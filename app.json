@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Vuelo",
+    "slug": "vuelo-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "vuelo",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0B0F",
+    "platforms": ["ios"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.vuelo.app"
+    },
+    "plugins": [
+      "expo-router",
+      ["expo-splash-screen", { "backgroundColor": "#0B0B0F", "image": "./assets/images/splash-icon.png", "imageWidth": 76 }]
+    ],
+    "experiments": { "typedRoutes": true }
+  }
+}

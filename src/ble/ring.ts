@@ -7,6 +7,7 @@ export const RING_NAME = 'Vuelo Ring';
 const NOTIFY_UUID = '000033f4-0000-1000-8000-00805f9b34fb';
 const WRITE_UUID = '000033f3-0000-1000-8000-00805f9b34fb';
 const SCAN_TIMEOUT_MS = 15000;
+const BLUETOOTH_WAIT_MS = 10000;
 const WRITE_GAP_MS = 80;
 const WRITE_RETRIES = 2;
 
@@ -34,13 +35,26 @@ export class RingBle implements Transport {
     this.onStatus(s);
   }
 
+  /** Ждём включённый Bluetooth. Если он недоступен или выключен — понятная ошибка, а не вечное ожидание. */
   private waitPoweredOn(): Promise<void> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      const finish = (fn: () => void) => {
+        clearTimeout(timer);
+        sub.remove();
+        fn();
+      };
+      const timer = setTimeout(
+        () => finish(() => reject(new Error('Bluetooth не включился. Включите его в Пункте управления и попробуйте снова.'))),
+        BLUETOOTH_WAIT_MS,
+      );
       const sub = this.manager.onStateChange((state) => {
         if (state === State.PoweredOn) {
-          sub.remove();
-          resolve();
-        } else if (state === State.PoweredOff || state === State.Unauthorized) {
+          finish(resolve);
+        } else if (state === State.Unsupported) {
+          finish(() => reject(new Error('На этом устройстве нет Bluetooth. Кольцо работает только на настоящем iPhone, в симуляторе — нет.')));
+        } else if (state === State.Unauthorized) {
+          finish(() => reject(new Error('Приложению запрещён доступ к Bluetooth. Разрешите его в Настройках → Vuelo.')));
+        } else if (state === State.PoweredOff) {
           this.setStatus('bluetooth-off');
         }
       }, true);

@@ -30,7 +30,8 @@
         {
           "bluetoothAlwaysPermission": "Vuelo подключается к кольцу Vuelo Ring, чтобы получать данные о сне, пульсе и активности."
         }
-      ]
+      ],
+      "./plugins/with-ios-scene-lifecycle"
     ],
     "experiments": {
       "typedRoutes": true

@@ -8,15 +8,32 @@
     "scheme": "vuelo",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0B0B0F",
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.vuelo.app"
     },
     "plugins": [
       "expo-router",
-      ["expo-splash-screen", { "backgroundColor": "#0B0B0F", "image": "./assets/images/splash-icon.png", "imageWidth": 76 }]
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0B0B0F",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "bluetoothAlwaysPermission": "Vuelo подключается к кольцу Vuelo Ring, чтобы получать данные о сне, пульсе и активности."
+        }
+      ]
     ],
-    "experiments": { "typedRoutes": true }
+    "experiments": {
+      "typedRoutes": true
+    }
   }
 }

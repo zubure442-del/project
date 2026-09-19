@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Line, Path } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop } from 'react-native-svg';
 import { smoothHeart, splitSegments, HR_SMOOTH_MAX_GAP } from '../domain';
 import type { DayPoint } from '../storage';
 import { colors, spacing, withAlpha } from './theme';
@@ -63,7 +63,7 @@ export function HeartChart({ points, width }: { points: DayPoint[]; width: numbe
       <Svg width={width} height={HEIGHT}>
         <Axis width={width} />
         {points.map((p, i) => (
-          <Circle key={i} cx={scale.x(p.m)} cy={scale.y(p.v)} r={2.2} fill={withAlpha(colors.accent, 0.3)} />
+          <Circle key={i} cx={scale.x(p.m)} cy={scale.y(p.v)} r={2.6} fill={withAlpha(colors.accent, 0.45)} />
         ))}
         {segments.map((seg, i) =>
           seg.length === 1 ? (
@@ -113,15 +113,20 @@ export function WeekBars({ days, width }: { days: { date: string; total: number 
   const height = 110;
   return (
     <Svg width={width} height={height}>
+      <Defs>
+        <LinearGradient id="week-bar" x1="0.5" y1="0" x2="0.5" y2="1">
+          <Stop offset="0" stopColor={colors.arcTo} />
+          <Stop offset="1" stopColor={colors.arcFrom} />
+        </LinearGradient>
+      </Defs>
       {days.map((d, i) => {
         const x = i * (barWidth + gap);
-        const value = d.total ?? 0;
-        const h = Math.max(3, (value / 100) * (height - 26));
+        const h = Math.max(3, ((d.total ?? 0) / 100) * (height - 26));
         return (
           <Path
             key={d.date}
             d={`M${x} ${height - 22 - h} h${barWidth} v${h} h${-barWidth} Z`}
-            fill={d.total === null ? colors.track : withAlpha(colors.accent, 0.35 + (value / 100) * 0.65)}
+            fill={d.total === null ? colors.track : 'url(#week-bar)'}
           />
         );
       })}
@@ -138,9 +143,9 @@ function Empty({ width }: { width: number }) {
 }
 
 const styles = StyleSheet.create({
-  labels: { height: 14, marginTop: -4 },
-  label: { position: 'absolute', color: colors.textFaint, fontSize: 10 },
+  labels: { height: 16, marginTop: -2 },
+  label: { position: 'absolute', color: colors.textMuted, fontSize: 12 },
   empty: { alignItems: 'center', justifyContent: 'center' },
-  emptyText: { color: colors.textFaint, fontSize: 13 },
+  emptyText: { color: colors.textMuted, fontSize: 14 },
   spacer: { height: spacing.sm },
 });

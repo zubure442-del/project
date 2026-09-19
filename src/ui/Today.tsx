@@ -5,7 +5,7 @@ import type { DaySnapshot } from '../storage';
 import { HeartChart, Spo2Chart, WeekBars } from './Charts';
 import { Logo } from './Logo';
 import { Ring } from './Ring';
-import { COMPONENT_LABEL, colors, componentAlpha, radius, spacing, withAlpha } from './theme';
+import { COMPONENT_LABEL, colors, radius, spacing, withAlpha } from './theme';
 
 const NO_DATA = 'Недостаточно данных';
 
@@ -26,7 +26,7 @@ function Section({ title, note, children }: { title: string; note?: string; chil
 function ComponentRing({ id, value }: { id: ComponentId; value: number | null }) {
   return (
     <View style={styles.component}>
-      <Ring value={value} size={78} thickness={6} color={withAlpha(colors.accent, componentAlpha[id])}>
+      <Ring value={value} size={82} thickness={6}>
         <Text style={styles.componentValue}>{value === null ? '—' : value}</Text>
       </Ring>
       <Text style={styles.componentLabel}>{COMPONENT_LABEL[id]}</Text>
@@ -89,7 +89,7 @@ export function Today({ today, week, report, reportTitle, battery, spo2Fallback,
       ) : null}
 
       <View style={styles.totalBlock}>
-        <Ring value={today?.total ?? null} size={216} thickness={10}>
+        <Ring value={today?.total ?? null} size={216} thickness={11} glow>
           <Text style={styles.totalValue}>{today?.total ?? '—'}</Text>
           <Text style={styles.totalCaption}>Итог Vuelo</Text>
         </Ring>
@@ -118,9 +118,19 @@ export function Today({ today, week, report, reportTitle, battery, spo2Fallback,
         </View>
       </View>
 
-      <Section title="Пульс" note="точки — замеры, линия — сглаженная">
+      <Section title="Пульс">
         <View style={styles.card}>
           <HeartChart points={today?.heart ?? []} width={chartWidth} />
+          <View style={styles.legend}>
+            <View style={styles.legendItem}>
+              <View style={styles.legendDot} />
+              <Text style={styles.legendText}>замеры</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={styles.legendLine} />
+              <Text style={styles.legendText}>сглажено</Text>
+            </View>
+          </View>
         </View>
       </Section>
 
@@ -170,9 +180,9 @@ export function Today({ today, week, report, reportTitle, battery, spo2Fallback,
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, gap: spacing.sm },
-  headerTitle: { color: colors.text, fontSize: 19, fontWeight: '500' },
+  headerTitle: { color: colors.text, fontSize: 20, fontWeight: '500' },
   headerRight: { flex: 1, alignItems: 'flex-end' },
-  battery: { color: colors.textMuted, fontSize: 13 },
+  battery: { color: colors.textMuted, fontSize: 14 },
 
   demoBadge: {
     alignSelf: 'center',
@@ -184,20 +194,20 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     backgroundColor: colors.card,
   },
-  demoText: { color: colors.textMuted, fontSize: 11 },
+  demoText: { color: colors.textMuted, fontSize: 12.5 },
   totalBlock: { alignItems: 'center', marginTop: spacing.lg, marginBottom: spacing.lg },
   totalValue: { color: colors.text, fontSize: 82, fontWeight: '100', letterSpacing: -2 },
-  totalCaption: { color: colors.textMuted, fontSize: 13, marginTop: 2, letterSpacing: 0.5 },
+  totalCaption: { color: colors.textMuted, fontSize: 14, marginTop: 2, letterSpacing: 0.5 },
 
   components: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: spacing.lg },
   component: { alignItems: 'center', gap: spacing.xs },
-  componentValue: { color: colors.text, fontSize: 24, fontWeight: '200' },
-  componentLabel: { color: colors.textMuted, fontSize: 12 },
+  componentValue: { color: colors.text, fontSize: 25, fontWeight: '200' },
+  componentLabel: { color: colors.textMuted, fontSize: 14 },
 
   section: { marginTop: spacing.lg },
   sectionHead: { flexDirection: 'row', alignItems: 'baseline', paddingHorizontal: spacing.md + spacing.xs, gap: spacing.sm, marginBottom: spacing.sm },
-  sectionTitle: { color: colors.text, fontSize: 15, fontWeight: '500' },
-  sectionNote: { color: colors.textFaint, fontSize: 11, flex: 1 },
+  sectionTitle: { color: colors.text, fontSize: 16, fontWeight: '500' },
+  sectionNote: { color: colors.textMuted, fontSize: 12.5, flex: 1 },
 
   card: {
     backgroundColor: colors.card,
@@ -208,18 +218,23 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
-  cardTitle: { color: colors.textMuted, fontSize: 12, marginBottom: spacing.sm, letterSpacing: 0.4, textTransform: 'uppercase' },
-  reportText: { color: colors.text, fontSize: 16, lineHeight: 23, fontWeight: '300' },
+  cardTitle: { color: colors.textMuted, fontSize: 13, fontWeight: '600', marginBottom: spacing.sm, letterSpacing: 0.6, textTransform: 'uppercase' },
+  reportText: { color: colors.text, fontSize: 17, lineHeight: 25, fontWeight: '300' },
 
   statRow: { flexDirection: 'row', flexWrap: 'wrap', rowGap: spacing.md },
   estimate: { width: '50%' },
-  estimateLabel: { color: colors.textFaint, fontSize: 11, marginBottom: 2 },
-  estimateValue: { color: colors.text, fontSize: 22, fontWeight: '200' },
-  estimateUnit: { color: colors.textMuted, fontSize: 12, fontWeight: '400' },
-  disclaimer: { color: colors.textFaint, fontSize: 11, lineHeight: 16, marginTop: spacing.md },
+  estimateLabel: { color: colors.textMuted, fontSize: 13, marginBottom: 3 },
+  estimateValue: { color: colors.text, fontSize: 24, fontWeight: '200' },
+  estimateUnit: { color: colors.textMuted, fontSize: 13, fontWeight: '400' },
+  disclaimer: { color: colors.textMuted, fontSize: 12.5, lineHeight: 18, marginTop: spacing.md },
 
+  legend: { flexDirection: 'row', gap: spacing.md, marginTop: spacing.sm, justifyContent: 'center' },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  legendDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: withAlpha(colors.accent, 0.45) },
+  legendLine: { width: 16, height: 2.5, borderRadius: 2, backgroundColor: colors.accent },
+  legendText: { color: colors.textMuted, fontSize: 12.5 },
   weekLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -14 },
-  weekLabel: { color: colors.textFaint, fontSize: 11, flex: 1, textAlign: 'center' },
+  weekLabel: { color: colors.textMuted, fontSize: 13, flex: 1, textAlign: 'center' },
 
   noData: { color: colors.textMuted, textAlign: 'center', marginTop: spacing.lg },
 });

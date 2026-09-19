@@ -1,3 +1,4 @@
+export * from './demo';
 export * from './heart';
 export * from './report';
 export * from './score';

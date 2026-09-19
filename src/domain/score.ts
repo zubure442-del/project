@@ -82,7 +82,7 @@ export function restingHeartRate(heart: Sample[], night: SleepSession | null): n
   if (values.length < 3) return null;
   const low = values.slice(0, Math.max(1, Math.floor(values.length / 4)));
   const mid = low.length >> 1;
-  return low.length % 2 ? low[mid] : (low[mid - 1] + low[mid]) / 2;
+  return Math.round(low.length % 2 ? low[mid] : (low[mid - 1] + low[mid]) / 2);
 }
 
 export function stateScore(spo2: number[], hrv: number[], restingHr: number | null): number | null {

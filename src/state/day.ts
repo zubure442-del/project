@@ -64,10 +64,7 @@ export function reportToShow(state: VueloState, today: DaySnapshot | null, now =
   });
 }
 
-/**
- * Результат синхронизации поверх состояния.
- * Кэш хранит ровно одну последнюю выгрузку: новые дни не дописываются к старым, а заменяют их.
- */
+/** Результат синхронизации поверх состояния: ряды дополняются по дню и типу данных. */
 export function applySync(state: VueloState, days: DaySnapshot[], sync: SyncResult, now = new Date()) {
   const kept = keepLastDays(days);
   const today = findDay(kept, todayKey(now));
@@ -77,17 +74,30 @@ export function applySync(state: VueloState, days: DaySnapshot[], sync: SyncResu
     recentTemplateIds: recentTemplateIds(state.reports),
   });
   return {
-    state: { ...state, days: kept, lastSyncAt: now.getTime(), battery: sync.battery ?? state.battery },
+    state: {
+      ...state,
+      days: kept,
+      lastSyncAt: now.getTime(),
+      syncFailed: false,
+      battery: sync.battery ?? state.battery,
+    },
     report,
   };
 }
 
-/** «Обновлено 15:40» — короткая строка для шапки. */
+const clock = (ms: number) => {
+  const d = new Date(ms);
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+/**
+ * Статус для шапки. «Обновлено» ставим только после удачной синхронизации:
+ * старое время с бодрым словом выглядело бы так, будто всё в порядке.
+ */
 export function syncStatusText(state: VueloState): string {
-  if (state.lastSyncAt === null) return 'Ещё не обновляли';
+  if (state.lastSyncAt === null) return state.syncFailed ? 'Не удалось обновить' : 'Ещё не обновляли';
+  if (state.syncFailed) return `Не удалось обновить · данные на ${clock(state.lastSyncAt)}`;
   const d = new Date(state.lastSyncAt);
-  const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  const time = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
-  return sameDay ? `Обновлено ${time}` : `Обновлено ${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay ? `Обновлено ${clock(state.lastSyncAt)}` : `Обновлено ${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`;
 }

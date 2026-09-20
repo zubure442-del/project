@@ -2,6 +2,7 @@ import { command } from './bytes';
 
 export const CMD = {
   setTime: 0x01,
+  profile: 0x02,
   activity: 0x03,
   battery: 0x0b,
   prepareArchive: 0x13,
@@ -33,6 +34,16 @@ export function setTimeCommand(nowMs: number, tzOffsetSeconds: number): Uint8Arr
 /** 0x19: автозамер пульса и SpO2, окно 00:00–23:59. Отправлять при КАЖДОМ подключении, после 0x01. */
 export function autoMeasureCommand(periodMin: AutoMeasurePeriod = 30): Uint8Array {
   return command(CMD.autoMeasure, 0, 0, 23, 59, 1, periodMin % 255, 1);
+}
+
+/**
+ * 0x02 — профиль пользователя.
+ * [1] возраст, у мужчин старший бит выставлен; [2] рост в см; [3] вес в кг; [4] 0 — метрические единицы.
+ * Пример: мужчина 30 лет, 180 см, 80 кг -> 02 9E B4 50 00.
+ */
+export function profileCommand(input: { age: number; heightCm: number; weightKg: number; male: boolean }): Uint8Array {
+  const age = input.age & 0x7f;
+  return command(CMD.profile, input.male ? age | 0x80 : age, input.heightCm, input.weightKg, 0);
 }
 
 /** Запрос архива за день: 0 — сегодня, 1 — вчера и т.д. */

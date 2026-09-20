@@ -37,9 +37,26 @@ describe('base64', () => {
 });
 
 describe('СИНТЕТИЧЕСКИЕ (поддельное кольцо): рукопожатие', () => {
+  it('профиль уходит после 0x01 и 0x19', async () => {
+    const { transport, sent } = fakeRing((c) => (c[0] === 0x19 ? [command(0x19)] : []));
+    const p = handshake(transport, { age: 30, heightCm: 180, weightKg: 80, male: true }, 0, 0);
+    await vi.runAllTimersAsync();
+    await p;
+    expect(sent.map((c) => c[0])).toEqual([0x01, 0x19, 0x02]);
+    expect(Array.from(sent[2].slice(0, 5))).toEqual([0x02, 0x9e, 0xb4, 0x50, 0x00]);
+  });
+
+  it('пустой профиль кольцу не отправляем', async () => {
+    const { transport, sent } = fakeRing((c) => (c[0] === 0x19 ? [command(0x19)] : []));
+    const p = handshake(transport, null, 0, 0);
+    await vi.runAllTimersAsync();
+    await p;
+    expect(sent.some((c) => c[0] === 0x02)).toBe(false);
+  });
+
   it('сначала 0x01, потом 0x19', async () => {
     const { transport, sent } = fakeRing((c) => (c[0] === 0x19 ? [command(0x19)] : []));
-    const p = handshake(transport, Date.parse('2026-09-19T12:00:00Z'), 3 * 3600);
+    const p = handshake(transport, null, Date.parse('2026-09-19T12:00:00Z'), 3 * 3600);
     await vi.runAllTimersAsync();
     expect(await p).toEqual({ autoMeasure: 'accepted' });
     expect(sent.map((c) => c[0])).toEqual([0x01, 0x19]);
@@ -47,18 +64,18 @@ describe('СИНТЕТИЧЕСКИЕ (поддельное кольцо): рук
   it('нет ответа на 0x19 — одна повторная отправка', async () => {
     let n = 0;
     const { transport, sent } = fakeRing((c) => (c[0] === 0x19 && ++n === 2 ? [command(0x19)] : []));
-    const p = handshake(transport, 0, 0);
+    const p = handshake(transport, null, 0, 0);
     await vi.runAllTimersAsync();
     expect(await p).toEqual({ autoMeasure: 'accepted' });
     expect(sent.map((c) => c[0])).toEqual([0x01, 0x19, 0x19]);
   });
   it('отказ 0x99 и полная тишина различаются', async () => {
     const a = fakeRing((c) => (c[0] === 0x19 ? [command(0x99)] : []));
-    const pa = handshake(a.transport, 0, 0);
+    const pa = handshake(a.transport, null, 0, 0);
     await vi.runAllTimersAsync();
     expect((await pa).autoMeasure).toBe('rejected');
     const b = fakeRing(() => []);
-    const pb = handshake(b.transport, 0, 0);
+    const pb = handshake(b.transport, null, 0, 0);
     await vi.runAllTimersAsync();
     expect((await pb).autoMeasure).toBe('noreply');
   });
@@ -76,13 +93,24 @@ describe('выгрузка с реальными пакетами 0x40 и под
     expect(r.spo2).toEqual([]);
     expect(r.activity).toBeNull();
   });
-  it('запросы идут по одному: архивы по дням, затем активность и заряд', async () => {
+  it('на тишину запрос повторяется один раз, но выгрузка идёт дальше', async () => {
     const { transport, sent } = fakeRing(() => []);
     const p = runSync(transport, { days: 1 });
     await vi.runAllTimersAsync();
     await p;
-    const codes = sent.map((c) => c[0]);
-    expect(codes).toEqual([0x13, 0x10, 0x11, 0x16, 0x55, 0x03, 0x0b]);
+    // каждый архивный запрос ушёл дважды, разовые 0x03 и 0x0B — по разу
+    expect(sent.map((c) => c[0])).toEqual([0x13, 0x10, 0x10, 0x11, 0x11, 0x16, 0x16, 0x55, 0x55, 0x03, 0x0b]);
+  });
+
+  it('пока кольцо отвечает, запрос не повторяется и не считается сбоем', async () => {
+    const { transport, sent } = fakeRing((c) =>
+      c[0] === 0x10 ? [command(0x10, 0x00, 0x60, 0xae, 0x6a, 5, 5, 5)] : [],
+    );
+    const p = runSync(transport, { days: 1 });
+    await vi.runAllTimersAsync();
+    const r = await p;
+    expect(sent.filter((c) => c[0] === 0x10)).toHaveLength(1);
+    expect(r.steps.length).toBeGreaterThan(0);
   });
   it('пассивный заряд 0x0B и сводка 0x03 попадают в результат', async () => {
     const { transport } = fakeRing((c) =>

@@ -16,8 +16,6 @@ export const GREETING_NIGHT = 'Доброй ночи';
 
 /** Приветствие висит хотя бы столько, даже если данные пришли мгновенно. */
 const MIN_VISIBLE_MS = 1200;
-/** Не дождались первой фазы — показываем, что делать. */
-const GIVE_UP_MS = 20000;
 /** Кольцо давно молчит — предупреждаем, но продолжаем ждать. */
 const SLOW_MS = 8000;
 
@@ -28,17 +26,47 @@ export function greeting(now = new Date()): string {
 
 const STAGE_TEXT = { connecting: 'Ищем кольцо', configuring: 'Настраиваем', loading: 'Загружаем данные' } as const;
 
-const NOT_FOUND =
-  'Кольцо не найдено. Наденьте его и поднесите ближе к телефону. Если кольцо уже подключено к этому iPhone ' +
-  'или к другому телефону, откройте Настройки → Bluetooth, нажмите ⓘ рядом с кольцом и выберите ' +
-  '«Забыть это устройство».';
+/** Три разные беды — три разных текста. В заголовке суть, в тексте только что делать. */
+const PROBLEMS = {
+  'not-found': {
+    title: 'Кольцо не найдено',
+    text:
+      'Наденьте кольцо и поднесите ближе к телефону. Если оно уже подключено к этому iPhone или к другому ' +
+      'телефону, откройте Настройки → Bluetooth, нажмите ⓘ рядом с кольцом и выберите «Забыть это устройство».',
+  },
+  lost: {
+    title: 'Связь оборвалась',
+    text: 'Кольцо пропало на середине загрузки. Поднесите его ближе к телефону и попробуйте снова.',
+  },
+  slow: {
+    title: 'Кольцо отвечает слишком медленно',
+    text: 'Данные идут, но очень медленно. Держите телефон рядом с кольцом или попробуйте позже.',
+  },
+} as const;
+
+/** Смена фразы: сперва старая гаснет, только потом появляется новая. */
+const STATUS_FADE_MS = 150;
+
+function useDelayedText(text: string) {
+  const [state, setState] = useState({ shown: text, visible: true });
+  const pending = useRef(text);
+
+  useEffect(() => {
+    if (text === pending.current) return;
+    pending.current = text;
+    setState((prev) => ({ ...prev, visible: false }));
+    const timer = setTimeout(() => setState({ shown: text, visible: true }), STATUS_FADE_MS);
+    return () => clearTimeout(timer);
+  }, [text]);
+
+  return state;
+}
 
 export default function Welcome() {
-  const { state, phase, stage, progress, packets, error, sync, markStarted } = useVuelo();
+  const { state, today, phase, stage, progress, packets, error, connected, sync, markStarted } = useVuelo();
   const insets = useSafeAreaInsets();
   const [reduceMotion, setReduceMotion] = useState(false);
   const [slow, setSlow] = useState(false);
-  const [gaveUp, setGaveUp] = useState(false);
   const shownAt = useRef(0);
   const lastPacket = useRef(0);
   const needsStart = !state.started && !state.days.length;
@@ -57,29 +85,34 @@ export default function Welcome() {
   useEffect(() => {
     if (needsStart) return;
     const timer = setInterval(() => {
-      setSlow(Date.now() - lastPacket.current > SLOW_MS);
-      if (Date.now() - shownAt.current > GIVE_UP_MS) setGaveUp(true);
+      const quiet = Date.now() - lastPacket.current > SLOW_MS;
+      setSlow((was) => (was === quiet ? was : quiet));
     }, 1000);
     return () => clearInterval(timer);
   }, [needsStart]);
 
-  // Первая фаза закончилась — уходим на главный экран, но не раньше, чем приветствие успели увидеть.
+  // Уходим на главный экран, когда первая фаза закончилась либо когда данные за сегодня уже есть.
+  const hasToday = !!today && (today.steps !== null || today.sleep !== null || today.heart.length > 0);
   useEffect(() => {
-    if (needsStart || (phase !== 'background' && phase !== 'done')) return;
+    if (needsStart) return;
+    const enough = phase === 'background' || phase === 'done' || (phase === 'first' && hasToday && connected);
+    if (!enough) return;
     const wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - shownAt.current));
     const timer = setTimeout(() => router.replace('/'), wait);
     return () => clearTimeout(timer);
-  }, [needsStart, phase]);
+  }, [connected, hasToday, needsStart, phase]);
 
-  const failed = gaveUp || phase === 'failed';
   const open = () => router.replace('/');
+  const problem = phase === 'failed' ? PROBLEMS[error ?? 'not-found'] : null;
+  const percent = stage === 'loading' ? ` · ${String(Math.round(progress * 100)).padStart(2, ' ')} %` : '';
+  const status = useDelayedText(stage ? `${STAGE_TEXT[stage]}${percent}` : 'Готовим данные');
 
-  if (failed) {
+  if (problem) {
     return (
       <View style={[styles.root, { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + spacing.lg }]}>
         <View style={styles.body}>
-          <Text style={styles.title}>Кольцо не найдено</Text>
-          <Text style={styles.message}>{error && !gaveUp ? error : NOT_FOUND}</Text>
+          <Text style={styles.title}>{problem.title}</Text>
+          <Text style={styles.message}>{problem.text}</Text>
           <Pressable onPress={() => Linking.openSettings()} hitSlop={8}>
             <Text style={styles.link}>Открыть настройки Bluetooth</Text>
           </Pressable>
@@ -87,7 +120,6 @@ export default function Welcome() {
         <Pressable
           style={styles.button}
           onPress={() => {
-            setGaveUp(false);
             setSlow(false);
             shownAt.current = Date.now();
             sync();
@@ -101,8 +133,6 @@ export default function Welcome() {
       </View>
     );
   }
-
-  const percent = stage === 'loading' ? ` · ${String(Math.round(progress * 100)).padStart(2, ' ')} %` : '';
 
   return (
     <Pressable style={styles.root} onPress={needsStart ? undefined : open}>
@@ -122,8 +152,8 @@ export default function Welcome() {
         />
         {needsStart ? null : (
           <View style={styles.stage}>
-            <Animated.Text key={stage ?? 'wait'} entering={FadeIn.duration(280)} exiting={FadeOut.duration(200)} style={styles.stageText}>
-              {stage ? `${STAGE_TEXT[stage]}${percent}` : 'Готовим данные'}
+            <Animated.Text style={[styles.stageText, { opacity: status.visible ? 1 : 0 }]}>
+              {status.shown}
             </Animated.Text>
             {slow ? (
               <Animated.Text entering={FadeIn.duration(280)} style={styles.slow}>

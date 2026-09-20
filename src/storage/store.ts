@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { EMPTY_STATE, HISTORY_DAYS, type StoredReport, type VueloState } from './types';
+import { EMPTY_PROFILE, EMPTY_STATE, HISTORY_DAYS, type StoredReport, type VueloState } from './types';
 
 const KEY = 'vuelo/state/v1';
 
@@ -11,11 +11,14 @@ export async function loadState(): Promise<VueloState> {
     const parsed = JSON.parse(raw) as Partial<VueloState>;
     return {
       days: parsed.days ?? [],
+      raw: parsed.raw ?? {},
       reports: parsed.reports ?? [],
       lastSyncAt: parsed.lastSyncAt ?? null,
+      syncFailed: parsed.syncFailed ?? false,
       battery: parsed.battery ?? null,
       ring: parsed.ring ?? null,
       age: parsed.age ?? null,
+      profile: { ...EMPTY_PROFILE, ...(parsed.profile ?? {}) },
       started: parsed.started ?? false,
     };
   } catch {

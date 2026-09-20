@@ -5,6 +5,7 @@ import {
   batteryCommand,
   parsePacket,
   prepareArchiveCommand,
+  profileCommand,
   setTimeCommand,
   type HeartSample,
   type Sample,
@@ -16,6 +17,8 @@ import { sleep, type Transport } from './transport';
 export const IDLE_MS = 2000;
 /** Сколько ждём ПЕРВЫЙ пакет: кольцу нужно время поднять данные из памяти. */
 export const FIRST_PACKET_MS = 2500;
+/** Тишина по запросу: один раз повторяем, потом считаем запрос неудачным и идём дальше. */
+export const STALL_MS = 10000;
 const GAP_BETWEEN_REQUESTS_MS = 500;
 const DAY_END_GRACE_MS = 500;
 const ACK_TIMEOUT_MS = 5000;
@@ -27,7 +30,19 @@ export type AutoMeasureResult = 'accepted' | 'rejected' | 'noreply';
  * Начало каждого подключения. Порядок важен: сначала 0x01 (время), потом 0x19 (автозамер),
  * иначе кольцо перестаёт писать SpO2. Если ответа на 0x19 нет — одна повторная попытка.
  */
-export async function handshake(t: Transport, now = Date.now(), tzOffsetSeconds = -new Date().getTimezoneOffset() * 60) {
+export interface RingProfile {
+  age: number;
+  heightCm: number;
+  weightKg: number;
+  male: boolean;
+}
+
+export async function handshake(
+  t: Transport,
+  profile: RingProfile | null = null,
+  now = Date.now(),
+  tzOffsetSeconds = -new Date().getTimezoneOffset() * 60,
+) {
   await t.send(setTimeCommand(now, tzOffsetSeconds));
   await sleep(1000);
   let result: AutoMeasureResult = 'noreply';
@@ -42,6 +57,11 @@ export async function handshake(t: Transport, now = Date.now(), tzOffsetSeconds 
     while (ack === null && Date.now() - started < ACK_TIMEOUT_MS) await sleep(POLL_MS);
     off();
     if (ack !== null) result = ack ? 'accepted' : 'rejected';
+  }
+  // Профиль уходит после 0x01 и 0x19, как в официальном клиенте. Пустой профиль не отправляем.
+  if (profile) {
+    await t.send(profileCommand(profile));
+    await sleep(300);
   }
   return { autoMeasure: result };
 }
@@ -72,6 +92,8 @@ export interface SyncOptions {
   days?: number;
   /** Запрашивать разовые 0x03 и 0x0B. На промежуточной фазе не нужно. */
   extras?: boolean;
+  /** Жёсткий предел на всю фазу. По истечении новые запросы не отправляем. */
+  hardCapMs?: number;
   onStage?: (stage: SyncStage) => void;
   /** Доля выполненных запросов, 0..1. Растёт по мере ответов кольца. */
   onProgress?: (fraction: number) => void;
@@ -178,9 +200,21 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     }
   });
 
-  /** Отправляет запрос и ждёт, пока кольцо замолчит. Данные копит обработчик выше. */
-  const request = async (kind: ArchiveKind, day: number, firstPacketMs: number, retries = 0) => {
+  const startedAt = Date.now();
+  const outOfTime = () => options.hardCapMs !== undefined && Date.now() - startedAt > options.hardCapMs;
+
+  /**
+   * Отправляет запрос и ждёт, пока кольцо замолчит.
+   * Тишина дольше STALL_MS — один повтор; если и он пуст, запрос пропускаем,
+   * но выгрузку не прерываем: остальные данные могут прийти.
+   */
+  const request = async (kind: ArchiveKind, day: number, firstPacketMs: number, retries = 1) => {
     let got = 0;
+    if (outOfTime()) {
+      doneRequests++;
+      report();
+      return 0;
+    }
     for (let attempt = 0; attempt <= retries; attempt++) {
       seen = 0;
       finished = false;
@@ -192,7 +226,7 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
         await sleep(POLL_MS);
         const now = Date.now();
         if (seen === 0) {
-          if (finished || now - started > firstPacketMs) break;
+          if (finished || now - started > (attempt === 0 ? firstPacketMs : STALL_MS)) break;
         } else {
           if (finished || now - lastRx > IDLE_MS) break;
           if (dayEnd && now - lastRx > DAY_END_GRACE_MS) break;
@@ -213,12 +247,11 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     await sleep(500);
     for (let i = 0; i < days; i++) {
       const day = fromDay + i;
-      for (const kind of ['steps', 'sleep', 'heart'] as const) {
+      // Порядок: шаги (сон приходит в этом же окне), пульс, сводка.
+      // 0x40 (кислород) не запрашиваем: кольцо отдаёт его редко и ненадёжно.
+      for (const kind of ['steps', 'sleep', 'heart', 'summary'] as const) {
         await request(kind, day, FIRST_PACKET_MS);
       }
-      // 0x40 (кислород) не запрашиваем: кольцо отдаёт его редко и ненадёжно.
-      // Разбор пакета остался в кодеке на случай, если понадобится вернуть.
-      await request('summary', day, FIRST_PACKET_MS);
     }
     if (extras) {
       // 0x03 — активность за сегодня, 0x0B — заряд. Оба разовые, не по дням (PROTOCOL.md, раздел 3).

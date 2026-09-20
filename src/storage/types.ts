@@ -1,4 +1,5 @@
 import type { KnownRing } from '../ble';
+import type { RawByDay } from './raw';
 import type { ComponentId, ReportMode, SleepStage } from '../domain';
 
 /** Одна точка графика: секунды от начала дня + значение. Так день хранится компактно. */
@@ -63,10 +64,45 @@ export interface VueloState {
   ring: KnownRing | null;
   /** Возраст для расчёта пульсовых зон; null — не спрашивали. */
   age: number | null;
+  /** Полные ряды по дням: из них пересчитываются сводки. */
+  raw: RawByDay;
+  /** Последняя попытка синхронизации не удалась. */
+  syncFailed: boolean;
+  /** Профиль: нужен для 0x02 и расчёта пульсовых зон. */
+  profile: Profile;
   /** Пользователь нажал «Начать» хотя бы раз: системный запрос Bluetooth уже показывали. */
   started: boolean;
 }
 
-export const EMPTY_STATE: VueloState = { days: [], reports: [], lastSyncAt: null, battery: null, ring: null, age: null, started: false };
+export type Sex = 'male' | 'female';
+export type Goal = 'lose' | 'gain' | 'keep';
+
+export interface Profile {
+  sex: Sex | null;
+  heightCm: number | null;
+  weightKg: number | null;
+  birthYear: number | null;
+  goal: Goal | null;
+}
+
+export const EMPTY_PROFILE: Profile = { sex: null, heightCm: null, weightKg: null, birthYear: null, goal: null };
+
+/** Границы полей профиля. */
+export const PROFILE_LIMITS = {
+  heightCm: { min: 100, max: 230 },
+  weightKg: { min: 30, max: 250 },
+  age: { min: 10, max: 99 },
+} as const;
+
+export const profileAge = (profile: Profile, now = new Date()): number | null =>
+  profile.birthYear === null ? null : now.getFullYear() - profile.birthYear;
+
+export const isProfileComplete = (p: Profile): boolean =>
+  p.sex !== null && p.heightCm !== null && p.weightKg !== null && p.birthYear !== null;
+
+export const EMPTY_STATE: VueloState = {
+  days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, battery: null,
+  ring: null, age: null, profile: EMPTY_PROFILE, started: false,
+};
 /** Сколько дней показываем в недельной полосе. Кэш хранит ровно одну последнюю синхронизацию. */
 export const HISTORY_DAYS = 7;

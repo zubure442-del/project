@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import { RingBle, handshake, mergeSyncResults, runSync, type KnownRing, type RingProfile, type SyncStage } from '../ble';
+import { nowRingTs } from '../codec';
+import { RingBle, handshake, liveMeasure, runSync, type KnownRing, type RingProfile, type SyncStage } from '../ble';
 import type { AutoMeasurePeriod } from '../codec';
 import type { Report } from '../domain';
 import { clearPacketLog } from '../ble';
@@ -10,6 +11,7 @@ import {
   buildSnapshots,
   clearState,
   isProfileComplete,
+  keepLastDays,
   keepRecentDays,
   loadedDays,
   loadState,
@@ -37,13 +39,18 @@ import {
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
 export const FRESH_MS = CACHE_FRESH_MS;
-/** Первая фаза: сегодня и вчера — ночь через полночь кольцо отдаёт двумя днями. */
-export const FIRST_PHASE_DAYS = 2;
+/** Сегодня и вчера запрашиваем всегда: ночь через полночь кольцо отдаёт двумя днями. */
+export const ALWAYS_DAYS = 2;
+export const FIRST_PHASE_DAYS = ALWAYS_DAYS;
 export const TOTAL_DAYS = 7;
 /** Предел первой фазы. Пока идут пакеты, её не прерываем, но бесконечно не ждём. */
 export const HARD_CAP_MS = 120000;
+/** Если последний замер старше этого, запускаем один живой замер. */
+export const GAP_MIN = 90;
+/** Живой замер не чаще одного раза в это время. */
+export const LIVE_MEASURE_COOLDOWN_MS = 30 * 60 * 1000;
 
-export type Phase = 'idle' | 'first' | 'background' | 'done' | 'failed' | 'fresh';
+export type Phase = 'idle' | 'first' | 'done' | 'failed' | 'fresh';
 /** Три разные беды, о которых говорим по-разному. */
 export type SyncError = 'not-found' | 'lost' | 'slow';
 
@@ -70,6 +77,8 @@ interface Vuelo {
   setAutoMeasure: (minutes: AutoMeasurePeriod) => void;
   /** Удаляет данные, историю, биометрию и логи. Привязка к кольцу остаётся. */
   clearData: () => void;
+  /** Не все дни догрузились: показываем плашку с «Повторить». */
+  incomplete: boolean;
 }
 
 const Context = createContext<Vuelo | null>(null);
@@ -83,6 +92,11 @@ export function useVuelo(): Vuelo {
 /** Календарная дата для смещения в днях назад. */
 const dateForOffset = (offset: number, now = new Date()): string =>
   new Date(Date.parse(`${todayKey(now)}T00:00:00Z`) - offset * 86400000).toISOString().slice(0, 10);
+
+const EMPTY_SYNC = {
+  steps: [], sleep: [], heart: [], spo2: [], summary: [], activity: null, battery: null,
+  packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 },
+};
 
 const toRingProfile = (profile: Profile): RingProfile | null => {
   const age = profileAge(profile);
@@ -101,6 +115,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   /** Связь могла появиться уже после начала попытки, поэтому дублируем её в ref. */
   const connectedRef = useRef(false);
   const [error, setError] = useState<SyncError | null>(null);
+  const [incomplete, setIncomplete] = useState(false);
+  const lastLiveAt = useRef(0);
   const ring = useRef<RingBle | null>(null);
   const running = useRef(false);
   const latest = useRef(EMPTY_STATE);
@@ -144,6 +160,36 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     }
   }, [commit]);
 
+  /**
+   * Один живой замер, если кольцо давно ничего не мерило.
+   * Работает только при открытом приложении: в фоне iOS такое не разрешает.
+   */
+  const maybeLiveMeasure = useCallback(
+    async (device: RingBle) => {
+      const day = findDay(latest.current.days, todayKey());
+      const lastMinute = day?.heart.length ? day.heart[day.heart.length - 1].m : null;
+      const nowMinute = new Date().getHours() * 60 + new Date().getMinutes();
+      const quiet = lastMinute === null || nowMinute - lastMinute >= GAP_MIN;
+      if (!quiet || Date.now() - lastLiveAt.current < LIVE_MEASURE_COOLDOWN_MS) return;
+      lastLiveAt.current = Date.now();
+      try {
+        const measured = await liveMeasure(device);
+        if (!measured) return;
+        const ts = nowRingTs(Date.now(), -new Date().getTimezoneOffset() * 60);
+        const source = latest.current;
+        const raw = mergeRaw(source.raw, splitByDay({
+          ...EMPTY_SYNC,
+          heart: [{ ts, value: measured.pulse, raw: [measured.pulse] }],
+        }));
+        const days = buildSnapshots(toSyncResult(raw), profileAge(source.profile) ?? source.age);
+        if (days.length) commit({ ...source, raw, days: keepLastDays(days) });
+      } catch {
+        // Замер не удался — молчим: кольцо могло быть снято.
+      }
+    },
+    [commit],
+  );
+
   const sync = useCallback(() => {
     if (running.current) return;
     const base = latest.current;
@@ -155,8 +201,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     running.current = true;
     void (async () => {
       setError(null);
+      setIncomplete(false);
       connectedRef.current = false;
       setConnected(false);
+      const startedAt = Date.now();
       setProgress(0);
       setPhase('first');
       const device = ring.current ?? new RingBle(base.ring);
@@ -199,42 +247,28 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         }
 
         const bump = () => setPackets((n) => n + 1);
-        // Первая фаза: сегодня и вчера — их запрашиваем всегда.
-        const first = await runSync(device, {
-          fromDay: 0,
-          days: FIRST_PHASE_DAYS,
+        // Одна фаза: на главный экран пускаем только после полной выгрузки.
+        // По ходу интерфейс не трогаем — разбор пакетов и пересчёт заметно лагали.
+        const cached = loadedDays(base.raw, todayKey());
+        const needed: number[] = [];
+        for (let day = 0; day < TOTAL_DAYS; day++) {
+          if (day < ALWAYS_DAYS || !cached.has(dateForOffset(day))) needed.push(day);
+        }
+        const result = await runSync(device, {
+          fromDay: needed[0] ?? 0,
+          days: needed.length ? needed[needed.length - 1] - needed[0] + 1 : ALWAYS_DAYS,
           extras: true,
           hardCapMs: HARD_CAP_MS,
           onStage: setStage,
           onProgress: advance,
           onPacket: bump,
-          onData: store,
         });
-        store(first);
+        store(result);
         firstPhaseOk = latest.current.days.length > 0;
-        setProgress(1);
-        setPhase('background');
-
-        // Остальные дни тянем, только если их нет в кэше.
-        const cached = loadedDays(latest.current.raw, todayKey());
-        const missing: number[] = [];
-        for (let day = FIRST_PHASE_DAYS; day < TOTAL_DAYS; day++) {
-          if (!cached.has(dateForOffset(day))) missing.push(day);
-        }
-        if (missing.length) {
-          setProgress(0);
-          const rest = await runSync(device, {
-            fromDay: missing[0],
-            days: missing[missing.length - 1] - missing[0] + 1,
-            extras: false,
-            onProgress: advance,
-            onPacket: bump,
-            onData: (partial) => store(mergeSyncResults(first, partial)),
-          });
-          store(mergeSyncResults(first, rest));
-        }
+        setIncomplete(Date.now() - startedAt > HARD_CAP_MS);
         setProgress(1);
         setPhase('done');
+        void maybeLiveMeasure(device);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         // Частичная загрузка — не провал: данные за сегодня уже в кэше.
@@ -250,7 +284,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         running.current = false;
       }
     })();
-  }, [advance, commit, refreshBattery]);
+  }, [advance, commit, maybeLiveMeasure, refreshBattery]);
 
   // Возврат приложения из фона: приветствие и загрузка, если кэш устарел.
   useEffect(() => {
@@ -328,8 +362,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       saveProfile,
       setAutoMeasure,
       clearData,
+      incomplete,
     };
-  }, [clearData, connected, dismissFresh, error, forgetRing, markStarted, packets, phase, progress, ready, saveProfile, setAutoMeasure, stage, state, sync]);
+  }, [clearData, connected, dismissFresh, error, forgetRing, incomplete, markStarted, packets, phase, progress, ready, saveProfile, setAutoMeasure, stage, state, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

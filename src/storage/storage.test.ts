@@ -86,7 +86,7 @@ describe('кэш последней синхронизации', () => {
   const snapshot = (date: string, total: number): DaySnapshot => ({
     date, total, scores: { sleep: null, activity: total, state: null }, steps: 100, sleep: null,
     restingHr: null, restingHrSource: null, stateInputs: { hrv: false, restingHr: false, spo2: false },
-    heart: [], spo2: [], stress: [], summaryPoints: [], stepsByHour: new Array(24).fill(0), sleepSegments: [],
+    heart: [], spo2: [], stress: [], summaryPoints: [], stepsByHour: new Array(24).fill(0), stepsByMinute: [], sleepSegments: [],
     estimates: { hrv: null, glucose: null, systolic: null, diastolic: null, stress: null },
   });
 

@@ -180,6 +180,12 @@ export function parsePacket(data: Uint8Array): Packet {
     case 0x06:
       parsed = { kind: 'busy' };
       break;
+    case 0x24:
+      // Кольцо досылает промежуточные пакеты с нулями: берём только готовый результат.
+      if (data.length >= 5 && data[1] >= HR_MIN && data[1] <= HR_MAX) {
+        parsed = { kind: 'liveBiometrics', pulse: data[1], systolic: data[2], diastolic: data[3] };
+      }
+      break;
     case CMD.liveHeart: {
       // 0x14: [1..4] метка времени, [5] пульс. Ноль означает «замер не удался».
       const ts = u32le(data, 1);

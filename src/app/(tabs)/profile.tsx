@@ -134,6 +134,18 @@ export default function ProfileTab() {
 
       <Card title="Биометрия">
         <View style={styles.line}>
+          <Text style={styles.label}>Имя</Text>
+          <TextInput
+            style={[styles.input, styles.nameInput]}
+            value={draft.name ?? ''}
+            onChangeText={(text) => setDraft((prev) => ({ ...prev, name: text }))}
+            onBlur={() => commit({ name: draft.name?.trim() || null })}
+            placeholder="—"
+            placeholderTextColor={colors.textFaint}
+            maxLength={24}
+          />
+        </View>
+        <View style={styles.line}>
           <Text style={styles.label}>Пол</Text>
           <View style={styles.chips}>
             {SEX.map((s) => (
@@ -219,6 +231,7 @@ const styles = StyleSheet.create({
   value: { color: colors.text, fontSize: 15 },
   stale: { color: colors.textFaint },
   input: { color: colors.text, fontSize: 16, minWidth: 64, textAlign: 'right', paddingVertical: 2 },
+  nameInput: { minWidth: 140 },
   chips: { flexDirection: 'row', gap: spacing.xs },
   chip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.track },
   chipOn: { backgroundColor: colors.accent },

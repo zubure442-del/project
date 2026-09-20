@@ -24,12 +24,18 @@ export const CARDIO_ZONES = [
   { from: 0.7, points: 1 },
   { from: 0.6, points: 0.5 },
 ] as const;
-/** Порог нагрузки: нижняя граница зон, которые учитывает оценка активности. */
+/** Нижняя граница зон, которые учитывает оценка активности. */
 export const ACTIVE_HR_RATIO = CARDIO_ZONES[CARDIO_ZONES.length - 1].from;
+/** Порог «активного» пульса для графика: половина максимального. */
+export const ACTIVE_HR_LOW_RATIO = 0.5;
+/** Насколько пульс должен подняться над пульсом покоя, чтобы считаться нагрузкой. */
+export const ACTIVE_HR_OVER_RESTING = 25;
+/** Шагов в минуту, начиная с которых минута считается активной. */
+export const STEP_MIN_PER_MIN = 20;
 /** Короче этого эпизод нагрузки не считаем. */
 export const MIN_EPISODE_MIN = 10;
 /** Соседние эпизоды с паузой до этого склеиваем. */
-export const MERGE_GAP_MIN = 20;
+export const MERGE_GAP_MIN = 10;
 /** Дырка между замерами больше этой интервал не перекрывает. */
 export const MAX_SAMPLE_GAP_MIN = 45;
 

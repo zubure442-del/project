@@ -5,6 +5,7 @@ import {
   type AutoMeasurePeriod,
   batteryCommand,
   parsePacket,
+  liveModeCommand,
   prepareArchiveCommand,
   profileCommand,
   setTimeCommand,
@@ -334,4 +335,32 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
 
 function dedupe<T extends Sample>(items: T[]): T[] {
   return [...new Map(items.map((s) => [s.ts, s])).values()].sort((a, b) => a.ts - b.ts);
+}
+
+/**
+ * Один живой замер: кольцо включает оптику и присылает 0x24 с пульсом и давлением.
+ * Порядок режимов и признак готовности взяты из reference/main.py, пункт 2 меню.
+ * Если замер не удался (кольцо снято, рука двигается), возвращаем null и ничего не пишем.
+ */
+export async function liveMeasure(t: Transport, timeoutMs = 45000): Promise<{ pulse: number } | null> {
+  let pulse: number | null = null;
+  const off = t.onPacket((d) => {
+    const p = parsePacket(d);
+    if (p.kind === 'livePulse') pulse = p.value;
+    if (p.kind === 'liveBiometrics' && p.pulse > 0) pulse = p.pulse;
+  });
+  try {
+    await t.send(liveModeCommand(2));
+    const started = Date.now();
+    while (pulse === null && Date.now() - started < timeoutMs) await sleep(500);
+    if (pulse === null) {
+      await t.send(liveModeCommand(1));
+      const second = Date.now();
+      while (pulse === null && Date.now() - second < timeoutMs) await sleep(500);
+    }
+    return pulse === null ? null : { pulse };
+  } finally {
+    await t.send(liveModeCommand(0)).catch(() => undefined);
+    off();
+  }
 }

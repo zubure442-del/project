@@ -33,6 +33,8 @@ export type Packet =
   | { kind: 'busy' }
   /** 0x14 — живой замер пульса с меткой времени. */
   | { kind: 'livePulse'; ts: number; value: number }
+  /** 0x24 — комплексный живой замер. */
+  | { kind: 'liveBiometrics'; pulse: number; systolic: number; diastolic: number }
   | { kind: 'activity'; steps: number; distanceM: number; calories: number }
   | { kind: 'battery'; percent: number }
   | { kind: 'functions'; mask: Uint8Array }

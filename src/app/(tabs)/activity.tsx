@@ -4,6 +4,7 @@ import { findDay, todayKey, useSelectedDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
   BiometryBanner,
+  IncompleteBanner,
   Card,
   DayActivityChart,
   HeroRing,
@@ -18,7 +19,7 @@ import {
 } from '../../ui';
 
 export default function ActivityTab() {
-  const { week, state, phase, progress, packets, statusText, sync, profileReady } = useVuelo();
+  const { week, state, phase, progress, packets, statusText, sync, profileReady, incomplete } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
@@ -26,7 +27,9 @@ export default function ActivityTab() {
   const hours = day?.stepsByHour ?? [];
   const best = day ? busiestHour(hours, day.heart.map((p) => ({ m: p.m, v: p.v })), age) : null;
   const chartWidth = width - spacing.md * 4;
-  const zones = day ? loadIntervals(day.heart.map((p) => ({ m: p.m, v: p.v })), age) : [];
+  const zones = day
+    ? loadIntervals(day.heart.map((p) => ({ m: p.m, v: p.v })), age, day.stepsByMinute, day.restingHr)
+    : [];
   const loadMinutes = Math.round(zones.reduce((sum, z) => sum + (z.to - z.from), 0));
   const calories = picked === todayKey() ? state.caloriesToday : null;
 
@@ -35,11 +38,16 @@ export default function ActivityTab() {
       title="Активность"
       date={picked}
       statusText={statusText}
-      loading={phase === 'background'}
+      loading={phase === 'first'}
       progress={progress}
       packets={packets}
       onSync={sync}
-      banner={profileReady ? undefined : <BiometryBanner />}
+      banner={
+        <>
+          {profileReady ? null : <BiometryBanner />}
+          {incomplete ? <IncompleteBanner onRetry={sync} /> : null}
+        </>
+      }
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.activity ?? null} calibrating={!!day && day.scores.activity === null} />
@@ -56,10 +64,21 @@ export default function ActivityTab() {
       </Card>
 
       <Card title="День" right={<InfoButton title={FORMULAS.busiestHour.title} text={formulaText('busiestHour')} />}>
-        {day ? <DayActivityChart heart={day.heart} width={chartWidth} age={age} /> : <Skeleton height={130} />}
+        {day ? (
+          <DayActivityChart
+            heart={day.heart}
+            width={chartWidth}
+            age={age}
+            steps={day.stepsByMinute}
+            restingHr={day.restingHr}
+          />
+        ) : (
+          <Skeleton height={130} />
+        )}
         {zones.length ? (
           <Text style={styles.zones}>
-            {zones.length} {plural(zones.length, 'период', 'периода', 'периодов')} нагрузки · {loadMinutes} мин
+            {zones.length} {plural(zones.length, 'эпизод', 'эпизода', 'эпизодов')} · {Math.floor(loadMinutes / 60)} ч{' '}
+            {String(loadMinutes % 60).padStart(2, '0')} м
           </Text>
         ) : null}
         <View style={[ui.statRow, styles.stats]}>

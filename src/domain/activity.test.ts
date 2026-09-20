@@ -3,9 +3,9 @@ import { busiestHour, loadIntervals } from './charts';
 import {
   HOUR_LOAD_HR_WEIGHT,
   HOUR_LOAD_STEPS_WEIGHT,
-  MAX_SAMPLE_GAP_MIN,
   MERGE_GAP_MIN,
   MIN_EPISODE_MIN,
+  STEP_MIN_PER_MIN,
   maxHeartRate,
 } from './score';
 
@@ -38,56 +38,43 @@ describe('самый активный час', () => {
 
 describe('эпизоды нагрузки', () => {
   const maxHr = maxHeartRate(30);
-  const hot = Math.round(maxHr * 0.8);
+  const hot = Math.round(maxHr * 0.75);
+  const minutes = (from: number, count: number, v: number) =>
+    Array.from({ length: count }, (_, i) => ({ m: from + i, v }));
 
-  it('соседние замеры в зоне сливаются в один эпизод', () => {
-    const zones = loadIntervals(
-      [
-        { m: 1090, v: Math.round(maxHr * 0.75) },
-        { m: 1105, v: hot },
-        { m: 1120, v: hot },
-        { m: 1300, v: 60 },
-      ],
-      30,
-    );
+  it('прогулка по шагам находится даже без замеров пульса', () => {
+    // 20.09: вечерняя прогулка, пульс кольцо в это время не мерило
+    const steps = minutes(20 * 60, 90, STEP_MIN_PER_MIN + 10);
+    const zones = loadIntervals([], 30, steps, 55);
     expect(zones).toHaveLength(1);
-    expect(zones[0]).toMatchObject({ from: 1090, to: 1120 });
+    expect(zones[0].from).toBe(20 * 60);
+    expect(zones[0].steps).toBeGreaterThan(2000);
+    expect(zones[0].peak).toBeNull();
+  });
+
+  it('тренировка без шагов находится по пульсу', () => {
+    const heart = minutes(7 * 60, MIN_EPISODE_MIN + 5, hot);
+    const zones = loadIntervals(heart, 30, [], 55);
+    expect(zones).toHaveLength(1);
     expect(zones[0].peak).toBe(hot);
   });
 
   it('эпизод короче порога отбрасывается', () => {
-    expect(loadIntervals([{ m: 600, v: hot }], 30)).toEqual([]);
-    expect(loadIntervals([{ m: 600, v: hot }, { m: 600 + MIN_EPISODE_MIN - 1, v: hot }], 30)).toEqual([]);
-    expect(loadIntervals([{ m: 600, v: hot }, { m: 600 + MIN_EPISODE_MIN, v: hot }], 30)).toHaveLength(1);
+    expect(loadIntervals([], 30, minutes(600, MIN_EPISODE_MIN - 1, 30), 55)).toEqual([]);
+    expect(loadIntervals([], 30, minutes(600, MIN_EPISODE_MIN + 1, 30), 55)).toHaveLength(1);
   });
 
   it('пауза больше MERGE_GAP_MIN разрывает эпизоды', () => {
-    const zones = loadIntervals(
-      [
-        { m: 600, v: hot },
-        { m: 600 + MIN_EPISODE_MIN, v: hot },
-        { m: 600 + MIN_EPISODE_MIN + MERGE_GAP_MIN + 1, v: hot },
-        { m: 600 + MIN_EPISODE_MIN * 2 + MERGE_GAP_MIN + 1, v: hot },
-      ],
-      30,
-    );
-    expect(zones).toHaveLength(2);
+    const first = minutes(600, MIN_EPISODE_MIN + 1, 30);
+    const second = minutes(600 + MIN_EPISODE_MIN + MERGE_GAP_MIN + 5, MIN_EPISODE_MIN + 1, 30);
+    expect(loadIntervals([], 30, [...first, ...second], 55)).toHaveLength(2);
   });
 
-  it('через дырку в замерах интервал не растягивается', () => {
-    const zones = loadIntervals(
-      [
-        { m: 600, v: hot },
-        { m: 600 + MAX_SAMPLE_GAP_MIN + 10, v: hot },
-        { m: 600 + MAX_SAMPLE_GAP_MIN + 10 + MIN_EPISODE_MIN, v: hot },
-      ],
-      30,
-    );
-    expect(zones).toHaveLength(1);
-    expect(zones[0].from).toBe(600 + MAX_SAMPLE_GAP_MIN + 10);
+  it('спокойные минуты эпизодом не считаются', () => {
+    expect(loadIntervals(minutes(600, 60, 62), 30, minutes(600, 60, 3), 55)).toEqual([]);
   });
 
-  it('без возраста зоны не считаем: максимальный пульс неизвестен', () => {
+  it('без возраста и без шагов эпизодов нет', () => {
     expect(loadIntervals([{ m: 600, v: 170 }], null)).toEqual([]);
   });
 });

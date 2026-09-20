@@ -1,10 +1,11 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STRESS_ZONE_BOUNDS, formulaText } from '../../domain';
 import { findDay, latestSpo2, useSelectedDay, useVuelo } from '../../state';
-import { BiometryBanner, Card, DayLineChart, HeroRing, InfoButton, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
+import { BiometryBanner,
+  IncompleteBanner, Card, DayLineChart, HeroRing, InfoButton, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
 
 export default function BodyTab() {
-  const { week, state, phase, progress, packets, statusText, sync, profileReady } = useVuelo();
+  const { week, state, phase, progress, packets, statusText, sync, profileReady, incomplete } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
@@ -25,11 +26,16 @@ export default function BodyTab() {
       title="Тело"
       date={picked}
       statusText={statusText}
-      loading={phase === 'background'}
+      loading={phase === 'first'}
       progress={progress}
       packets={packets}
       onSync={sync}
-      banner={profileReady ? undefined : <BiometryBanner />}
+      banner={
+        <>
+          {profileReady ? null : <BiometryBanner />}
+          {incomplete ? <IncompleteBanner onRetry={sync} /> : null}
+        </>
+      }
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.state ?? null} calibrating={!!day && day.scores.state === null} />

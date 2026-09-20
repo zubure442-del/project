@@ -1,10 +1,11 @@
 import { wallClock, type Sample } from '../codec';
 import { DEEP_MIN_STATE } from './sleep';
 import {
-  ACTIVE_HR_RATIO,
+  ACTIVE_HR_LOW_RATIO,
+  ACTIVE_HR_OVER_RESTING,
+  STEP_MIN_PER_MIN,
   HOUR_LOAD_HR_WEIGHT,
   HOUR_LOAD_STEPS_WEIGHT,
-  MAX_SAMPLE_GAP_MIN,
   MERGE_GAP_MIN,
   MIN_EPISODE_MIN,
   cardioPointsFor,
@@ -125,35 +126,56 @@ export function busiestHour(
 }
 
 /**
- * Эпизоды нагрузки: непрерывные отрезки, где пульс не ниже ACTIVE_HR_RATIO от максимума.
- * Соседние склеиваем, если пауза меньше MERGE_GAP_MIN; через дырку в данных не тянем.
+ * Эпизоды нагрузки: минуты, где много шагов, плюс интервалы с поднятым пульсом.
+ * Только по пульсу мало: кольцо мерит его раз в 30 минут и прогулку может пропустить,
+ * поэтому шаги по минутам — основной признак, а пульс добавляет тренировки без шагов.
  */
 export function loadIntervals(
   heart: { m: number; v: number }[],
   age: number | null,
-): { from: number; to: number; peak: number; low: number }[] {
-  if (age === null) return [];
-  const active = maxHeartRate(age) * ACTIVE_HR_RATIO;
-  const points = [...heart].sort((a, b) => a.m - b.m);
-  const raw: { from: number; to: number; peak: number; low: number }[] = [];
+  stepsPerMinute: { m: number; v: number }[] = [],
+  restingHr: number | null = null,
+): { from: number; to: number; peak: number | null; low: number | null; steps: number }[] {
+  const active = new Set<number>();
 
-  points.forEach((p, i) => {
-    if (p.v < active) return;
-    const previous = points[i - 1];
-    const last = raw[raw.length - 1];
-    const gapFromLast = last ? p.m - last.to : Infinity;
-    // Через дырку между замерами интервал не растягиваем: там кольцо просто не мерило.
-    const holeBefore = previous ? p.m - previous.m > MAX_SAMPLE_GAP_MIN : false;
-    if (last && gapFromLast <= MERGE_GAP_MIN && !holeBefore) {
-      last.to = p.m;
-      last.peak = Math.max(last.peak, p.v);
-      last.low = Math.min(last.low, p.v);
-    } else {
-      raw.push({ from: p.m, to: p.m, peak: p.v, low: p.v });
-    }
-  });
+  for (const s of stepsPerMinute) {
+    if (s.v >= STEP_MIN_PER_MIN) active.add(s.m);
+  }
 
-  return raw.filter((z) => z.to - z.from >= MIN_EPISODE_MIN);
+  if (age !== null) {
+    const maxHr = maxHeartRate(age);
+    const threshold = Math.max(
+      maxHr * ACTIVE_HR_LOW_RATIO,
+      restingHr === null ? 0 : restingHr + ACTIVE_HR_OVER_RESTING,
+    );
+    const hot = heart.filter((p) => p.v >= threshold).sort((a, b) => a.m - b.m);
+    // Замер покрывает окно до следующего: кольцо мерит редко.
+    for (const p of hot) active.add(p.m);
+  }
+
+  const minutes = [...active].sort((a, b) => a - b);
+  const groups: { from: number; to: number }[] = [];
+  for (const m of minutes) {
+    const last = groups[groups.length - 1];
+    if (last && m - last.to <= MERGE_GAP_MIN) last.to = m;
+    else groups.push({ from: m, to: m });
+  }
+
+  return groups
+    .filter((g) => g.to - g.from >= MIN_EPISODE_MIN)
+    .map((g) => {
+      const inside = heart.filter((p) => p.m >= g.from && p.m <= g.to).map((p) => p.v);
+      const steps = stepsPerMinute
+        .filter((s) => s.m >= g.from && s.m <= g.to)
+        .reduce((sum, s) => sum + s.v, 0);
+      return {
+        from: g.from,
+        to: g.to,
+        peak: inside.length ? Math.max(...inside) : null,
+        low: inside.length ? Math.min(...inside) : null,
+        steps,
+      };
+    });
 }
 
 /** Уровни волны сна: глубокий внизу, лёгкий вверху. */

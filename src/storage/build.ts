@@ -88,6 +88,7 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
         hrv: r.hrv,
       })),
       stepsByHour: stepsByHour(stepSamples ?? []),
+      stepsByMinute: toPoints(stepSamples ?? []),
       sleepSegments: night
         ? hypnogramSegments(sync.sleep.filter((s) => s.ts >= night.start && s.ts <= night.end)).map((seg) => ({
             from: (seg.from - midnightTs(date)) / 60,

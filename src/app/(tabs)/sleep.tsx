@@ -1,12 +1,13 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, formulaText } from '../../domain';
 import { findDay, useSelectedDay, useVuelo } from '../../state';
-import { BiometryBanner, Card, HeroRing, InfoButton, Screen, SleepWave, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
+import { BiometryBanner,
+  IncompleteBanner, Card, HeroRing, InfoButton, Screen, SleepWave, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
 
 const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
 
 export default function SleepTab() {
-  const { week, state, phase, progress, packets, statusText, sync, profileReady } = useVuelo();
+  const { week, state, phase, progress, packets, statusText, sync, profileReady, incomplete } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
@@ -20,11 +21,16 @@ export default function SleepTab() {
       title="Сон"
       date={picked}
       statusText={statusText}
-      loading={phase === 'background'}
+      loading={phase === 'first'}
       progress={progress}
       packets={packets}
       onSync={sync}
-      banner={profileReady ? undefined : <BiometryBanner />}
+      banner={
+        <>
+          {profileReady ? null : <BiometryBanner />}
+          {incomplete ? <IncompleteBanner onRetry={sync} /> : null}
+        </>
+      }
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.sleep ?? null} calibrating={!!day && day.scores.sleep === null} />

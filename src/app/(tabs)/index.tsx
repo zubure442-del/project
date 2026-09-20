@@ -3,6 +3,7 @@ import { FORMULAS, STEPS_GOAL, formulaText, type ComponentId } from '../../domai
 import { findDay, todayKey, useSelectedDay, useVuelo } from '../../state';
 import {
   BiometryBanner,
+  IncompleteBanner,
   COMPONENT_LABEL,
   Card,
   HeroRing,
@@ -19,7 +20,7 @@ import {
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 export default function TodayTab() {
-  const { week, report, state, phase, progress, packets, statusText, sync, profileReady } = useVuelo();
+  const { week, report, state, phase, progress, packets, statusText, sync, profileReady, incomplete } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
@@ -33,11 +34,16 @@ export default function TodayTab() {
       title="Итог"
       date={picked}
       statusText={statusText}
-      loading={phase === 'background'}
+      loading={phase === 'first'}
       progress={progress}
       packets={packets}
       onSync={sync}
-      banner={profileReady ? undefined : <BiometryBanner />}
+      banner={
+        <>
+          {profileReady ? null : <BiometryBanner />}
+          {incomplete ? <IncompleteBanner onRetry={sync} /> : null}
+        </>
+      }
     >
       <View style={styles.total}>
         <HeroRing value={day?.total ?? null} size={Math.min(214, width - 140)} />

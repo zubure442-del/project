@@ -38,6 +38,8 @@ export interface DaySnapshot {
   }[];
   /** Шаги по часам суток: ровно 24 числа. */
   stepsByHour: number[];
+  /** Шаги по минутам: нужны, чтобы находить эпизоды нагрузки. */
+  stepsByMinute: DayPoint[];
   /** Отрезки гипнограммы. Минуты от полуночи этого дня; вечер накануне — отрицательные. */
   sleepSegments: { from: number; to: number; stage: SleepStage }[];
   /** Оценочные показатели: показываем, но в итог не берём. */
@@ -89,6 +91,8 @@ export type Sex = 'male' | 'female';
 export type Goal = 'lose' | 'gain' | 'keep';
 
 export interface Profile {
+  /** Как обращаться. Необязательное, хранится только на телефоне. */
+  name: string | null;
   sex: Sex | null;
   heightCm: number | null;
   weightKg: number | null;
@@ -96,7 +100,7 @@ export interface Profile {
   goal: Goal | null;
 }
 
-export const EMPTY_PROFILE: Profile = { sex: null, heightCm: null, weightKg: null, birthYear: null, goal: null };
+export const EMPTY_PROFILE: Profile = { name: null, sex: null, heightCm: null, weightKg: null, birthYear: null, goal: null };
 
 /** Границы полей профиля. */
 export const PROFILE_LIMITS = {

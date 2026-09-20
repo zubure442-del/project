@@ -19,9 +19,10 @@ const MIN_VISIBLE_MS = 1200;
 /** Кольцо давно молчит — предупреждаем, но продолжаем ждать. */
 const SLOW_MS = 8000;
 
-export function greeting(now = new Date()): string {
+export function greeting(now = new Date(), name?: string | null): string {
   const h = now.getHours();
-  return GREETINGS.find((g) => h >= g.fromHour && h < g.until)?.text ?? GREETING_NIGHT;
+  const base = GREETINGS.find((g) => h >= g.fromHour && h < g.until)?.text ?? GREETING_NIGHT;
+  return name ? `${base}, ${name}` : base;
 }
 
 const STAGE_TEXT = { connecting: 'Ищем кольцо', configuring: 'Настраиваем', loading: 'Загружаем данные' } as const;
@@ -63,7 +64,7 @@ function useDelayedText(text: string) {
 }
 
 export default function Welcome() {
-  const { state, today, phase, stage, progress, packets, error, connected, sync, markStarted } = useVuelo();
+  const { state, phase, stage, progress, packets, error, sync, markStarted } = useVuelo();
   const insets = useSafeAreaInsets();
   const [reduceMotion, setReduceMotion] = useState(false);
   const [slow, setSlow] = useState(false);
@@ -92,15 +93,14 @@ export default function Welcome() {
   }, [needsStart]);
 
   // Уходим на главный экран, когда первая фаза закончилась либо когда данные за сегодня уже есть.
-  const hasToday = !!today && (today.steps !== null || today.sleep !== null || today.heart.length > 0);
   useEffect(() => {
     if (needsStart) return;
-    const enough = phase === 'background' || phase === 'done' || (phase === 'first' && hasToday && connected);
+    const enough = phase === 'done';
     if (!enough) return;
     const wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - shownAt.current));
     const timer = setTimeout(() => router.replace('/'), wait);
     return () => clearTimeout(timer);
-  }, [connected, hasToday, needsStart, phase]);
+  }, [needsStart, phase]);
 
   const open = () => router.replace('/');
   const problem = phase === 'failed' ? PROBLEMS[error ?? 'not-found'] : null;
@@ -138,7 +138,8 @@ export default function Welcome() {
     <Pressable style={styles.root} onPress={needsStart ? undefined : open}>
       <View style={{ height: insets.top + spacing.xl }} />
       <Animated.Text entering={FadeIn.duration(600)} style={styles.greeting}>
-        {greeting()}
+        {/* При обновлении по запросу приветствие не показываем: это не новый вход. */}
+        {state.started && state.lastSyncAt !== null ? greeting(new Date(), state.profile.name) : greeting()}
       </Animated.Text>
 
       <View style={styles.center}>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Defs, Line, Path, Pattern, Rect, Text as SvgText } from 'react-native-svg';
 import { HR_SMOOTH_MAX_GAP, formatMinute, loadIntervals, smoothHeart, splitSegments, type SleepStage } from '../domain';
@@ -19,39 +19,44 @@ const empty = (width: number, text = 'Нет данных') => (
 const MIN_ZONE_WIDTH = 6;
 /** Запас по вертикали вокруг пульса эпизода. */
 const ZONE_PADDING = 0.15;
-const PULSE_TICKS = [60, 90, 120, 150, 180, 200];
+/** Шаг подписей шкалы пульса. */
+const PULSE_STEP = 20;
 
 /**
  * Пульс за день: сглаженная линия на всю ширину, шкала пульса слева, часы внизу.
  * Поверх линии штрихованные прямоугольники — эпизоды нагрузки.
  */
+export type LoadZone = ReturnType<typeof loadIntervals>[number];
+
 export function DayActivityChart({
   heart,
   width,
   age,
-  onZones,
+  steps = [],
+  restingHr = null,
 }: {
   heart: DayPoint[];
   width: number;
   age: number | null;
-  onZones?: (zones: { from: number; to: number }[]) => void;
+  steps?: { m: number; v: number }[];
+  restingHr?: number | null;
 }) {
-  const [picked, setPicked] = useState<{ from: number; to: number; peak: number } | null>(null);
+  const [picked, setPicked] = useState<LoadZone | null>(null);
   const smooth = smoothHeart(heart.map((p) => ({ ts: p.m * 60, value: p.v })));
-  const zones = loadIntervals(heart.map((p) => ({ m: p.m, v: p.v })), age);
-
-  useEffect(() => onZones?.(zones.map((z) => ({ from: z.from, to: z.to }))), [onZones, zones]);
+  const zones = loadIntervals(heart.map((p) => ({ m: p.m, v: p.v })), age, steps, restingHr);
 
   if (smooth.length < 2) return empty(width);
 
+  // Шкала подстраивается под день: фиксированная 60–200 прижимала линию ко дну.
   const values = smooth.map((p) => p.value);
-  const yMin = Math.min(PULSE_TICKS[0], Math.min(...values) - 5);
-  const yMax = Math.max(PULSE_TICKS[PULSE_TICKS.length - 1], Math.max(...values) + 5);
+  const yMin = Math.floor((Math.min(...values) - 10) / PULSE_STEP) * PULSE_STEP;
+  const yMax = Math.ceil((Math.max(...values) + 20) / PULSE_STEP) * PULSE_STEP;
   const gutter = 34;
   const plot = width - gutter;
   const x = (m: number) => gutter + (m / 1440) * plot;
   const y = (v: number) => 10 + (1 - (v - yMin) / (yMax - yMin)) * (HEIGHT - 32);
-  const ticks = PULSE_TICKS.filter((t) => t >= yMin && t <= yMax);
+  const ticks: number[] = [];
+  for (let t = yMin; t <= yMax; t += PULSE_STEP) ticks.push(t);
   const segments = splitSegments(smooth, HR_SMOOTH_MAX_GAP);
 
   const pick = (e: GestureResponderEvent) => {
@@ -84,9 +89,15 @@ export function DayActivityChart({
         ))}
 
         {zones.map((z, i) => {
-          const span = Math.max(1, z.peak - z.low);
-          const top = y(Math.min(yMax, z.peak + span * ZONE_PADDING));
-          const bottom = y(Math.max(yMin, z.low - span * ZONE_PADDING));
+          // Если внутри эпизода замеров пульса нет, рисуем среднюю полосу графика.
+          const hasPulse = z.peak !== null && z.low !== null;
+          const span = hasPulse ? Math.max(1, (z.peak as number) - (z.low as number)) : 0;
+          const top = hasPulse
+            ? y(Math.min(yMax, (z.peak as number) + span * ZONE_PADDING))
+            : 10 + (HEIGHT - 32) * 0.35;
+          const bottom = hasPulse
+            ? y(Math.max(yMin, (z.low as number) - span * ZONE_PADDING))
+            : 10 + (HEIGHT - 32) * 0.65;
           const left = x(z.from);
           const zoneWidth = Math.max(MIN_ZONE_WIDTH, x(z.to) - left);
           return (
@@ -136,8 +147,9 @@ export function DayActivityChart({
       </Svg>
       {picked ? (
         <Text style={styles.touch}>
-          {formatMinute(picked.from)}–{formatMinute(picked.to)} · {Math.round(picked.to - picked.from)} мин · до{' '}
-          {Math.round(picked.peak)} уд/мин
+          {formatMinute(picked.from)}–{formatMinute(picked.to)} · {Math.round(picked.to - picked.from)} мин
+          {picked.steps > 0 ? ` · ${picked.steps.toLocaleString('ru-RU')} шагов` : ''}
+          {picked.peak !== null ? ` · до ${Math.round(picked.peak)} уд/мин` : ''}
         </Text>
       ) : null}
     </View>

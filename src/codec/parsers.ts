@@ -80,15 +80,31 @@ export function parseMinuteSeries(data: Uint8Array, kind: 'steps' | 'sleep'): Pa
   return { kind, samples };
 }
 
-/** 0x55: [1..4] ts, записи по 5 байт с шагом 15 минут: сист., диаст., СТРЕСС (не SpO2!), глюкоза×10, HRV. */
+/**
+ * 0x55: [1..4] ts, записи по 5 байт: сист., диаст., СТРЕСС (не SpO2!), глюкоза×10, HRV.
+ *
+ * Проверено на кольце 20.09.2026: все три записи в пакете совпадают, а сами пакеты
+ * приходят раз в 30 минут — с периодом автозамера. Это ОДИН замер, продублированный
+ * на все слоты, как в 0x40. Тогда берём одну точку по времени первой записи.
+ * Если записи различаются, считаем их разными замерами с шагом 15 минут, как в PROTOCOL.md.
+ *
+ * Ноль замером не считается: официальное приложение усредняет только значения больше нуля,
+ * а ноль показывает как «--». В логах кольца нули приходят лишь в служебном пакете 23:45,
+ * где вся запись нулевая.
+ */
 export function parseSummary(data: Uint8Array): Packet | null {
   if (data.length < 6) return null;
   const ts = u32le(data, 1);
   if (ts <= MIN_VALID_TS) return null;
-  const records: SummaryRecord[] = [];
+
   const count = Math.floor((data.length - 5) / 5);
-  for (let i = 0; i < count; i++) {
-    const [sys, dia, stress, sugar, hrv] = Array.from(data.subarray(5 + i * 5, 10 + i * 5));
+  const slots: number[][] = [];
+  for (let i = 0; i < count; i++) slots.push(Array.from(data.subarray(5 + i * 5, 10 + i * 5)));
+  const duplicated = slots.length > 1 && slots.every((slot) => slot.every((b, j) => b === slots[0][j]));
+  const entries = duplicated ? slots.slice(0, 1) : slots;
+
+  const records: SummaryRecord[] = [];
+  entries.forEach(([sys, dia, stress, sugar, hrv], i) => {
     const bpOk = sys !== NO_DATA && dia !== NO_DATA && sys > dia && dia > 0;
     const rec: SummaryRecord = {
       ts: ts + i * 900,
@@ -101,7 +117,7 @@ export function parseSummary(data: Uint8Array): Packet | null {
     if (rec.systolic !== null || rec.stress !== null || rec.glucose !== null || rec.hrv !== null) {
       records.push(rec);
     }
-  }
+  });
   return { kind: 'summary', records };
 }
 

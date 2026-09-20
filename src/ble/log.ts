@@ -9,7 +9,7 @@ export interface LoggedPacket {
   hex: string;
 }
 
-const LIMIT = 600;
+const LIMIT = 3000;
 const buffer: LoggedPacket[] = [];
 const listeners = new Set<() => void>();
 

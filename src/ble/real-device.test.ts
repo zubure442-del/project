@@ -125,6 +125,45 @@ describe('РЕАЛЬНЫЕ БАЙТЫ: сон приходит в ответ н�
   });
 });
 
+describe('РЕАЛЬНЫЕ БАЙТЫ: сводка 0x55', () => {
+  /** Три одинаковые записи: один замер, продублированный на все слоты. */
+  const DUPLICATED = '55 8c 2c af 6a 71 47 0b 37 50 71 47 0b 37 50 71 47 0b 37 50';
+  const NEXT = '55 94 33 af 6a 6e 48 05 3e 52 6e 48 05 3e 52 6e 48 05 3e 52';
+  /** Служебный пакет конца суток: вся запись нулевая. */
+  const DAY_END = '55 fc cc ad 6a 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00';
+
+  it('одинаковые записи схлопываются в одну точку по времени первой', () => {
+    const p = parsePacket(hexToBytes(DUPLICATED));
+    expect(p.kind).toBe('summary');
+    if (p.kind !== 'summary') return;
+    expect(p.records).toHaveLength(1);
+    expect(formatWall(p.records[0].ts)).toBe('2026-09-20 00:45:00');
+    expect(p.records[0]).toMatchObject({ systolic: 113, diastolic: 71, stress: 11, glucose: 5.5, hrv: 80 });
+  });
+
+  it('соседние пакеты дают шаг 30 минут — период автозамера', () => {
+    const a = parsePacket(hexToBytes(DUPLICATED));
+    const b = parsePacket(hexToBytes(NEXT));
+    if (a.kind !== 'summary' || b.kind !== 'summary') throw new Error('не сводка');
+    expect(b.records[0].ts - a.records[0].ts).toBe(1800);
+  });
+
+  it('нулевая запись замером не считается', () => {
+    const p = parsePacket(hexToBytes(DAY_END));
+    expect(p.kind === 'summary' && p.records).toEqual([]);
+  });
+
+  it('СИНТЕТИЧЕСКИЙ: разные записи остаются раздельными, шаг 15 минут', () => {
+    const p = parsePacket(
+      hexToBytes('55 8c 2c af 6a 71 47 0b 37 50 6e 48 05 3e 52 71 47 0b 37 50'),
+    );
+    if (p.kind !== 'summary') throw new Error('не сводка');
+    expect(p.records).toHaveLength(3);
+    expect(p.records[1].ts - p.records[0].ts).toBe(900);
+    expect(p.records[1].stress).toBe(5);
+  });
+});
+
 describe('РЕАЛЬНЫЕ БАЙТЫ: заряд 0x0B', () => {
   it('кольцо отвечает процентом на запрос', () => {
     expect(parsePacket(hexToBytes('0b 2d 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'))).toEqual({

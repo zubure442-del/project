@@ -63,3 +63,21 @@ export function formatMinute(minuteOfDay: number): string {
   const m = ((rounded % 1440) + 1440) % 1440;
   return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
 }
+
+/**
+ * Зоны стресса, как в официальном приложении кольца: 0–30, 31–60, 61–80, 81–100.
+ * Названия нейтральные: это оценка кольца по пульсовой волне, а не медицинский показатель.
+ */
+export const STRESS_ZONES = [
+  { upTo: 30, label: 'Низкий' },
+  { upTo: 60, label: 'Умеренный' },
+  { upTo: 80, label: 'Повышенный' },
+  { upTo: 100, label: 'Высокий' },
+] as const;
+
+export const STRESS_ZONE_BOUNDS = [30, 60, 80];
+
+export function stressZone(value: number): string | null {
+  if (!(value > 0) || value > 100) return null;
+  return (STRESS_ZONES.find((z) => value <= z.upTo) ?? STRESS_ZONES[STRESS_ZONES.length - 1]).label;
+}

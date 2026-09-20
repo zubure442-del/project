@@ -12,12 +12,14 @@ import {
   spacing,
   styles as ui,
 } from '../../ui';
+import { stressZone } from '../../domain';
 import { lastSpo2, spo2Days, useVuelo } from '../../state';
 import { router } from 'expo-router';
 
 const STRESS_HELP =
-  'Индекс кольца от 0 до 100: до 30 — низкий, 30–60 — средний, выше 60 — высокий. ' +
-  'Кольцо оценивает его по пульсовой волне. Это не медицинский показатель, и в итог Vuelo он не входит.';
+  'Индекс кольца от 0 до 100, четыре зоны: 0–30 низкий, 31–60 умеренный, 61–80 повышенный, ' +
+  '81–100 высокий. Кольцо оценивает его по пульсовой волне — это оценка, а не медицинский ' +
+  'показатель, и в итог Vuelo он не входит. Значение 0 замером не считается.';
 
 /** «Тело»: пульс, кислород, стресс и оценочные показатели. */
 export default function BodyTab() {
@@ -80,7 +82,9 @@ export default function BodyTab() {
         {stressHelp ? <Text style={styles.help}>{STRESS_HELP}</Text> : null}
         <StressChart points={today?.stress ?? []} width={chartWidth} />
         <Text style={styles.inline}>
-          {est?.stress != null ? `Среднее за день: ${Math.round(est.stress)}` : 'За сегодня замеров нет.'}
+          {est?.stress != null
+            ? `Среднее за день: ${Math.round(est.stress)} · ${stressZone(Math.round(est.stress)) ?? '—'}`
+            : 'За сегодня замеров нет.'}
         </Text>
       </Card>
 

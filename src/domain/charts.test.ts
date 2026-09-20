@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Sample } from '../codec';
-import { formatMinute, hypnogramSegments, niceTicks, sleepStage, stepsByHour } from './charts';
+import { formatMinute, hypnogramSegments, niceTicks, sleepStage, stepsByHour, stressZone } from './charts';
 
 const ring = (s: string) => Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
 const minutes = (from: string, values: number[]): Sample[] =>
@@ -90,5 +90,22 @@ describe('время', () => {
   });
   it('отрицательные минуты — предыдущий вечер', () => {
     expect(formatMinute(-50)).toBe('23:10');
+  });
+});
+
+describe('зоны стресса', () => {
+  it('четыре зоны как в официальном приложении: 0–30, 31–60, 61–80, 81–100', () => {
+    expect(stressZone(1)).toBe('Низкий');
+    expect(stressZone(30)).toBe('Низкий');
+    expect(stressZone(31)).toBe('Умеренный');
+    expect(stressZone(60)).toBe('Умеренный');
+    expect(stressZone(61)).toBe('Повышенный');
+    expect(stressZone(80)).toBe('Повышенный');
+    expect(stressZone(81)).toBe('Высокий');
+    expect(stressZone(100)).toBe('Высокий');
+  });
+  it('ноль и выход за шкалу — не замер', () => {
+    expect(stressZone(0)).toBeNull();
+    expect(stressZone(101)).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from 'react-native-svg';
-import { HR_SMOOTH_MAX_GAP, niceTicks, smoothHeart, splitSegments, type SleepStage } from '../domain';
+import { HR_SMOOTH_MAX_GAP, STRESS_ZONE_BOUNDS, niceTicks, smoothHeart, splitSegments, type SleepStage } from '../domain';
 import type { DayPoint, DaySnapshot } from '../storage';
 import { Plot } from './Plot';
 import { colors, spacing, withAlpha } from './theme';
@@ -69,12 +69,12 @@ export function Spo2Chart({ points, width }: { points: DayPoint[]; width: number
   );
 }
 
-/** Стресс за день: линия 0–100 с порогами 30 и 60; при разрыве больше 45 минут линия рвётся. */
+/** Стресс за день: линия 0–100 с границами зон 30, 60 и 80; при разрыве больше 45 минут линия рвётся. */
 export function StressChart({ points, width }: { points: DayPoint[]; width: number }) {
   const sorted = [...points].sort((a, b) => a.m - b.m);
   const segments = splitSegments(sorted.map((p) => ({ ts: p.m * 60, value: p.v })), STRESS_MAX_GAP);
   return (
-    <Plot width={width} yMin={0} yMax={100} yTicks={[0, 30, 60, 100]} empty={!sorted.length}>
+    <Plot width={width} yMin={0} yMax={100} yTicks={[0, ...STRESS_ZONE_BOUNDS, 100]} empty={!sorted.length}>
       {(s) => (
         <>
           {segments.map((seg, i) =>

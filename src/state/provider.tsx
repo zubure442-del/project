@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Alert } from 'react-native';
-import { RingBle, handshake, runSync } from '../ble';
+import { RingBle, handshake, runSync, type KnownRing } from '../ble';
 import type { Report } from '../domain';
 import { EMPTY_STATE, addReport, loadState, saveState, type DaySnapshot, type VueloState } from '../storage';
 import { applySync, demoSync, findToday, reportMode, reportToShow, savedReport, syncStatusText, todayKey, weekDays } from './day';
@@ -62,16 +62,21 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     if (busy) return;
     void (async () => {
       setBusy(true);
-      const device = ring ?? new RingBle();
+      const device = ring ?? new RingBle(stored.ring);
       if (!ring) setRing(device);
+      let known: KnownRing | null = null;
       try {
         device.onStatus = (s) =>
           setProgress(s === 'scanning' ? 'Ищу кольцо…' : s === 'connecting' ? 'Подключаюсь…' : null);
+        // Запоминаем кольцо: в следующий раз подключимся по идентификатору, без поиска в эфире.
+        device.onKnown = (k) => {
+          known = k;
+        };
         await device.connect();
         setProgress('Настраиваю кольцо…');
         await handshake(device);
         const result = await runSync(device, { onProgress: (m) => setProgress(`Выгружаю: ${m}`) });
-        const next = applySync(stored, result);
+        const next = applySync({ ...stored, ring: known ?? stored.ring }, result);
         await persist(next.state, next.report);
       } catch (e) {
         Alert.alert('Не вышло', e instanceof Error ? e.message : String(e));

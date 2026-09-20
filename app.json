@@ -16,7 +16,8 @@
       "bundleIdentifier": "ru.vuelo.ring",
       "infoPlist": {
         "EXDevMenuShowFloatingActionButton": false
-      }
+      },
+      "appleTeamId": "DXMFBFFYHQ"
     },
     "plugins": [
       "expo-router",
@@ -31,10 +32,15 @@
       [
         "react-native-ble-plx",
         {
-          "bluetoothAlwaysPermission": "Bluetooth нужен, чтобы подключаться к кольцу Vuelo Ring и забирать с него данные о сне, пульсе, кислороде и активности. Данные остаются на телефоне."
+          "bluetoothAlwaysPermission": "Bluetooth нужен, чтобы подключаться к кольцу Vuelo Ring и забирать с него данные о сне, пульсе, кислороде и активности. Данные остаются на телефоне.",
+          "isBackgroundEnabled": true,
+          "modes": [
+            "central"
+          ]
         }
       ],
-      "./plugins/with-ios-scene-lifecycle"
+      "./plugins/with-ios-scene-lifecycle",
+      "./plugins/with-signing-team"
     ],
     "experiments": {
       "typedRoutes": true

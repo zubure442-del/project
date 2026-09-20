@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import {
   Card,
@@ -10,12 +11,11 @@ import {
   spacing,
   styles as ui,
 } from '../../ui';
-import { spo2Fallback } from '../state';
-import { useVuelo } from '../store';
+import { spo2Fallback, useVuelo } from '../../state';
 
 /** «Тело»: пульс, кислород, напряжение и оценочные показатели. */
 export default function BodyTab() {
-  const { today, week, state, busy, progress, statusText, sync, forgetDemo } = useVuelo();
+  const { today, week, state, busy, progress, statusText, sync, setDemo } = useVuelo();
   const { width } = useWindowDimensions();
   const chartWidth = width - spacing.md * 4;
 
@@ -34,7 +34,8 @@ export default function BodyTab() {
       progress={progress}
       demo={state.demo}
       onSync={sync}
-      onForgetDemo={forgetDemo}
+      onForgetDemo={() => setDemo(false)}
+      onOpenSettings={() => router.push('/settings')}
     >
       <Card title="Пульс" note="точки — замеры, линия — сглажено">
         <HeartChart points={today?.heart ?? []} width={chartWidth} />

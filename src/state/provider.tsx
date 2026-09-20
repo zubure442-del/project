@@ -2,8 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Alert } from 'react-native';
 import { RingBle, handshake, runSync } from '../ble';
 import type { Report } from '../domain';
-import { EMPTY_STATE, addReport, clearState, loadState, saveState, type DaySnapshot, type VueloState } from '../storage';
-import { applySync, demoSync, findToday, reportMode, reportToShow, savedReport, syncStatusText, todayKey } from './state';
+import { EMPTY_STATE, addReport, loadState, saveState, type DaySnapshot, type VueloState } from '../storage';
+import { applySync, demoSync, findToday, reportMode, reportToShow, savedReport, syncStatusText, todayKey } from './day';
 
 interface Vuelo {
   state: VueloState;
@@ -14,7 +14,8 @@ interface Vuelo {
   progress: string | null;
   statusText: string;
   sync: () => void;
-  forgetDemo: () => void;
+  /** Переключатель демо-данных в настройках. По умолчанию выключен. */
+  setDemo: (on: boolean) => void;
 }
 
 const Context = createContext<Vuelo | null>(null);
@@ -27,22 +28,19 @@ export function useVuelo(): Vuelo {
 
 /** Одно состояние на все вкладки: данные читаются с телефона один раз. */
 export function VueloProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<VueloState>(EMPTY_STATE);
+  const [stored, setStored] = useState<VueloState>(EMPTY_STATE);
+  /**
+   * Демо-режим держим только в памяти: так он не затирает настоящие данные
+   * и не остаётся включённым после перезапуска.
+   */
+  const [demoState, setDemoState] = useState<VueloState | null>(null);
+  const state = demoState ?? stored;
   const [ring, setRing] = useState<RingBle | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
 
   useEffect(() => {
-    void loadState().then((loaded) => {
-      // Первый запуск: подставляем демо-данные, чтобы экраны не были пустыми.
-      if (loaded.days.length || loaded.demoDismissed) {
-        setState(loaded);
-        return;
-      }
-      const seeded = applySync({ ...loaded, age: loaded.age ?? 30 }, demoSync(), new Date(), true);
-      setState(seeded.state);
-      void saveState(seeded.state);
-    });
+    void loadState().then(setStored);
   }, []);
 
   const persist = useCallback(async (next: VueloState, report: Report) => {
@@ -55,7 +53,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         text: report.text,
       }),
     };
-    setState(withReport);
+    setDemoState(null);
+    setStored(withReport);
     await saveState(withReport);
   }, []);
 
@@ -72,7 +71,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         setProgress('Настраиваю кольцо…');
         await handshake(device);
         const result = await runSync(device, { onProgress: (m) => setProgress(`Выгружаю: ${m}`) });
-        const next = applySync(state, result);
+        const next = applySync(stored, result);
         await persist(next.state, next.report);
       } catch (e) {
         Alert.alert('Не вышло', e instanceof Error ? e.message : String(e));
@@ -81,10 +80,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         setBusy(false);
       }
     })();
-  }, [busy, persist, ring, state]);
+  }, [busy, persist, ring, stored]);
 
-  const forgetDemo = useCallback(() => {
-    void clearState(true).then(setState);
+  const setDemo = useCallback((on: boolean) => {
+    setDemoState(on ? applySync({ ...EMPTY_STATE, age: 30 }, demoSync(), new Date(), true).state : null);
   }, []);
 
   const value = useMemo<Vuelo>(() => {
@@ -98,9 +97,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       progress,
       statusText: syncStatusText(state),
       sync,
-      forgetDemo,
+      setDemo,
     };
-  }, [busy, forgetDemo, progress, state, sync]);
+  }, [busy, progress, setDemo, state, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

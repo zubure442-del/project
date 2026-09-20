@@ -1,10 +1,11 @@
+import { router } from 'expo-router';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { Card, Hypnogram, Screen, Stat, colors, spacing, styles as ui } from '../../ui';
-import { useVuelo } from '../store';
+import { useVuelo } from '../../state';
 
 /** «Сон»: гипнограмма за ночь, общее время и доля глубокого сна. */
 export default function SleepTab() {
-  const { today, state, busy, progress, statusText, sync, forgetDemo } = useVuelo();
+  const { today, state, busy, progress, statusText, sync, setDemo } = useVuelo();
   const { width } = useWindowDimensions();
   const chartWidth = width - spacing.md * 4;
   const sleep = today?.sleep;
@@ -19,7 +20,8 @@ export default function SleepTab() {
       progress={progress}
       demo={state.demo}
       onSync={sync}
-      onForgetDemo={forgetDemo}
+      onForgetDemo={() => setDemo(false)}
+      onOpenSettings={() => router.push('/settings')}
     >
       <Card title="Ночь" note="фазы по времени">
         <Hypnogram segments={today?.sleepSegments ?? []} width={chartWidth} />
@@ -38,7 +40,7 @@ export default function SleepTab() {
       <Card title="Оценка сна">
         <Text style={styles.score}>{today?.scores.sleep ?? '—'}</Text>
         <Text style={styles.note}>
-          Из ста. Считается по длительности сна и доле глубокой фазы. Если данных за ночь нет, оценка не выставляется
+          Оценка из 100. Считается по длительности сна и доле глубокой фазы. Если данных за ночь нет, оценка не выставляется
           и в итог не идёт.
         </Text>
       </Card>

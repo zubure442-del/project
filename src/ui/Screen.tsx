@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Logo } from './Logo';
+import { GearIcon } from './TabIcons';
 import { colors, radius, spacing } from './theme';
 
 export interface ScreenProps {
@@ -13,11 +14,12 @@ export interface ScreenProps {
   demo: boolean;
   onSync: () => void;
   onForgetDemo: () => void;
+  onOpenSettings?: () => void;
   children: ReactNode;
 }
 
 /** Общий каркас вкладки: шапка с кнопкой синхронизации, строка статуса, обновление свайпом. */
-export function Screen({ title, statusText, busy, progress, demo, onSync, onForgetDemo, children }: ScreenProps) {
+export function Screen({ title, statusText, busy, progress, demo, onSync, onForgetDemo, onOpenSettings, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
   return (
     <View style={styles.root}>
@@ -29,6 +31,11 @@ export function Screen({ title, statusText, busy, progress, demo, onSync, onForg
           <Pressable style={[styles.syncButton, busy && styles.syncBusy]} onPress={onSync} disabled={busy}>
             {busy ? <ActivityIndicator size="small" color={colors.bg} /> : <Text style={styles.syncText}>Обновить</Text>}
           </Pressable>
+          {onOpenSettings ? (
+            <Pressable style={styles.gear} onPress={onOpenSettings} hitSlop={8}>
+              <GearIcon color={colors.textMuted} size={22} />
+            </Pressable>
+          ) : null}
         </View>
         <View style={styles.statusRow}>
           <Text style={styles.status}>{progress ?? statusText}</Text>
@@ -84,6 +91,7 @@ export const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 21, fontWeight: '500' },
   spacer: { flex: 1 },
   syncButton: { backgroundColor: colors.accent, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8, minWidth: 56, alignItems: 'center' },
+  gear: { padding: 4 },
   syncBusy: { opacity: 0.5 },
   syncText: { color: colors.bg, fontSize: 13, fontWeight: '600' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs, flexWrap: 'wrap' },

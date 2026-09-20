@@ -1,6 +1,7 @@
 import {
   activityCommand,
   archiveCommand,
+  batteryCommand,
   autoMeasureCommand,
   parsePacket,
   prepareArchiveCommand,
@@ -154,7 +155,10 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
       for (const p of m.packets) if (p.kind === 'summary') result.summary.push(...p.records);
       result.packetCounts.summary += m.packets.length;
     }
+    // 0x03 — активность за сегодня, 0x0B — заряд. Оба разовые, не по дням (PROTOCOL.md, раздел 3).
     await t.send(activityCommand());
+    await sleep(1000);
+    await t.send(batteryCommand());
     await sleep(1000);
   } finally {
     off();

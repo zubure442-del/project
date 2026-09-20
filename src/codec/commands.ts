@@ -46,4 +46,6 @@ export function archiveCommand(
 /** 0x13 — перед выгрузкой архивов (эксперимент, в SDK нет, но так делает рабочий main.py). */
 export const prepareArchiveCommand = (): Uint8Array => command(CMD.prepareArchive);
 export const activityCommand = (): Uint8Array => command(CMD.activity);
+/** 0x0B — заряд. Кольцо присылает процент и само, но PROTOCOL.md описывает запрос. */
+export const batteryCommand = (): Uint8Array => command(CMD.battery);
 export const functionsCommand = (): Uint8Array => command(CMD.functions);

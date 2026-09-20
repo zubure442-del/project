@@ -45,3 +45,18 @@ export const BodyIcon = ({ color, size = 24 }: IconProps) => (
     />
   </Svg>
 );
+
+export const GearIcon = ({ color, size = 24 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24">
+    <Circle cx="12" cy="12" r="7.4" stroke={color as string} strokeWidth="3" fill="none" />
+    <Path d="M12 12 m0 -10.2 l0 3" stroke={color as string} strokeWidth="2.4" strokeLinecap="round" transform="rotate(0 12 12)" fill="none" />
+    <Path d="M12 12 m0 -10.2 l0 3" stroke={color as string} strokeWidth="2.4" strokeLinecap="round" transform="rotate(45 12 12)" fill="none" />
+    <Path d="M12 12 m0 -10.2 l0 3" stroke={color as string} strokeWidth="2.4" strokeLinecap="round" transform="rotate(90 12 12)" fill="none" />
+    <Path d="M12 12 m0 -10.2 l0 3" stroke={color as string} strokeWidth="2.4" strokeLinecap="round" transform="rotate(135 12 12)" fill="none" />
+    <Path d="M12 12 m0 -10.2 l0 3" stroke={color as string} strokeWidth="2.4" strokeLinecap="round" transform="rotate(180 12 12)" fill="none" />
+    <Path d="M12 12 m0 -10.2 l0 3" stroke={color as string} strokeWidth="2.4" strokeLinecap="round" transform="rotate(225 12 12)" fill="none" />
+    <Path d="M12 12 m0 -10.2 l0 3" stroke={color as string} strokeWidth="2.4" strokeLinecap="round" transform="rotate(270 12 12)" fill="none" />
+    <Path d="M12 12 m0 -10.2 l0 3" stroke={color as string} strokeWidth="2.4" strokeLinecap="round" transform="rotate(315 12 12)" fill="none" />
+    <Circle cx="12" cy="12" r="3" fill={color as string} />
+  </Svg>
+);

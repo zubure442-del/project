@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import {
@@ -14,13 +15,13 @@ import {
   styles as ui,
   type WeekMetric,
 } from '../../ui';
-import { useVuelo } from '../store';
+import { useVuelo } from '../../state';
 
 const METRICS: WeekMetric[] = ['total', 'sleep', 'steps'];
 
 /** «Активность»: шаги по часам и неделя с переключателем показателя. */
 export default function ActivityTab() {
-  const { today, week, state, busy, progress, statusText, sync, forgetDemo } = useVuelo();
+  const { today, week, state, busy, progress, statusText, sync, setDemo } = useVuelo();
   const { width } = useWindowDimensions();
   const [metric, setMetric] = useState<WeekMetric>('total');
   const chartWidth = width - spacing.md * 4;
@@ -35,7 +36,8 @@ export default function ActivityTab() {
       progress={progress}
       demo={state.demo}
       onSync={sync}
-      onForgetDemo={forgetDemo}
+      onForgetDemo={() => setDemo(false)}
+      onOpenSettings={() => router.push('/settings')}
     >
       <Card title="Шаги по часам" note="сегодня">
         <StepsHourChart hours={hours} width={chartWidth} />

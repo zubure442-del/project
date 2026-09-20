@@ -1,6 +1,7 @@
 import { BleManager, State, type Device, type Subscription } from 'react-native-ble-plx';
 import { PACKET_LENGTH } from '../codec';
 import { base64ToBytes, bytesToBase64 } from './base64';
+import { logPacket } from './log';
 import { sleep, type Transport } from './transport';
 
 export const RING_NAME = 'Vuelo Ring';
@@ -24,6 +25,8 @@ export class RingBle implements Transport {
   private manager = new BleManager();
   private device: Device | null = null;
   private serviceUuid: string | null = null;
+  /** Кольцо может принимать команды только «без подтверждения» — выбираем по свойствам характеристики. */
+  private writeWithResponse = true;
   private listeners = new Set<(d: Uint8Array) => void>();
   private subscriptions: Subscription[] = [];
   private writeChain: Promise<unknown> = Promise.resolve();
@@ -73,7 +76,8 @@ export class RingBle implements Transport {
           reject(error);
           return;
         }
-        if (device && (device.name === RING_NAME || device.localName === RING_NAME)) {
+        const name = (device?.name ?? device?.localName ?? '').trim();
+        if (device && name.toLowerCase() === RING_NAME.toLowerCase()) {
           clearTimeout(timer);
           void this.manager.stopDeviceScan();
           resolve(device);
@@ -95,8 +99,13 @@ export class RingBle implements Transport {
 
     // UUID сервиса в PROTOCOL.md не указан: находим сервис, где есть обе характеристики.
     for (const service of await device.services()) {
-      const uuids = (await service.characteristics()).map((c) => normalizeUuid(c.uuid));
-      if (uuids.includes(NOTIFY_UUID) && uuids.includes(WRITE_UUID)) this.serviceUuid = service.uuid;
+      const characteristics = await service.characteristics();
+      const byUuid = new Map(characteristics.map((c) => [normalizeUuid(c.uuid), c]));
+      const write = byUuid.get(WRITE_UUID);
+      if (!byUuid.has(NOTIFY_UUID) || !write) continue;
+      this.serviceUuid = service.uuid;
+      // Если характеристика не умеет запись с подтверждением, пишем без него — иначе кольцо не примет команду.
+      this.writeWithResponse = write.isWritableWithResponse || !write.isWritableWithoutResponse;
     }
     if (!this.serviceUuid) throw new Error('У кольца не нашлись нужные характеристики (33f3/33f4).');
 
@@ -105,6 +114,7 @@ export class RingBle implements Transport {
       this.manager.monitorCharacteristicForDevice(device.id, this.serviceUuid, NOTIFY_UUID, (error, characteristic) => {
         if (error || !characteristic?.value) return;
         const bytes = base64ToBytes(characteristic.value);
+        logPacket('in', bytes);
         this.listeners.forEach((l) => l(bytes));
       }),
       this.manager.onDeviceDisconnected(device.id, () => {
@@ -138,9 +148,13 @@ export class RingBle implements Transport {
         const device = this.device;
         if (!device || !this.serviceUuid) throw new Error('Кольцо не подключено.');
         try {
-          await this.manager.writeCharacteristicWithResponseForDevice(
-            device.id, this.serviceUuid, WRITE_UUID, bytesToBase64(data),
-          );
+          const payload = bytesToBase64(data);
+          if (this.writeWithResponse) {
+            await this.manager.writeCharacteristicWithResponseForDevice(device.id, this.serviceUuid, WRITE_UUID, payload);
+          } else {
+            await this.manager.writeCharacteristicWithoutResponseForDevice(device.id, this.serviceUuid, WRITE_UUID, payload);
+          }
+          logPacket('out', data);
           await sleep(WRITE_GAP_MS);
           return;
         } catch (e) {

@@ -1,14 +1,14 @@
+import { router } from 'expo-router';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import type { ComponentId } from '../../domain';
 import { COMPONENT_LABEL, Card, Ring, Screen, Stat, colors, spacing, styles as ui } from '../../ui';
-import { reportMode, reportTitle } from '../state';
-import { useVuelo } from '../store';
+import { reportMode, reportTitle, useVuelo } from '../../state';
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 
 /** «Сегодня»: итог, три составляющие, отчёт и короткие цифры. Графики — на других вкладках. */
 export default function TodayTab() {
-  const { today, report, state, busy, progress, statusText, sync, forgetDemo } = useVuelo();
+  const { today, report, state, busy, progress, statusText, sync, setDemo } = useVuelo();
   const { width } = useWindowDimensions();
   const sleep = today?.sleep;
 
@@ -20,7 +20,8 @@ export default function TodayTab() {
       progress={progress}
       demo={state.demo}
       onSync={sync}
-      onForgetDemo={forgetDemo}
+      onForgetDemo={() => setDemo(false)}
+      onOpenSettings={() => router.push('/settings')}
     >
       <View style={styles.totalBlock}>
         <Ring value={today?.total ?? null} size={Math.min(226, width - 120)} thickness={11} glow>
@@ -47,7 +48,15 @@ export default function TodayTab() {
         <Card title={reportTitle(reportMode(new Date()))}>
           <Text style={styles.reportText}>{report.text}</Text>
         </Card>
-      ) : null}
+      ) : (
+        <Card>
+          <Text style={styles.reportText}>Синхронизируйте кольцо, чтобы получить отчёт.</Text>
+          <Text style={styles.emptyNote}>
+            Наденьте кольцо, закройте официальное приложение и нажмите «Обновить». Посмотреть приложение без кольца
+            можно, включив демо-данные в настройках.
+          </Text>
+        </Card>
+      )}
 
       <Card title="Коротко">
         <View style={ui.statRow}>
@@ -75,4 +84,5 @@ const styles = StyleSheet.create({
   componentLabel: { color: colors.textMuted, fontSize: 14 },
   hint: { color: colors.textMuted, fontSize: 12.5, textAlign: 'center', marginTop: spacing.sm, paddingHorizontal: spacing.lg },
   reportText: { color: colors.text, fontSize: 17, lineHeight: 25, fontWeight: '300' },
+  emptyNote: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginTop: spacing.sm },
 });

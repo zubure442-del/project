@@ -47,11 +47,9 @@ export interface VueloState {
   lastSyncAt: number | null;
   /** Возраст для расчёта пульсовых зон; null — не спрашивали. */
   age: number | null;
-  /** Данные выдуманы для показа интерфейса. Любая настоящая синхронизация снимает флаг. */
+  /** Данные выдуманы для показа интерфейса. На диск такое состояние не пишется. */
   demo: boolean;
-  /** Пользователь убрал демо-данные — больше не подставлять их сами. */
-  demoDismissed: boolean;
 }
 
-export const EMPTY_STATE: VueloState = { days: [], reports: [], lastSyncAt: null, age: null, demo: false, demoDismissed: false };
+export const EMPTY_STATE: VueloState = { days: [], reports: [], lastSyncAt: null, age: null, demo: false };
 export const HISTORY_DAYS = 7;

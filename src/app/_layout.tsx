@@ -2,7 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors } from '../ui';
-import { VueloProvider } from './store';
+import { VueloProvider } from '../state';
 
 export default function RootLayout() {
   return (

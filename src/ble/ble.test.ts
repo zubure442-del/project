@@ -78,14 +78,14 @@ describe('выгрузка с реальными пакетами 0x40 и под
     expect(r.steps).toEqual([]);
     expect(r.activity).toBeNull();
   });
-  it('запросы идут по одному, каждый день: 0x10, 0x11, 0x16, 0x40, 0x55', async () => {
+  it('запросы идут по одному: архивы по дням, затем активность и заряд', async () => {
     const { transport, sent } = fakeRing(() => []);
     const p = runSync(transport, { days: 1 });
     await vi.runAllTimersAsync();
     await p;
     const codes = sent.map((c) => c[0]);
     expect(codes.slice(0, 6)).toEqual([0x13, 0x10, 0x11, 0x16, 0x40, 0x40]); // 0x40 повторён: в тишине один повтор
-    expect(codes.slice(6)).toEqual([0x55, 0x03]);
+    expect(codes.slice(6)).toEqual([0x55, 0x03, 0x0b]);
   });
   it('пассивный заряд 0x0B и сводка 0x03 попадают в результат', async () => {
     const { transport } = fakeRing((c) =>

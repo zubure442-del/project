@@ -2,19 +2,12 @@ import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
+import { MAX_DAY_SPACING, MIN_DAYS_FOR_TREND, hasData, visibleDays } from '../domain';
 import type { DaySnapshot } from '../storage';
 import { colors, spacing, withAlpha } from './theme';
 
 const WEEK_DAY = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const dayLabel = (date: string) => WEEK_DAY[new Date(`${date}T12:00:00Z`).getUTCDay()];
-
-/** День считается непустым, если есть сон или заметное число шагов. */
-export const MIN_STEPS_FOR_DAY = 500;
-export const hasData = (day: DaySnapshot | null): day is DaySnapshot =>
-  !!day && (day.sleep !== null || (day.steps ?? 0) >= MIN_STEPS_FOR_DAY);
-
-/** Чип динамики показываем, только когда есть чем усреднять. */
-export const MIN_DAYS_FOR_TREND = 3;
 
 interface WeekChartProps {
   days: { date: string; day: DaySnapshot | null }[];
@@ -31,13 +24,16 @@ export function WeekChart({ days, value, selected, onSelect, width }: WeekChartP
   const top = 22;
   const bottom = height - 20;
 
-  const points = days.map(({ date, day }) => ({ date, v: hasData(day) ? value(day) : null }));
+  const shown = visibleDays(days);
+  const points = shown.map(({ date, day }) => ({ date, v: hasData(day) ? value(day) : null }));
   const known = points.map((p) => p.v).filter((v): v is number => v !== null);
   const min = known.length ? Math.min(...known) : 0;
   const max = known.length ? Math.max(...known) : 100;
   const span = Math.max(1, max - min);
-  const step = width / days.length;
-  const x = (i: number) => step * (i + 0.5);
+  // Ширина шага ограничена: два дня стоят по центру, семь занимают всю ширину.
+  const step = Math.min(MAX_DAY_SPACING, width / Math.max(1, shown.length));
+  const left = (width - step * shown.length) / 2;
+  const x = (i: number) => left + step * (i + 0.5);
   const y = (v: number) => bottom - ((v - min) / span) * (bottom - top);
 
   // Линия рвётся на днях без данных: дорисовывать ноль было бы враньём.
@@ -54,8 +50,8 @@ export function WeekChart({ days, value, selected, onSelect, width }: WeekChartP
   const selectedValue = selectedIndex >= 0 ? points[selectedIndex].v : null;
 
   const pick = (e: GestureResponderEvent) => {
-    const index = Math.max(0, Math.min(days.length - 1, Math.floor(e.nativeEvent.locationX / step)));
-    const date = days[index].date;
+    const index = Math.max(0, Math.min(shown.length - 1, Math.floor((e.nativeEvent.locationX - left) / step)));
+    const date = shown[index].date;
     if (date !== selected) {
       void Haptics.selectionAsync();
       onSelect(date);
@@ -68,6 +64,8 @@ export function WeekChart({ days, value, selected, onSelect, width }: WeekChartP
     known.length >= MIN_DAYS_FOR_TREND && selectedValue !== null && average !== null
       ? Math.round(selectedValue - average)
       : null;
+
+  if (!shown.length) return null;
 
   return (
     <View

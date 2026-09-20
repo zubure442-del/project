@@ -25,8 +25,8 @@ export const CARDIO_ZONES = [
   { from: 0.6, points: 0.5 },
 ] as const;
 /** Веса комбинированной нагрузки часа: шаги и кардио. */
-export const HOUR_LOAD_STEPS_WEIGHT = 0.6;
-export const HOUR_LOAD_HR_WEIGHT = 0.4;
+export const HOUR_LOAD_STEPS_WEIGHT = 0.5;
+export const HOUR_LOAD_HR_WEIGHT = 0.5;
 
 export const maxHeartRate = (age: number) => 208 - 0.7 * age;
 

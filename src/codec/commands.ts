@@ -6,6 +6,8 @@ export const CMD = {
   activity: 0x03,
   battery: 0x0b,
   prepareArchive: 0x13,
+  liveHeart: 0x14,
+  liveMode: 0x23,
   steps: 0x10,
   sleep: 0x11,
   heart: 0x16,
@@ -45,6 +47,9 @@ export function profileCommand(input: { age: number; heightCm: number; weightKg:
   const age = input.age & 0x7f;
   return command(CMD.profile, input.male ? age | 0x80 : age, input.heightCm, input.weightKg, 0);
 }
+
+/** 0x23 — режим живого замера: 0 выключить, 1 давление, 2 кислород, 3 глюкоза. */
+export const liveModeCommand = (mode: 0 | 1 | 2 | 3): Uint8Array => command(CMD.liveMode, mode);
 
 /** Запрос архива за день: 0 — сегодня, 1 — вчера и т.д. */
 export function archiveCommand(

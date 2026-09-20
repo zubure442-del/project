@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { migrateSnapshots } from './raw';
 import { EMPTY_PROFILE, EMPTY_STATE, HISTORY_DAYS, type StoredReport, type VueloState } from './types';
 
 const KEY = 'vuelo/state/v1';
@@ -11,7 +12,8 @@ export async function loadState(): Promise<VueloState> {
     const parsed = JSON.parse(raw) as Partial<VueloState>;
     return {
       days: parsed.days ?? [],
-      raw: parsed.raw ?? {},
+      // Старый кэш без рядов переносим, иначе сон пропадёт при первой же синхронизации.
+      raw: parsed.raw ?? migrateSnapshots(parsed.days ?? []),
       reports: parsed.reports ?? [],
       lastSyncAt: parsed.lastSyncAt ?? null,
       syncFailed: parsed.syncFailed ?? false,

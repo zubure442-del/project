@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { command, formatWall, hexToBytes, parsePacket } from '../codec';
 import { buildSleepSessions, nightForDate } from '../domain';
-import { runSync } from './sync';
+import { resetLightThrottle, runSync } from './sync';
 import type { Transport } from './transport';
 
 /**
@@ -57,7 +57,10 @@ describe('РЕАЛЬНЫЕ БАЙТЫ: пакеты сна 0x11', () => {
 });
 
 describe('РЕАЛЬНЫЕ БАЙТЫ: сон приходит в ответ на запрос шагов', () => {
-  beforeEach(() => vi.useFakeTimers());
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetLightThrottle();
+  });
   afterEach(() => vi.useRealTimers());
 
   /** Кольцо: на 0x10 отдаёт сначала сон, потом шаги; на 0x11 — пустое подтверждение. */

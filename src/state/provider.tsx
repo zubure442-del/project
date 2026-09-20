@@ -127,7 +127,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   /** Заряд обновляем независимо от правила свежести: он меняется всё время. */
   const refreshBattery = useCallback(async () => {
     const device = ring.current;
-    if (!device || device.status !== 'ready') return;
+    // Без защиты вызовы накладывались и слали 0x13/0x03/0x0B пачками.
+    if (!device || device.status !== 'ready' || running.current) return;
+    running.current = true;
     try {
       const off = device.onPacket(() => undefined);
       const result = await runSync(device, { fromDay: 0, days: 0, extras: true });
@@ -137,6 +139,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       }
     } catch {
       // Заряд не критичен: молча оставляем прежний.
+    } finally {
+      running.current = false;
     }
   }, [commit]);
 
@@ -187,8 +191,12 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         await device.connect();
         connectedRef.current = true;
         setConnected(true);
-        setStage('configuring');
-        await handshake(device, toRingProfile(base.profile), base.autoMeasureMin);
+        // Рукопожатие — один раз на подключение: раньше оно уходило дважды подряд.
+        if (device.needsHandshake()) {
+          setStage('configuring');
+          await handshake(device, toRingProfile(base.profile), base.autoMeasureMin);
+          device.markHandshakeDone();
+        }
 
         const bump = () => setPackets((n) => n + 1);
         // Первая фаза: сегодня и вчера — их запрашиваем всегда.

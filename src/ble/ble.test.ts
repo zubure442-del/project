@@ -2,28 +2,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fixtures from '../../reference/sample_packets.json';
 import { command, hexToBytes } from '../codec';
 import { base64ToBytes, bytesToBase64 } from './base64';
-import { handshake, runSync } from './sync';
+import { FIRST_PACKET_MS, handshake, resetLightThrottle, runSync } from './sync';
 import type { Transport } from './transport';
 
 /** Подделка кольца: записывает команды и отвечает по сценарию (через 50 мс). */
-function fakeRing(respond: (cmd: Uint8Array, sentBefore: Uint8Array[]) => Uint8Array[]) {
+function fakeRing(respond: (cmd: Uint8Array, sentBefore: Uint8Array[]) => Uint8Array[], delayMs = 50) {
   const listeners = new Set<(d: Uint8Array) => void>();
   const sent: Uint8Array[] = [];
+  const sentAt: number[] = [];
   const transport: Transport = {
     async send(data) {
       const replies = respond(data, [...sent]);
       sent.push(data);
-      replies.forEach((r, i) => setTimeout(() => listeners.forEach((l) => l(r)), 50 + i * 10));
+      sentAt.push(Date.now());
+      replies.forEach((r, i) => setTimeout(() => listeners.forEach((l) => l(r)), delayMs + i * 10));
     },
     onPacket(l) {
       listeners.add(l);
       return () => listeners.delete(l);
     },
   };
-  return { transport, sent };
+  return { transport, sent, sentAt };
 }
 
-beforeEach(() => vi.useFakeTimers());
+beforeEach(() => {
+  vi.useFakeTimers();
+  resetLightThrottle();
+});
 afterEach(() => vi.useRealTimers());
 
 describe('base64', () => {
@@ -102,6 +107,48 @@ describe('выгрузка с реальными пакетами 0x40 и под
     expect(sent.map((c) => c[0])).toEqual([0x13, 0x10, 0x10, 0x16, 0x16, 0x55, 0x55, 0x40, 0x40, 0x03, 0x0b]);
   });
 
+  it('в окне первого пакета второй запрос не уходит', async () => {
+    // Кольцо молчит: повтор допустим, но не раньше FIRST_PACKET_MS.
+    const { transport, sent, sentAt } = fakeRing(() => []);
+    const p = runSync(transport, { days: 1 });
+    await vi.runAllTimersAsync();
+    await p;
+    const stepsAt = sent.map((c, i) => ({ code: c[0], at: sentAt[i] })).filter((x) => x.code === 0x10);
+    expect(stepsAt).toHaveLength(2);
+    expect(stepsAt[1].at - stepsAt[0].at).toBeGreaterThanOrEqual(FIRST_PACKET_MS);
+  });
+
+  it('кольцо ответило поздно — повтора нет', async () => {
+    // ответ приходит через 7 секунд, как в логе после «06 02»
+    const { transport, sent } = fakeRing(
+      (c) => (c[0] === 0x10 ? [hexToBytes('10 9c 3a af 6a 00 00 00 15 2b 00 00 00 00 00 33 07 00 00 00')] : []),
+      7000,
+    );
+    const p = runSync(transport, { days: 1 });
+    await vi.runAllTimersAsync();
+    const r = await p;
+    expect(sent.filter((c) => c[0] === 0x10)).toHaveLength(1);
+    expect(r.steps.length).toBeGreaterThan(0);
+  });
+
+  it('явный конец потока (16 ff) повтора не вызывает', async () => {
+    const { transport, sent } = fakeRing((c) => (c[0] === 0x16 ? [command(0x16, 0xff)] : []));
+    const p = runSync(transport, { days: 1 });
+    await vi.runAllTimersAsync();
+    await p;
+    expect(sent.filter((c) => c[0] === 0x16)).toHaveLength(1);
+  });
+
+  it('живой пульс 0x14 попадает в замеры', async () => {
+    const { transport } = fakeRing((c) =>
+      c[0] === 0x10 ? [hexToBytes('14 26 8c b0 6a 47 00 00 00 00 00 00 00 00 00 00 00 00 00 00')] : [],
+    );
+    const p = runSync(transport, { days: 1 });
+    await vi.runAllTimersAsync();
+    const r = await p;
+    expect(r.heart.map((h) => h.value)).toEqual([71]);
+  });
+
   it('на ответ «занято» запрос не повторяем, а ждём', async () => {
     const { transport, sent } = fakeRing((c) => (c[0] === 0x10 ? [command(0x06, 0x02)] : []));
     const p = runSync(transport, { days: 1 });
@@ -110,15 +157,23 @@ describe('выгрузка с реальными пакетами 0x40 и под
     expect(sent.filter((c) => c[0] === 0x10)).toHaveLength(1);
   });
 
-  it('маркер 23:45 закрывает поток сразу', async () => {
-    const { transport } = fakeRing((c) =>
-      c[0] === 0x10 ? [command(0x10, 0x7c, 0xc1, 0xb1, 0x6a)] : [],
-    );
-    const started = Date.now();
-    const p = runSync(transport, { days: 1 });
+  it('маркер 23:45 закрывает поток быстрее, чем тайм-аут', async () => {
+    const withMarker = fakeRing((c) => (c[0] === 0x10 ? [command(0x10, 0x7c, 0xc1, 0xb1, 0x6a)] : []));
+    const silent = fakeRing(() => []);
+    const t0 = Date.now();
+    const withMarkerRun = runSync(withMarker.transport, { days: 1 });
     await vi.runAllTimersAsync();
-    await p;
-    expect(Date.now() - started).toBeLessThan(60000);
+    await withMarkerRun;
+    const fast = Date.now() - t0;
+
+    const t1 = Date.now();
+    const silentRun = runSync(silent.transport, { days: 1 });
+    await vi.runAllTimersAsync();
+    await silentRun;
+    const slow = Date.now() - t1;
+
+    expect(fast).toBeLessThan(slow);
+    expect(withMarker.sent.filter((c) => c[0] === 0x10)).toHaveLength(1);
   });
 
   it('пока кольцо отвечает, запрос не повторяется и не считается сбоем', async () => {

@@ -180,6 +180,13 @@ export function parsePacket(data: Uint8Array): Packet {
     case 0x06:
       parsed = { kind: 'busy' };
       break;
+    case CMD.liveHeart: {
+      // 0x14: [1..4] метка времени, [5] пульс. Ноль означает «замер не удался».
+      const ts = u32le(data, 1);
+      const value = data[5];
+      if (ts > MIN_VALID_TS && value >= HR_MIN && value <= HR_MAX) parsed = { kind: 'livePulse', ts, value };
+      break;
+    }
     case 0x90:
     case 0x91:
       parsed = { kind: 'archiveEnd' };

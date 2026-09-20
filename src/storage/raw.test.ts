@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
 import { buildSnapshots } from './build';
-import { mergeRaw, splitByDay, toSyncResult } from './raw';
+import { mergeRaw, migrateSnapshots, splitByDay, toSyncResult } from './raw';
 import { CACHE_DAYS } from './types';
 
 const ring = (s: string) => Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
@@ -84,5 +84,35 @@ describe('кэш рядов', () => {
     const later = splitByDay({ ...empty, steps: [{ ts: ring('2026-09-20 09:00:00'), value: 30 }] });
     const merged = mergeRaw(withSleep, later);
     expect(merged['2026-09-20'].sleep.length).toBeGreaterThan(0);
+  });
+});
+
+describe('перенос старого кэша', () => {
+  it('сон из сводок переезжает в ряды', () => {
+    const old = [
+      {
+        date: '2026-09-20',
+        sleepSegments: [
+          { from: -30, to: 0, stage: 'light' },
+          { from: 0, to: 60, stage: 'deep' },
+        ],
+        heart: [{ m: 120, v: 62 }],
+        spo2: [{ m: 200, v: 98 }],
+        summaryPoints: [{ m: 300, systolic: 118, diastolic: 76, glucose: 5.2, hrv: 70 }],
+        stepsByHour: new Array(24).fill(0).map((_, h) => (h === 19 ? 1200 : 0)),
+      },
+    ];
+    const raw = migrateSnapshots(old);
+    expect(raw['2026-09-20'].sleep).toHaveLength(90);
+    expect(raw['2026-09-20'].sleep[0][0]).toBe(-30);
+    expect(raw['2026-09-20'].heart).toEqual([[120, 62]]);
+    expect(raw['2026-09-20'].spo2).toEqual([[200, 98]]);
+    expect(raw['2026-09-20'].summary[0][1]).toBe(118);
+    expect(raw['2026-09-20'].steps).toEqual([[19 * 60, 1200]]);
+  });
+
+  it('пустые дни не переносятся', () => {
+    expect(migrateSnapshots([{ date: '2026-09-20', heart: [], sleepSegments: [] }])).toEqual({});
+    expect(migrateSnapshots([null, undefined, 42])).toEqual({});
   });
 });

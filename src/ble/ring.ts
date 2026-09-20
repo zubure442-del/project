@@ -2,6 +2,7 @@ import { BleError, BleErrorCode, BleManager, State, type Device, type Subscripti
 import { PACKET_LENGTH } from '../codec';
 import { base64ToBytes, bytesToBase64 } from './base64';
 import { logPacket } from './log';
+import { resetLightThrottle } from './sync';
 import { sleep, type Transport } from './transport';
 
 export const RING_NAME = 'Vuelo Ring';
@@ -46,6 +47,8 @@ export class RingBle implements Transport {
   private writeChain: Promise<unknown> = Promise.resolve();
   /** Связь держим: при обрыве переподключаемся сами, пока не попросили отключиться. */
   private keepConnected = false;
+  /** Рукопожатие делается один раз на подключение. */
+  private handshakeDone = false;
   private known: KnownRing | null;
 
   status: RingStatus = 'idle';
@@ -162,6 +165,8 @@ export class RingBle implements Transport {
     this.clearSubscriptions();
     this.device = device;
     this.keepConnected = true;
+    this.handshakeDone = false;
+    resetLightThrottle();
     this.known = { id: device.id, serviceUuid: this.serviceUuid };
     this.onKnown(this.known);
 
@@ -259,6 +264,15 @@ export class RingBle implements Transport {
     this.serviceUuid = null;
     if (id) await this.manager.cancelDeviceConnection(id).catch(() => undefined);
     this.setStatus('idle');
+  }
+
+  /** true, если рукопожатие для текущего подключения ещё не делали. */
+  needsHandshake(): boolean {
+    return !this.handshakeDone;
+  }
+
+  markHandshakeDone(): void {
+    this.handshakeDone = true;
   }
 
   onPacket(listener: (d: Uint8Array) => void): () => void {

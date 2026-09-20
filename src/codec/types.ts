@@ -31,6 +31,8 @@ export type Packet =
   | { kind: 'summary'; isDayEnd: boolean; records: SummaryRecord[] }
   /** 0x06 — кольцо занято: надо ждать, а не повторять запрос. */
   | { kind: 'busy' }
+  /** 0x14 — живой замер пульса с меткой времени. */
+  | { kind: 'livePulse'; ts: number; value: number }
   | { kind: 'activity'; steps: number; distanceM: number; calories: number }
   | { kind: 'battery'; percent: number }
   | { kind: 'functions'; mask: Uint8Array }

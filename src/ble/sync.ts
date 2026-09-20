@@ -14,14 +14,33 @@ import {
 } from '../codec';
 import { sleep, type Transport } from './transport';
 
-/** Пауза после последнего пакета = конец выгрузки. */
-export const IDLE_MS = 2000;
-/** Сколько ждём ПЕРВЫЙ пакет: кольцу нужно время поднять данные из памяти. */
-export const FIRST_PACKET_MS = 2500;
-/** Тишина по запросу: один раз повторяем, потом считаем запрос неудачным и идём дальше. */
+/**
+ * Запасная пауза: конец потока определяем по маркеру 23:45 и счётчику aa,
+ * а по тишине — только если признака не было. Внутри потока бывают паузы до 2.7 с.
+ */
+export const IDLE_MS = 5000;
+/** Сколько ждём ПЕРВЫЙ пакет: кольцо поднимает данные из памяти до 8 секунд. */
+export const FIRST_PACKET_MS = 12000;
+/** Тишина после повтора: дальше считаем запрос неудачным и идём к следующему. */
 export const STALL_MS = 10000;
 /** Сколько ждём после последней отметки aa, чтобы забрать хвост данных. */
 const TAIL_MS = 500;
+/** Лёгкие запросы (0x13, 0x03, 0x0B) не чаще одного раза в это время. */
+export const LIGHT_REQUEST_MS = 5000;
+const lightSentAt = new Map<number, number>();
+
+/** Сбрасывает счётчик лёгких запросов. Нужен в тестах и после переподключения. */
+export const resetLightThrottle = () => lightSentAt.clear();
+
+/** Отправляет лёгкую команду, если её недавно уже не отправляли. */
+async function sendLight(t: Transport, packet: Uint8Array): Promise<boolean> {
+  const code = packet[0];
+  const last = lightSentAt.get(code) ?? 0;
+  if (Date.now() - last < LIGHT_REQUEST_MS) return false;
+  lightSentAt.set(code, Date.now());
+  await t.send(packet);
+  return true;
+}
 const GAP_BETWEEN_REQUESTS_MS = 500;
 const DAY_END_GRACE_MS = 500;
 const ACK_TIMEOUT_MS = 5000;
@@ -208,6 +227,10 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
       case 'activity':
         result.activity = { steps: p.steps, distanceM: p.distanceM, calories: p.calories };
         break;
+      case 'livePulse':
+        result.heart.push({ ts: p.ts, value: p.value, raw: [p.value] });
+        isData = true;
+        break;
       case 'busy':
         // Кольцо занято: ждём, повторять запрос бессмысленно.
         busy = true;
@@ -265,8 +288,8 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
         }
       }
       got = seen;
-      options.onData?.(result);
-      if (got > 0 || busy) break;
+      // Явный конец потока (16 ff) — это ответ, а не молчание: повторять незачем.
+      if (got > 0 || busy || finished) break;
     }
     await sleep(GAP_BETWEEN_REQUESTS_MS);
     doneRequests++;
@@ -276,7 +299,7 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
 
   try {
     options.onStage?.('loading');
-    await t.send(prepareArchiveCommand());
+    await sendLight(t, prepareArchiveCommand());
     await sleep(500);
     for (let i = 0; i < days; i++) {
       const day = fromDay + i;
@@ -288,11 +311,11 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     }
     if (extras) {
       // 0x03 — активность за сегодня, 0x0B — заряд. Оба разовые, не по дням (PROTOCOL.md, раздел 3).
-      await t.send(activityCommand());
+      await sendLight(t, activityCommand());
       await sleep(1000);
       doneRequests++;
       report();
-      await t.send(batteryCommand());
+      await sendLight(t, batteryCommand());
       await sleep(1000);
       doneRequests++;
       report();

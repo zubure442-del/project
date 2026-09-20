@@ -133,3 +133,43 @@ export function toSyncResult(raw: RawByDay, battery: number | null = null): Sync
     packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 },
   };
 }
+
+/**
+ * Перенос старого кэша в ряды по дням.
+ * До этой версии хранились только сводки дня (DaySnapshot), а рядов не было.
+ * Без переноса первая же синхронизация пересобирала дни из пустых рядов и стирала сон,
+ * который кольцо второй раз не отдаёт.
+ *
+ * Поминутные шаги из сводки восстановить нельзя, там остался только почасовой итог:
+ * кладём каждый час одной записью на его начало.
+ */
+export function migrateSnapshots(days: unknown[]): RawByDay {
+  const out: RawByDay = {};
+  for (const item of days as Record<string, any>[]) {
+    if (!item || typeof item.date !== 'string') continue;
+    const day = emptyDay(item.date);
+    for (const seg of (item.sleepSegments ?? []) as { from: number; to: number; stage: string }[]) {
+      const value = seg.stage === 'deep' ? 99 : seg.stage === 'light' ? 40 : 0;
+      for (let m = Math.round(seg.from); m < Math.round(seg.to); m++) day.sleep.push([m, value]);
+    }
+    for (const p of (item.heart ?? []) as { m: number; v: number }[]) day.heart.push([p.m, p.v]);
+    for (const p of (item.spo2 ?? []) as { m: number; v: number }[]) day.spo2.push([p.m, p.v]);
+    for (const p of (item.summaryPoints ?? []) as Record<string, number | null>[]) {
+      day.summary.push([
+        p.m as number,
+        p.systolic ?? NONE,
+        p.diastolic ?? NONE,
+        NONE,
+        p.glucose === null || p.glucose === undefined ? NONE : Math.round(p.glucose * 10),
+        p.hrv ?? NONE,
+      ]);
+    }
+    (item.stepsByHour ?? []).forEach((value: number, hour: number) => {
+      if (value > 0) day.steps.push([hour * 60, value]);
+    });
+    if (day.sleep.length || day.heart.length || day.summary.length || day.steps.length || day.spo2.length) {
+      out[item.date] = day;
+    }
+  }
+  return out;
+}

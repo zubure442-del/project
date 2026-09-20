@@ -1,74 +1,56 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { FORMULAS, formulaText } from '../../domain';
 import { findDay, todayKey, useVuelo } from '../../state';
-import { Card, InfoButton, Screen, Stat, StepsHourChart, WeekStrip, colors, spacing, styles as ui } from '../../ui';
+import { Card, DayActivityChart, InfoButton, Screen, Skeleton, Stat, WeekChart, colors, spacing, styles as ui } from '../../ui';
 
 export default function ActivityTab() {
-  const { week, state, busy, progress, statusText, sync } = useVuelo();
+  const { week, state, phase, progress, packets, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const [picked, setPicked] = useState<string | null>(null);
-  const [metric, setMetric] = useState('score');
-  const date = picked ?? todayKey();
-  const day = findDay(state.days, date);
+  const [picked, setPicked] = useState(todayKey());
+  const day = findDay(state.days, picked);
   const hours = day?.stepsByHour ?? [];
   const best = hours.length ? hours.indexOf(Math.max(...hours)) : -1;
+  const chartWidth = width - spacing.md * 4;
 
   return (
     <Screen
       title="Активность"
+      date={picked}
       statusText={statusText}
-      busy={busy}
+      loading={phase === 'background'}
       progress={progress}
+      packets={packets}
       battery={state.battery}
       onSync={sync}
       onOpenRing={() => router.push('/ring')}
     >
-      <WeekStrip
-        days={week}
-        metrics={[
-          { id: 'score', label: 'Оценка', value: (d) => d.scores.activity },
-          { id: 'steps', label: 'Шаги', value: (d) => d.steps },
-        ]}
-        metricId={metric}
-        onMetric={setMetric}
-        selected={date}
-        onSelect={setPicked}
-      />
+      <View style={styles.head}>
+        <Text style={styles.score}>{day?.scores.activity ?? '—'}</Text>
+      </View>
 
-      <Card>
-        <View style={ui.statRow}>
-          <Stat label="Шаги" value={day?.steps != null ? String(day.steps) : '—'} />
-          <Stat label="Активный час" value={best >= 0 && hours[best] > 0 ? `${best}:00` : '—'} />
-        </View>
+      <Card title="Неделя" right={<InfoButton title={FORMULAS.activity.title} text={formulaText('activity')} />}>
+        <WeekChart days={week} value={(d) => d.scores.activity} selected={picked} onSelect={setPicked} width={chartWidth} />
       </Card>
 
-      {picked ? (
-        <Card title="Шаги по часам">
-          <StepsHourChart hours={hours} width={width - spacing.md * 4} />
-        </Card>
-      ) : (
-        <Card>
-          <Text style={styles.hint}>Выберите день наверху, чтобы увидеть шаги по часам.</Text>
-        </Card>
-      )}
-
-      <Card
-        title="Оценка активности"
-        right={
-          <InfoButton
-            title="Оценка активности"
-            text="Основа — шаги: десять тысяч дают максимум. Время с высоким пульсом добавляет сверху. Оценка растёт в течение дня, поэтому утром она всегда низкая."
-          />
-        }
-      >
-        <Text style={styles.score}>{day?.scores.activity ?? '—'}</Text>
+      <Card title="День">
+        {day ? (
+          <DayActivityChart heart={day.heart} hours={hours} width={chartWidth} />
+        ) : (
+          <Skeleton height={130} />
+        )}
+        <View style={[ui.statRow, styles.stats]}>
+          <Stat label="Шаги" value={day?.steps != null ? String(day.steps) : '—'} />
+          <Stat label="Самый активный час" value={best >= 0 && hours[best] > 0 ? `${best}:00` : '—'} />
+        </View>
       </Card>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  score: { color: colors.text, fontSize: 40, fontWeight: '200' },
-  hint: { color: colors.textMuted, fontSize: 15, lineHeight: 22 },
+  head: { alignItems: 'center', marginTop: spacing.md },
+  score: { color: colors.text, fontSize: 72, fontWeight: '200' },
+  stats: { marginTop: spacing.md },
 });

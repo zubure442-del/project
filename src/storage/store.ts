@@ -16,7 +16,7 @@ export async function loadState(): Promise<VueloState> {
       battery: parsed.battery ?? null,
       ring: parsed.ring ?? null,
       age: parsed.age ?? null,
-      onboarded: parsed.onboarded ?? false,
+      started: parsed.started ?? false,
     };
   } catch {
     return EMPTY_STATE; // повреждённое хранилище не должно ломать запуск

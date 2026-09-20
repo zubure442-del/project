@@ -1,3 +1,4 @@
+export * from './formulas';
 export * from './charts';
 export * from './heart';
 export * from './report';

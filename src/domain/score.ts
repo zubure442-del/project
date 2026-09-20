@@ -7,8 +7,17 @@ import { sleepMinutes } from './sleep';
 export const WEIGHTS = { sleep: 15, activity: 70, state: 15 } as const;
 export type ComponentId = keyof typeof WEIGHTS;
 
-/** Один замер в зоне даёт баллы за 30 минут (период автозамера в main.py); короче интервал — пропорционально меньше. */
-const CARDIO_REFERENCE_MIN = 30;
+/** Один замер в зоне даёт баллы за 30 минут (период автозамера); короче интервал — пропорционально меньше. */
+export const CARDIO_REFERENCE_MIN = 30;
+export const STEPS_GOAL = 10000;
+export const STEPS_WEIGHT = 0.7;
+export const CARDIO_WEIGHT = 4;
+export const SLEEP_TARGET_MIN = 420;
+export const SLEEP_VOLUME_WEIGHT = 0.7;
+export const DEEP_RATIO_BEST = { from: 0.15, to: 0.25 } as const;
+export const HRV_TARGET = 65;
+export const RESTING_HR_TARGET = 60;
+export const RESTING_HR_PENALTY = 2.5;
 
 export interface ScoreInput {
   /** Ночь дня; null — сна нет в данных. */
@@ -51,10 +60,13 @@ const avg = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
 export function sleepScore(night: SleepSession | null): number | null {
   if (!night) return null;
   const total = sleepMinutes(night);
-  const volume = Math.min(100, (total / 420) * 100);
+  const volume = Math.min(100, (total / SLEEP_TARGET_MIN) * 100);
   const deepRatio = night.deepMin / total;
-  const quality = deepRatio >= 0.15 && deepRatio <= 0.25 ? 100 : Math.max(0, 100 - Math.abs(0.2 - deepRatio) * 400);
-  return volume * 0.7 + quality * 0.3;
+  const quality =
+    deepRatio >= DEEP_RATIO_BEST.from && deepRatio <= DEEP_RATIO_BEST.to
+      ? 100
+      : Math.max(0, 100 - Math.abs((DEEP_RATIO_BEST.from + DEEP_RATIO_BEST.to) / 2 - deepRatio) * 400);
+  return volume * SLEEP_VOLUME_WEIGHT + quality * (1 - SLEEP_VOLUME_WEIGHT);
 }
 
 export function cardioPoints(heart: Sample[], age: number | null): number | null {
@@ -75,9 +87,9 @@ export function cardioPoints(heart: Sample[], age: number | null): number | null
 /** Активность: шаги ведут итог (растёт в течение дня); интенсивный пульс — бонус. Нет шагов — нет оценки. */
 export function activityScore(steps: number | null, heart: Sample[], age: number | null): number | null {
   if (steps === null) return null;
-  const stepScore = Math.min(100, (steps / 10000) * 100);
+  const stepScore = Math.min(100, (steps / STEPS_GOAL) * 100);
   const bonus = cardioPoints(heart, age) ?? 0;
-  return Math.min(100, stepScore * 0.7 + bonus * 4);
+  return Math.min(100, stepScore * STEPS_WEIGHT + bonus * CARDIO_WEIGHT);
 }
 
 const medianOfLowest = (values: number[], share: number): number => {
@@ -110,8 +122,8 @@ export function restingHeartRate(heart: Sample[], night: SleepSession | null): R
  */
 export function stateScore(hrv: number[], restingHr: RestingHr | null): number | null {
   if (!hrv.length || restingHr?.source !== 'night') return null;
-  const hrvScore = Math.min(100, (avg(hrv) / 65) * 100);
-  const pulseScore = clamp(100 - Math.max(0, restingHr.value - 60) * 2.5);
+  const hrvScore = Math.min(100, (avg(hrv) / HRV_TARGET) * 100);
+  const pulseScore = clamp(100 - Math.max(0, restingHr.value - RESTING_HR_TARGET) * RESTING_HR_PENALTY);
   return (hrvScore + pulseScore) / 2;
 }
 

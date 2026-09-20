@@ -76,6 +76,13 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
       stress: toPoints(
         summary.filter((r) => r.stress !== null).map((r) => ({ ts: r.ts, value: r.stress as number })),
       ),
+      summaryPoints: summary.map((r) => ({
+        m: minuteOfDay(r.ts),
+        systolic: r.systolic,
+        diastolic: r.diastolic,
+        glucose: r.glucose,
+        hrv: r.hrv,
+      })),
       stepsByHour: stepsByHour(stepSamples ?? []),
       sleepSegments: night
         ? hypnogramSegments(sync.sleep.filter((s) => s.ts >= night.start && s.ts <= night.end)).map((seg) => ({

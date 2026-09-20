@@ -62,10 +62,46 @@ export interface SyncResult {
   packetCounts: Record<ArchiveKind, number>;
 }
 
+/** Этапы, которые показывает экран приветствия. */
+export type SyncStage = 'connecting' | 'configuring' | 'loading';
+
 export interface SyncOptions {
-  /** Сколько дней выгружать: 0 — только сегодня, 7 — сегодня и 6 предыдущих (как в main.py). */
+  /** С какого дня начинать: 0 — сегодня. */
+  fromDay?: number;
+  /** Сколько дней выгружать подряд. */
   days?: number;
-  onProgress?: (message: string) => void;
+  /** Запрашивать разовые 0x03 и 0x0B. На промежуточной фазе не нужно. */
+  extras?: boolean;
+  onStage?: (stage: SyncStage) => void;
+  /** Доля выполненных запросов, 0..1. Растёт по мере ответов кольца. */
+  onProgress?: (fraction: number) => void;
+  /** Каждый пришедший пакет с данными — для анимации. */
+  onPacket?: () => void;
+}
+
+/** Запросов на один день: шаги, сон, пульс, сводка. */
+const REQUESTS_PER_DAY = 4;
+
+/** Объединяет выгрузки двух фаз в одну. */
+export function mergeSyncResults(a: SyncResult, b: SyncResult): SyncResult {
+  const byTs = <T extends { ts: number }>(x: T[], y: T[]) =>
+    [...new Map([...x, ...y].map((s) => [s.ts, s])).values()].sort((p, q) => p.ts - q.ts);
+  return {
+    steps: byTs(a.steps, b.steps),
+    sleep: byTs(a.sleep, b.sleep),
+    heart: byTs(a.heart, b.heart),
+    spo2: byTs(a.spo2, b.spo2),
+    summary: byTs(a.summary, b.summary),
+    activity: b.activity ?? a.activity,
+    battery: b.battery ?? a.battery,
+    packetCounts: {
+      steps: a.packetCounts.steps + b.packetCounts.steps,
+      sleep: a.packetCounts.sleep + b.packetCounts.sleep,
+      heart: a.packetCounts.heart + b.packetCounts.heart,
+      spo2: a.packetCounts.spo2 + b.packetCounts.spo2,
+      summary: a.packetCounts.summary + b.packetCounts.summary,
+    },
+  };
 }
 
 /**
@@ -79,7 +115,11 @@ export interface SyncOptions {
  */
 export async function runSync(t: Transport, options: SyncOptions = {}): Promise<SyncResult> {
   const days = options.days ?? 7;
-  const say = options.onProgress ?? (() => {});
+  const fromDay = options.fromDay ?? 0;
+  const extras = options.extras ?? true;
+  const totalRequests = days * REQUESTS_PER_DAY + (extras ? 2 : 0);
+  let doneRequests = 0;
+  const report = () => options.onProgress?.(Math.min(1, doneRequests / totalRequests));
   const result: SyncResult = {
     steps: [], sleep: [], heart: [], spo2: [], summary: [], activity: null, battery: null,
     packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 },
@@ -134,6 +174,7 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     if (isData) {
       seen++;
       lastRx = Date.now();
+      options.onPacket?.();
     }
   });
 
@@ -161,14 +202,17 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
       if (got > 0) break;
     }
     await sleep(GAP_BETWEEN_REQUESTS_MS);
+    doneRequests++;
+    report();
     return got;
   };
 
   try {
+    options.onStage?.('loading');
     await t.send(prepareArchiveCommand());
     await sleep(500);
-    for (let day = 0; day < days; day++) {
-      say(`День −${day}`);
+    for (let i = 0; i < days; i++) {
+      const day = fromDay + i;
       for (const kind of ['steps', 'sleep', 'heart'] as const) {
         await request(kind, day, FIRST_PACKET_MS);
       }
@@ -176,11 +220,17 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
       // Разбор пакета остался в кодеке на случай, если понадобится вернуть.
       await request('summary', day, FIRST_PACKET_MS);
     }
-    // 0x03 — активность за сегодня, 0x0B — заряд. Оба разовые, не по дням (PROTOCOL.md, раздел 3).
-    await t.send(activityCommand());
-    await sleep(1000);
-    await t.send(batteryCommand());
-    await sleep(1000);
+    if (extras) {
+      // 0x03 — активность за сегодня, 0x0B — заряд. Оба разовые, не по дням (PROTOCOL.md, раздел 3).
+      await t.send(activityCommand());
+      await sleep(1000);
+      doneRequests++;
+      report();
+      await t.send(batteryCommand());
+      await sleep(1000);
+      doneRequests++;
+      report();
+    }
   } finally {
     off();
   }

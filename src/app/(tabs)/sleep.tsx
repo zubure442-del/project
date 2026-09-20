@@ -1,78 +1,103 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { deepShareLabel } from '../../domain';
+import { FORMULAS, deepShareLabel, formulaText } from '../../domain';
 import { findDay, todayKey, useVuelo } from '../../state';
-import { Card, InfoButton, Screen, SleepBar, Stat, WeekStrip, colors, spacing, styles as ui } from '../../ui';
+import { Card, Hypnogram, InfoButton, Screen, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
 
-const hhmm = (minutes: number) => `${Math.floor(minutes / 60)}ч ${minutes % 60}м`;
+const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${minutes % 60} м`;
 
 export default function SleepTab() {
-  const { week, state, busy, progress, statusText, sync } = useVuelo();
+  const { week, state, phase, progress, packets, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useState(todayKey());
-  const [metric, setMetric] = useState('score');
   const day = findDay(state.days, picked);
   const sleep = day?.sleep;
+  const chartWidth = width - spacing.md * 4;
   const deepShare = sleep && sleep.totalMin > 0 ? Math.round((sleep.deepMin / sleep.totalMin) * 100) : null;
+  const lightShare = deepShare === null ? null : 100 - deepShare;
 
   return (
     <Screen
       title="Сон"
+      date={picked}
       statusText={statusText}
-      busy={busy}
+      loading={phase === 'background'}
       progress={progress}
+      packets={packets}
       battery={state.battery}
       onSync={sync}
       onOpenRing={() => router.push('/ring')}
     >
-      <WeekStrip
-        days={week}
-        metrics={[
-          { id: 'score', label: 'Оценка', value: (d) => d.scores.sleep },
-          {
-            id: 'duration',
-            label: 'Длительность',
-            value: (d) => (d.sleep ? Math.round((d.sleep.totalMin / 60) * 10) / 10 : null),
-            format: (v) => `${v}ч`,
-          },
-        ]}
-        metricId={metric}
-        onMetric={setMetric}
-        selected={picked}
-        onSelect={setPicked}
-      />
+      <View style={styles.head}>
+        <Text style={styles.score}>{day?.scores.sleep ?? '—'}</Text>
+        {deepShare !== null ? <Text style={styles.label}>{deepShareLabel(deepShare)}</Text> : null}
+      </View>
+
+      <Card title="Неделя" right={<InfoButton title={FORMULAS.sleep.title} text={formulaText('sleep')} />}>
+        <WeekChart days={week} value={(d) => d.scores.sleep} selected={picked} onSelect={setPicked} width={chartWidth} />
+      </Card>
 
       <Card title="Ночь">
-        <SleepBar segments={day?.sleepSegments ?? []} width={width - spacing.md * 4} />
+        <Hypnogram segments={day?.sleepSegments ?? []} width={chartWidth} />
       </Card>
 
       <Card>
-        <View style={ui.statRow}>
-          <Stat label="Всего" value={sleep ? hhmm(sleep.totalMin) : '—'} />
-          <Stat
-            label={deepShare !== null ? `Глубокий · ${deepShareLabel(deepShare)}` : 'Глубокий'}
-            value={deepShare !== null ? `${deepShare}` : '—'}
-            unit={deepShare !== null ? '%' : undefined}
-          />
-        </View>
-      </Card>
-
-      <Card
-        title="Оценка сна"
-        right={
-          <InfoButton
-            title="Оценка сна"
-            text="Складывается из длительности и доли глубокой фазы. Семь часов сна с глубокой фазой около 20 процентов дают максимум. Если кольцо не записало ночь, оценки нет и в итог она не идёт."
-          />
-        }
-      >
-        <Text style={styles.score}>{day?.scores.sleep ?? '—'}</Text>
+        {sleep ? (
+          <>
+            <Row label="Всего сна" value={hhmm(sleep.totalMin)} />
+            <Row
+              label="Глубокий"
+              value={`${hhmm(sleep.deepMin)} · ${deepShare} %`}
+              tail={deepShare === null ? undefined : deepShareLabel(deepShare)}
+              dot={colors.accent}
+              info={<InfoButton title={FORMULAS.deepShare.title} text={formulaText('deepShare')} />}
+            />
+            <Row label="Лёгкий" value={`${hhmm(sleep.lightMin)} · ${lightShare} %`} dot={withAlpha(colors.accent, 0.4)} />
+            <Row label="Пульс во сне" value={day?.restingHrSource === 'night' && day.restingHr ? String(day.restingHr) : '—'} />
+          </>
+        ) : (
+          <Skeleton height={96} />
+        )}
       </Card>
     </Screen>
   );
 }
 
+function Row({
+  label,
+  value,
+  tail,
+  dot,
+  info,
+}: {
+  label: string;
+  value: string;
+  tail?: string;
+  dot?: string;
+  info?: React.ReactNode;
+}) {
+  return (
+    <View style={styles.row}>
+      {dot ? <View style={[styles.dot, { backgroundColor: dot }]} /> : <View style={styles.dotSpace} />}
+      <Text style={styles.rowLabel}>{label}</Text>
+      <Text style={styles.rowValue}>
+        {value}
+        {tail ? <Text style={styles.tail}> · {tail}</Text> : null}
+      </Text>
+      {info}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  score: { color: colors.text, fontSize: 40, fontWeight: '200' },
+  head: { alignItems: 'center', marginTop: spacing.md, gap: 2 },
+  score: { color: colors.text, fontSize: 72, fontWeight: '200' },
+  label: { color: colors.textMuted, fontSize: 16 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  dotSpace: { width: 8 },
+  rowLabel: { color: colors.textMuted, fontSize: 15, flex: 1 },
+  rowValue: { color: colors.text, fontSize: 15 },
+  tail: { color: colors.textMuted },
 });

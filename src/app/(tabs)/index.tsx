@@ -1,50 +1,44 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import type { ComponentId } from '../../domain';
-import { findDay, reportMode, reportTitle, todayKey, useVuelo } from '../../state';
-import { COMPONENT_LABEL, Card, Ring, Screen, Stat, WeekStrip, colors, spacing, styles as ui } from '../../ui';
+import { FORMULAS, STEPS_GOAL, formulaText, type ComponentId } from '../../domain';
+import { findDay, todayKey, useVuelo } from '../../state';
+import { COMPONENT_LABEL, Card, InfoButton, Ring, Screen, Skeleton, WeekChart, colors, spacing } from '../../ui';
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
+/** Заголовок «Совет · Яндекс ИИ» включим, когда появится сервер-посредник. */
+export const ADVICE_YANDEX_LABEL = __DEV__;
 
 export default function TodayTab() {
-  const { week, report, state, busy, progress, statusText, sync } = useVuelo();
+  const { week, report, state, phase, progress, packets, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useState(todayKey());
   const day = findDay(state.days, picked);
-  const isToday = picked === todayKey();
-  const sleep = day?.sleep;
+  const chartWidth = width - spacing.md * 4;
+  const steps = day?.steps ?? null;
 
   return (
     <Screen
-      title={isToday ? 'Сегодня' : dayTitle(picked)}
+      title="Итог"
+      date={picked}
       statusText={statusText}
-      busy={busy}
+      loading={phase === 'background'}
       progress={progress}
+      packets={packets}
       battery={state.battery}
       onSync={sync}
       onOpenRing={() => router.push('/ring')}
     >
-      <WeekStrip
-        days={week}
-        metrics={[{ id: 'total', label: 'Итог', value: (d) => d.total }]}
-        metricId="total"
-        onMetric={() => {}}
-        selected={picked}
-        onSelect={setPicked}
-      />
-
       <View style={styles.total}>
-        <Ring value={day?.total ?? null} size={Math.min(220, width - 130)} thickness={11} glow>
+        <Ring value={day?.total ?? null} size={Math.min(214, width - 140)} thickness={11} glow>
           <Text style={styles.totalValue}>{day?.total ?? '—'}</Text>
-          <Text style={styles.totalCaption}>Итог</Text>
         </Ring>
       </View>
 
       <View style={styles.components}>
         {COMPONENTS.map((id) => (
           <View key={id} style={styles.component}>
-            <Ring value={day?.scores[id] ?? null} size={80} thickness={6}>
+            <Ring value={day?.scores[id] ?? null} size={78} thickness={6}>
               <Text style={styles.componentValue}>{day?.scores[id] ?? '—'}</Text>
             </Ring>
             <Text style={styles.componentLabel}>{COMPONENT_LABEL[id]}</Text>
@@ -52,48 +46,39 @@ export default function TodayTab() {
         ))}
       </View>
 
-      {isToday && report ? (
-        <Card title={reportTitle(reportMode(new Date()))}>
-          <Text style={styles.report}>{report.text}</Text>
-        </Card>
-      ) : null}
+      <Card title="Шаги">
+        {steps === null ? (
+          <Skeleton height={44} />
+        ) : (
+          <>
+            <Text style={styles.steps}>{steps}</Text>
+            <View style={styles.track}>
+              <View style={[styles.fill, { width: `${Math.min(100, (steps / STEPS_GOAL) * 100)}%` }]} />
+            </View>
+          </>
+        )}
+      </Card>
 
-      {!day && isToday ? (
-        <Card>
-          <Text style={styles.report}>Потяните вниз, чтобы получить данные с кольца.</Text>
-        </Card>
-      ) : null}
+      <Card title={ADVICE_YANDEX_LABEL ? 'Совет · Яндекс ИИ' : 'Совет'}>
+        {report ? <Text style={styles.report}>{report.text}</Text> : <Skeleton height={44} />}
+      </Card>
 
-      {day ? (
-        <Card>
-          <View style={ui.statRow}>
-            <Stat label="Сон" value={sleep ? `${Math.floor(sleep.totalMin / 60)}ч ${sleep.totalMin % 60}м` : '—'} />
-            <Stat label="Шаги" value={day.steps != null ? String(day.steps) : '—'} />
-            <Stat
-              label={day.restingHrSource === 'night' ? 'Пульс во сне' : 'Мин. пульс'}
-              value={day.restingHr != null ? String(day.restingHr) : '—'}
-              unit="уд/мин"
-            />
-          </View>
-        </Card>
-      ) : null}
+      <Card title="Неделя" right={<InfoButton title={FORMULAS.total.title} text={formulaText('total')} />}>
+        <WeekChart days={week} value={(d) => d.total} selected={picked} onSelect={setPicked} width={chartWidth} />
+      </Card>
     </Screen>
   );
 }
 
-const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-function dayTitle(date: string): string {
-  const [, month, day] = date.split('-');
-  return `${Number(day)} ${MONTHS[Number(month) - 1]}`;
-}
-
 const styles = StyleSheet.create({
-  total: { alignItems: 'center', marginTop: spacing.lg, marginBottom: spacing.lg },
+  total: { alignItems: 'center', marginTop: spacing.md, marginBottom: spacing.lg },
   totalValue: { color: colors.text, fontSize: 76, fontWeight: '200', letterSpacing: -2 },
-  totalCaption: { color: colors.textMuted, fontSize: 14 },
   components: { flexDirection: 'row', justifyContent: 'space-around' },
   component: { alignItems: 'center', gap: spacing.xs },
   componentValue: { color: colors.text, fontSize: 24, fontWeight: '300' },
   componentLabel: { color: colors.textMuted, fontSize: 14 },
+  steps: { color: colors.text, fontSize: 38, fontWeight: '200' },
+  track: { height: 4, borderRadius: 2, backgroundColor: colors.track, marginTop: spacing.sm },
+  fill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },
   report: { color: colors.text, fontSize: 16, lineHeight: 24 },
 });

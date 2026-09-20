@@ -24,6 +24,14 @@ export interface DaySnapshot {
   heart: DayPoint[];
   /** Напряжение (индекс стресса) по времени. */
   stress: DayPoint[];
+  /** Точки сводки 0x55 по времени: для графиков давления, глюкозы и вариабельности. */
+  summaryPoints: {
+    m: number;
+    systolic: number | null;
+    diastolic: number | null;
+    glucose: number | null;
+    hrv: number | null;
+  }[];
   /** Шаги по часам суток: ровно 24 числа. */
   stepsByHour: number[];
   /** Отрезки гипнограммы. Минуты от полуночи этого дня; вечер накануне — отрицательные. */
@@ -55,10 +63,10 @@ export interface VueloState {
   ring: KnownRing | null;
   /** Возраст для расчёта пульсовых зон; null — не спрашивали. */
   age: number | null;
-  /** Онбординг пройден. */
-  onboarded: boolean;
+  /** Пользователь нажал «Начать» хотя бы раз: системный запрос Bluetooth уже показывали. */
+  started: boolean;
 }
 
-export const EMPTY_STATE: VueloState = { days: [], reports: [], lastSyncAt: null, battery: null, ring: null, age: null, onboarded: false };
+export const EMPTY_STATE: VueloState = { days: [], reports: [], lastSyncAt: null, battery: null, ring: null, age: null, started: false };
 /** Сколько дней показываем в недельной полосе. Кэш хранит ровно одну последнюю синхронизацию. */
 export const HISTORY_DAYS = 7;

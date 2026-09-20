@@ -1,11 +1,10 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { FORMULAS, deepShareLabel, formulaText } from '../../domain';
+import { FORMULAS, formulaText } from '../../domain';
 import { findDay, todayKey, useVuelo } from '../../state';
-import { Card, Hypnogram, InfoButton, Screen, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
+import { Card, HeroRing, InfoButton, Screen, SleepWave, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
 
-const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${minutes % 60} м`;
+const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
 
 export default function SleepTab() {
   const { week, state, phase, progress, packets, statusText, sync } = useVuelo();
@@ -25,79 +24,67 @@ export default function SleepTab() {
       loading={phase === 'background'}
       progress={progress}
       packets={packets}
-      battery={state.battery}
       onSync={sync}
-      onOpenRing={() => router.push('/ring')}
     >
-      <View style={styles.head}>
-        <Text style={styles.score}>{day?.scores.sleep ?? '—'}</Text>
-        {deepShare !== null ? <Text style={styles.label}>{deepShareLabel(deepShare)}</Text> : null}
+      <View style={styles.hero}>
+        <HeroRing value={day?.scores.sleep ?? null} />
+        {sleep ? <Text style={styles.summary}>{hhmm(sleep.totalMin)}</Text> : null}
       </View>
 
       <Card title="Неделя" right={<InfoButton title={FORMULAS.sleep.title} text={formulaText('sleep')} />}>
         <WeekChart days={week} value={(d) => d.scores.sleep} selected={picked} onSelect={setPicked} width={chartWidth} />
       </Card>
 
-      <Card title="Ночь">
-        <Hypnogram segments={day?.sleepSegments ?? []} width={chartWidth} />
-      </Card>
+      {day?.sleepSegments.length ? (
+        <Card title="Ночь">
+          <SleepWave segments={day.sleepSegments} width={chartWidth} />
+        </Card>
+      ) : null}
 
-      <Card>
-        {sleep ? (
+      <Card right={<InfoButton title={FORMULAS.deepShare.title} text={formulaText('deepShare')} />}>
+        {sleep && deepShare !== null ? (
           <>
-            <Row label="Всего сна" value={hhmm(sleep.totalMin)} />
-            <Row
-              label="Глубокий"
-              value={`${hhmm(sleep.deepMin)} · ${deepShare} %`}
-              tail={deepShare === null ? undefined : deepShareLabel(deepShare)}
-              dot={colors.accent}
-              info={<InfoButton title={FORMULAS.deepShare.title} text={formulaText('deepShare')} />}
-            />
-            <Row label="Лёгкий" value={`${hhmm(sleep.lightMin)} · ${lightShare} %`} dot={withAlpha(colors.accent, 0.4)} />
-            <Row label="Пульс во сне" value={day?.restingHrSource === 'night' && day.restingHr ? String(day.restingHr) : '—'} />
+            <View style={styles.bar}>
+              <View style={[styles.deep, { flex: deepShare }]} />
+              <View style={[styles.light, { flex: lightShare ?? 0 }]} />
+            </View>
+            <View style={styles.legend}>
+              <Legend color={colors.accent} label="Глубокий" value={`${hhmm(sleep.deepMin)} · ${deepShare} %`} />
+              <Legend color={withAlpha(colors.accent, 0.4)} label="Лёгкий" value={`${hhmm(sleep.lightMin)} · ${lightShare} %`} />
+            </View>
+            {day?.restingHrSource === 'night' && day.restingHr ? (
+              <View style={styles.chip}>
+                <Text style={styles.chipText}>Пульс во сне {day.restingHr}</Text>
+              </View>
+            ) : null}
           </>
         ) : (
-          <Skeleton height={96} />
+          <Skeleton height={72} />
         )}
       </Card>
     </Screen>
   );
 }
 
-function Row({
-  label,
-  value,
-  tail,
-  dot,
-  info,
-}: {
-  label: string;
-  value: string;
-  tail?: string;
-  dot?: string;
-  info?: React.ReactNode;
-}) {
-  return (
-    <View style={styles.row}>
-      {dot ? <View style={[styles.dot, { backgroundColor: dot }]} /> : <View style={styles.dotSpace} />}
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>
-        {value}
-        {tail ? <Text style={styles.tail}> · {tail}</Text> : null}
-      </Text>
-      {info}
-    </View>
-  );
-}
+const Legend = ({ color, label, value }: { color: string; label: string; value: string }) => (
+  <View style={styles.legendRow}>
+    <View style={[styles.dot, { backgroundColor: color }]} />
+    <Text style={styles.legendLabel}>{label}</Text>
+    <Text style={styles.legendValue}>{value}</Text>
+  </View>
+);
 
 const styles = StyleSheet.create({
-  head: { alignItems: 'center', marginTop: spacing.md, gap: 2 },
-  score: { color: colors.text, fontSize: 72, fontWeight: '200' },
-  label: { color: colors.textMuted, fontSize: 16 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  hero: { alignItems: 'center', marginTop: spacing.md, gap: spacing.xs },
+  summary: { color: colors.textMuted, fontSize: 16 },
+  bar: { flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: colors.track },
+  deep: { backgroundColor: colors.accent },
+  light: { backgroundColor: withAlpha(colors.accent, 0.4) },
+  legend: { marginTop: spacing.md, gap: spacing.sm },
+  legendRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  dotSpace: { width: 8 },
-  rowLabel: { color: colors.textMuted, fontSize: 15, flex: 1 },
-  rowValue: { color: colors.text, fontSize: 15 },
-  tail: { color: colors.textMuted },
+  legendLabel: { color: colors.textMuted, fontSize: 15, flex: 1 },
+  legendValue: { color: colors.text, fontSize: 15 },
+  chip: { alignSelf: 'flex-start', marginTop: spacing.md, backgroundColor: colors.track, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
+  chipText: { color: colors.textMuted, fontSize: 13 },
 });

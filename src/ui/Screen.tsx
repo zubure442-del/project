@@ -3,7 +3,6 @@ import * as Haptics from 'expo-haptics';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
 import { ProgressArc } from './ProgressArc';
 import { colors, radius, spacing } from './theme';
 
@@ -28,24 +27,13 @@ export interface ScreenProps {
   loading: boolean;
   progress: number;
   packets: number;
-  battery: number | null;
   onSync: () => void;
-  onOpenRing: () => void;
+  /** Плашка над содержимым: например, о незаполненной биометрии. */
+  banner?: ReactNode;
   children: ReactNode;
 }
 
-export function Screen({
-  title,
-  date,
-  statusText,
-  loading,
-  progress,
-  packets,
-  battery,
-  onSync,
-  onOpenRing,
-  children,
-}: ScreenProps) {
+export function Screen({ title, date, statusText, loading, progress, packets, onSync, banner, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
   const wasLoading = useRef(false);
 
@@ -58,29 +46,25 @@ export function Screen({
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <View style={styles.row}>
-          <Text style={styles.title}>{title}</Text>
-          <View style={styles.spacer} />
-          <Pressable onPress={onOpenRing} hitSlop={10} style={styles.battery}>
-            <Text style={styles.batteryText}>{battery === null ? '—' : `${battery} %`}</Text>
-          </Pressable>
-        </View>
-        <Text style={styles.date}>{formatDayTitle(date)}</Text>
-
+        <Text style={styles.title}>{title}</Text>
         <Pressable style={styles.statusRow} onPress={onSync} disabled={loading}>
           {loading ? (
             <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(300)} style={styles.row}>
-              <ProgressArc size={22} progress={progress} pulse={packets} />
-              <Text style={styles.status}>Загрузка · {Math.round(progress * 100)} %</Text>
+              <ProgressArc size={16} progress={progress} pulse={packets} />
+              <Text style={styles.status}>
+                {formatDayTitle(date)} · Загрузка · {Math.round(progress * 100)} %
+              </Text>
             </Animated.View>
           ) : (
-            <Animated.View entering={FadeIn.duration(300)} style={styles.row}>
-              <CheckIcon />
-              <Text style={styles.status}>{statusText}</Text>
+            <Animated.View entering={FadeIn.duration(300)}>
+              <Text style={styles.status}>
+                {formatDayTitle(date)} · {statusText}
+              </Text>
             </Animated.View>
           )}
         </Pressable>
       </View>
+      {banner}
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: spacing.xl }}
@@ -91,12 +75,6 @@ export function Screen({
     </View>
   );
 }
-
-const CheckIcon = () => (
-  <Svg width={14} height={14} viewBox="0 0 24 24">
-    <Path d="M4 12.5 9.5 18 20 6.5" stroke={colors.textFaint} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-  </Svg>
-);
 
 export function Card({ title, right, children }: { title?: string; right?: ReactNode; children: ReactNode }) {
   return (
@@ -134,11 +112,8 @@ export const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   title: { color: colors.text, fontSize: 28, fontWeight: '600' },
-  date: { color: colors.textMuted, fontSize: 15, marginTop: 2 },
   spacer: { flex: 1 },
-  battery: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: colors.card },
-  batteryText: { color: colors.textMuted, fontSize: 13 },
-  statusRow: { marginTop: spacing.sm, height: 24, justifyContent: 'center' },
+  statusRow: { marginTop: 4, height: 20, justifyContent: 'center' },
   status: { color: colors.textFaint, fontSize: 13, fontVariant: ['tabular-nums'] },
 
   card: {

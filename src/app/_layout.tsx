@@ -36,7 +36,6 @@ function Routes() {
     >
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="welcome" options={{ animation: 'fade' }} />
-      <Stack.Screen name="ring" options={{ presentation: 'modal' }} />
       <Stack.Screen name="raw-log" options={{ presentation: 'modal' }} />
       </Stack>
       {phase === 'fresh' ? <FreshBadge onDone={dismissFresh} /> : null}

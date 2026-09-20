@@ -1,6 +1,9 @@
 import { DEEP_SHARE_BEST, DEEP_SHARE_STEPS, STRESS_ZONES } from './charts';
 import {
   CARDIO_REFERENCE_MIN,
+  CARDIO_ZONES,
+  HOUR_LOAD_HR_WEIGHT,
+  HOUR_LOAD_STEPS_WEIGHT,
   HRV_TARGET,
   RESTING_HR_TARGET,
   RESTING_HR_PENALTY,
@@ -49,8 +52,17 @@ export const FORMULAS = {
     title: 'Активность',
     lines: [
       `Шаги = шаги / ${STEPS_GOAL} × 100`,
-      `Кардио = зона × минуты / ${CARDIO_REFERENCE_MIN}, зоны 60 / 70 / 85 % от 208 − 0,7 × возраст`,
+      `Кардио = очки × минуты / ${CARDIO_REFERENCE_MIN}; зоны ${CARDIO_ZONES.map((z) => Math.round(z.from * 100)).join(' / ')} % от 208 − 0,7 × возраст`,
       `Оценка = шаги × ${STEPS_WEIGHT} + кардио × ${CARDIO_WEIGHT}, не больше 100`,
+      NOT_MEDICAL,
+    ],
+  },
+  busiestHour: {
+    title: 'Самый активный час',
+    lines: [
+      `Нагрузка = ${HOUR_LOAD_STEPS_WEIGHT} × шаги / макс + ${HOUR_LOAD_HR_WEIGHT} × очки кардио / макс`,
+      `Очки: ${CARDIO_ZONES.map((z) => `> ${Math.round(z.from * 100)} % = ${z.points}`).join(' · ')}`,
+      'Кольцо мерит пульс не чаще раза в 30 минут: короткая нагрузка может не попасть',
       NOT_MEDICAL,
     ],
   },
@@ -74,6 +86,10 @@ export const FORMULAS = {
   hrv: {
     title: 'Вариабельность',
     lines: [`Среднее за день, мс`, `${HRV_TARGET} мс = 100 в оценке организма`, NOT_MEDICAL],
+  },
+  calories: {
+    title: 'Калории',
+    lines: ['Расход по данным кольца: шаги и профиль', 'Только за сегодня', NOT_MEDICAL],
   },
   pressure: {
     title: 'Давление',

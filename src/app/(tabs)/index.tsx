@@ -1,21 +1,36 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STEPS_GOAL, formulaText, type ComponentId } from '../../domain';
 import { findDay, todayKey, useVuelo } from '../../state';
-import { COMPONENT_LABEL, Card, InfoButton, Ring, Screen, Skeleton, WeekChart, colors, spacing } from '../../ui';
+import {
+  BiometryBanner,
+  COMPONENT_LABEL,
+  Card,
+  HeroRing,
+  InfoButton,
+  Ring,
+  Screen,
+  Skeleton,
+  SparkIcon,
+  WeekChart,
+  colors,
+  radius,
+  spacing,
+} from '../../ui';
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 /** Заголовок «Совет · Яндекс ИИ» включим, когда появится сервер-посредник. */
 export const ADVICE_YANDEX_LABEL = __DEV__;
 
 export default function TodayTab() {
-  const { week, report, state, phase, progress, packets, statusText, sync } = useVuelo();
+  const { week, report, state, phase, progress, packets, statusText, sync, profileReady } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useState(todayKey());
   const day = findDay(state.days, picked);
   const chartWidth = width - spacing.md * 4;
   const steps = day?.steps ?? null;
+  // Кольцо отдаёт расход только за текущий день, за прошлые ничего не показываем.
+  const calories = picked === todayKey() ? state.caloriesToday : null;
 
   return (
     <Screen
@@ -25,14 +40,11 @@ export default function TodayTab() {
       loading={phase === 'background'}
       progress={progress}
       packets={packets}
-      battery={state.battery}
       onSync={sync}
-      onOpenRing={() => router.push('/ring')}
+      banner={profileReady ? undefined : <BiometryBanner />}
     >
       <View style={styles.total}>
-        <Ring value={day?.total ?? null} size={Math.min(214, width - 140)} thickness={11} glow>
-          <Text style={styles.totalValue}>{day?.total ?? '—'}</Text>
-        </Ring>
+        <HeroRing value={day?.total ?? null} size={Math.min(214, width - 140)} />
       </View>
 
       <View style={styles.components}>
@@ -46,12 +58,21 @@ export default function TodayTab() {
         ))}
       </View>
 
-      <Card title="Шаги">
+      <Card title="Шаги и калории">
         {steps === null ? (
           <Skeleton height={44} />
         ) : (
           <>
-            <Text style={styles.steps}>{steps}</Text>
+            <View style={styles.stepsRow}>
+              <Text style={styles.steps}>{steps.toLocaleString('ru-RU')}</Text>
+              {calories !== null ? (
+                <View style={styles.calories}>
+                  <Text style={styles.caloriesValue}>{calories}</Text>
+                  <Text style={styles.caloriesLabel}>ккал</Text>
+                  <InfoButton title="Калории" text={formulaText('calories')} />
+                </View>
+              ) : null}
+            </View>
             <View style={styles.track}>
               <View style={[styles.fill, { width: `${Math.min(100, (steps / STEPS_GOAL) * 100)}%` }]} />
             </View>
@@ -59,8 +80,19 @@ export default function TodayTab() {
         )}
       </Card>
 
-      <Card title={ADVICE_YANDEX_LABEL ? 'Совет · Яндекс ИИ' : 'Совет'}>
-        {report ? <Text style={styles.report}>{report.text}</Text> : <Skeleton height={44} />}
+      <Card>
+        <View style={styles.aiHead}>
+          <SparkIcon color={colors.accent} />
+          <Text style={styles.aiTitle}>AI Ассистент</Text>
+        </View>
+        {report ? (
+          <View style={styles.advice}>
+            <Text style={styles.adviceText}>{report.text}</Text>
+          </View>
+        ) : (
+          <Skeleton height={64} />
+        )}
+        {ADVICE_YANDEX_LABEL ? <Text style={styles.poweredBy}>Powered by YandexGPT</Text> : null}
       </Card>
 
       <Card title="Неделя" right={<InfoButton title={FORMULAS.total.title} text={formulaText('total')} />}>
@@ -77,7 +109,22 @@ const styles = StyleSheet.create({
   component: { alignItems: 'center', gap: spacing.xs },
   componentValue: { color: colors.text, fontSize: 24, fontWeight: '300' },
   componentLabel: { color: colors.textMuted, fontSize: 14 },
-  steps: { color: colors.text, fontSize: 38, fontWeight: '200' },
+  stepsRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  steps: { color: colors.text, fontSize: 38, fontWeight: '200', flex: 1 },
+  calories: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
+  caloriesValue: { color: colors.text, fontSize: 22, fontWeight: '300' },
+  caloriesLabel: { color: colors.textMuted, fontSize: 13, marginRight: 4 },
+  aiHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
+  aiTitle: { color: colors.text, fontSize: 17, fontWeight: '500' },
+  advice: {
+    backgroundColor: 'rgba(242, 169, 59, 0.10)',
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: 'rgba(242, 169, 59, 0.28)',
+    padding: spacing.md,
+  },
+  adviceText: { color: colors.text, fontSize: 18, lineHeight: 27 },
+  poweredBy: { color: colors.textFaint, fontSize: 11, marginTop: spacing.sm, textAlign: 'right' },
   track: { height: 4, borderRadius: 2, backgroundColor: colors.track, marginTop: spacing.sm },
   fill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },
   report: { color: colors.text, fontSize: 16, lineHeight: 24 },

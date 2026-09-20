@@ -45,3 +45,29 @@ export const BodyIcon = ({ color, size = 24 }: IconProps) => (
     />
   </Svg>
 );
+
+export const ProfileIcon = ({ color, size = 24 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24">
+    <Circle cx="12" cy="8.5" r="3.6" stroke={color as string} strokeWidth="1.8" fill="none" />
+    <Path d="M4.8 20c.6-3.6 3.6-5.6 7.2-5.6s6.6 2 7.2 5.6" stroke={color as string} strokeWidth="1.8" strokeLinecap="round" fill="none" />
+  </Svg>
+);
+
+/** Иконка центральной кнопки «Сегодня»: кольцо с дугой. */
+export const RingIcon = ({ color, size = 26 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24">
+    <Circle cx="12" cy="12" r="8" stroke={color as string} strokeWidth="1.6" fill="none" opacity={0.4} />
+    <Path d="M12 4a8 8 0 0 1 7.1 4.3" stroke={color as string} strokeWidth="2.6" strokeLinecap="round" fill="none" />
+  </Svg>
+);
+
+/** Искра рядом с заголовком совета. */
+export const SparkIcon = ({ color, size = 18 }: IconProps) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24">
+    <Path
+      d="M12 3.2c.9 3.6 1.9 4.7 5.5 5.6-3.6.9-4.6 1.9-5.5 5.6-.9-3.7-1.9-4.7-5.5-5.6 3.6-.9 4.6-2 5.5-5.6Z"
+      fill={color as string}
+    />
+    <Path d="M18.4 15c.45 1.8.95 2.35 2.75 2.8-1.8.45-2.3.95-2.75 2.75-.45-1.8-.95-2.3-2.75-2.75 1.8-.45 2.3-1 2.75-2.8Z" fill={color as string} opacity={0.65} />
+  </Svg>
+);

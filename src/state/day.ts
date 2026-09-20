@@ -80,6 +80,8 @@ export function applySync(state: VueloState, days: DaySnapshot[], sync: SyncResu
       lastSyncAt: now.getTime(),
       syncFailed: false,
       battery: sync.battery ?? state.battery,
+      caloriesToday: sync.activity ? sync.activity.calories : state.caloriesToday,
+      caloriesDate: sync.activity ? todayKey(now) : state.caloriesDate,
     },
     report,
   };

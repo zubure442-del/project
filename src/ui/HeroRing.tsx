@@ -1,0 +1,109 @@
+import * as Haptics from 'expo-haptics';
+import { useEffect, useRef, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import Animated, { Easing, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
+import Svg, { Circle, Defs, LinearGradient, RadialGradient, Stop } from 'react-native-svg';
+import { colors } from './theme';
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+/** Заполнение дуги и счёт числа вверх. */
+export const HERO_FILL_MS = 800;
+
+/**
+ * Крупное кольцо-герой: градиентная дуга со свечением на конце и число внутри.
+ * При смене дня дуга доезжает от прошлого значения к новому, число считает вверх.
+ */
+export function HeroRing({
+  value,
+  size = 190,
+  caption,
+  hapticOnChange = true,
+}: {
+  value: number | null;
+  size?: number;
+  caption?: string;
+  hapticOnChange?: boolean;
+}) {
+  const thickness = Math.max(8, size * 0.055);
+  const r = (size - thickness) / 2;
+  const cx = size / 2;
+  const circumference = 2 * Math.PI * r;
+  const target = value === null ? 0 : Math.max(0, Math.min(100, value)) / 100;
+
+  const filled = useSharedValue(0);
+  const [shown, setShown] = useState(value ?? 0);
+  const previous = useRef<number | null>(null);
+
+  useEffect(() => {
+    filled.value = withTiming(target, { duration: HERO_FILL_MS, easing: Easing.out(Easing.cubic) });
+  }, [filled, target]);
+
+  // Число считаем вверх в JS: цифра меняется десяток раз, на плавность это не влияет.
+  useEffect(() => {
+    if (value === null) {
+      previous.current = null;
+      const reset = setTimeout(() => setShown(0), 0);
+      return () => clearTimeout(reset);
+    }
+    if (hapticOnChange && previous.current !== null && previous.current !== value) void Haptics.selectionAsync();
+    const from = previous.current ?? 0;
+    previous.current = value;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      const k = Math.min(1, (Date.now() - startedAt) / HERO_FILL_MS);
+      const eased = 1 - (1 - k) ** 3;
+      setShown(Math.round(from + (value - from) * eased));
+      if (k >= 1) clearInterval(timer);
+    }, 40);
+    return () => clearInterval(timer);
+  }, [hapticOnChange, value]);
+
+  const arcProps = useAnimatedProps(() => ({
+    strokeDasharray: `${circumference * filled.value} ${circumference}`,
+  }));
+  const tipProps = useAnimatedProps(() => {
+    const angle = (-90 + 360 * filled.value) * (Math.PI / 180);
+    return { cx: cx + r * Math.cos(angle), cy: cx + r * Math.sin(angle), opacity: filled.value > 0 ? 1 : 0 };
+  });
+
+  return (
+    <View style={{ width: size, height: size }}>
+      <Svg width={size} height={size}>
+        <Defs>
+          <LinearGradient id="hero-arc" x1="0.5" y1="0" x2="0.5" y2="1">
+            <Stop offset="0" stopColor={colors.arcFrom} />
+            <Stop offset="1" stopColor={colors.arcTo} />
+          </LinearGradient>
+          <RadialGradient id="hero-glow">
+            <Stop offset="0" stopColor={colors.arcTo} stopOpacity={0.55} />
+            <Stop offset="0.45" stopColor={colors.arcTo} stopOpacity={0.16} />
+            <Stop offset="1" stopColor={colors.arcTo} stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
+        <Circle cx={cx} cy={cx} r={r} stroke={colors.track} strokeWidth={thickness} fill="none" />
+        <AnimatedCircle
+          cx={cx}
+          cy={cx}
+          r={r}
+          stroke="url(#hero-arc)"
+          strokeWidth={thickness}
+          strokeLinecap="round"
+          fill="none"
+          transform={`rotate(-90 ${cx} ${cx})`}
+          animatedProps={arcProps}
+        />
+        <AnimatedCircle r={thickness * 2.4} fill="url(#hero-glow)" animatedProps={tipProps} />
+      </Svg>
+      <View style={styles.center} pointerEvents="none">
+        <Text style={[styles.value, { fontSize: size * 0.34 }]}>{value === null ? '—' : shown}</Text>
+        {caption ? <Text style={styles.caption}>{caption}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  center: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  value: { color: colors.text, fontWeight: '200', letterSpacing: -1 },
+  caption: { color: colors.textMuted, fontSize: 14, marginTop: 2 },
+});

@@ -12,6 +12,14 @@ export const colors = {
   textFaint: '#7A7A88',
 } as const;
 
+/** Исключение из правила одного акцента: холодная палитра только для волны сна. */
+export const SLEEP_PALETTE = {
+  from: '#4C4CD6',
+  to: '#8A5CF0',
+  glow: '#A78BFA',
+  deep: '#6D5BE0',
+} as const;
+
 export const spacing = { xs: 6, sm: 10, md: 16, lg: 24, xl: 36 } as const;
 /** Один радиус на все карточки. */
 export const radius = { card: 18, pill: 999 } as const;

@@ -18,6 +18,21 @@ export const DEEP_RATIO_BEST = { from: 0.15, to: 0.25 } as const;
 export const HRV_TARGET = 65;
 export const RESTING_HR_TARGET = 60;
 export const RESTING_HR_PENALTY = 2.5;
+/** Пульсовые зоны, которые учитывает оценка активности: доля от максимального пульса и очки. */
+export const CARDIO_ZONES = [
+  { from: 0.85, points: 2 },
+  { from: 0.7, points: 1 },
+  { from: 0.6, points: 0.5 },
+] as const;
+/** Веса комбинированной нагрузки часа: шаги и кардио. */
+export const HOUR_LOAD_STEPS_WEIGHT = 0.6;
+export const HOUR_LOAD_HR_WEIGHT = 0.4;
+
+export const maxHeartRate = (age: number) => 208 - 0.7 * age;
+
+/** Очки кардио за один замер: по тем же зонам, что и оценка активности. */
+export const cardioPointsFor = (value: number, maxHr: number): number =>
+  CARDIO_ZONES.find((z) => value / maxHr > z.from)?.points ?? 0;
 
 export interface ScoreInput {
   /** Ночь дня; null — сна нет в данных. */
@@ -71,15 +86,13 @@ export function sleepScore(night: SleepSession | null): number | null {
 
 export function cardioPoints(heart: Sample[], age: number | null): number | null {
   if (age === null || !heart.length) return null;
-  const maxHr = 208 - 0.7 * age;
+  const maxHr = maxHeartRate(age);
   const items = [...heart].sort((a, b) => a.ts - b.ts);
   let points = 0;
   items.forEach((s, i) => {
     const next = items[i + 1];
     const minutes = next ? Math.min((next.ts - s.ts) / 60, CARDIO_REFERENCE_MIN) : CARDIO_REFERENCE_MIN;
-    const pct = s.value / maxHr;
-    const zone = pct > 0.85 ? 2 : pct > 0.7 ? 1 : pct > 0.6 ? 0.5 : 0;
-    points += zone * (minutes / CARDIO_REFERENCE_MIN);
+    points += cardioPointsFor(s.value, maxHr) * (minutes / CARDIO_REFERENCE_MIN);
   });
   return points;
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { HR_SMOOTH_MAX_GAP, formatMinute, smoothHeart, splitSegments, type SleepStage } from '../domain';
+import { HR_SMOOTH_MAX_GAP, formatMinute, loadIntervals, smoothHeart, splitSegments, type SleepStage } from '../domain';
 import type { DayPoint, DaySnapshot } from '../storage';
 import { colors, spacing, withAlpha } from './theme';
 
@@ -20,12 +20,16 @@ export function DayActivityChart({
   heart,
   hours,
   width,
+  age,
 }: {
   heart: DayPoint[];
   hours: number[];
   width: number;
+  age: number | null;
 }) {
   const [touch, setTouch] = useState<{ m: number; hr: number | null; steps: number } | null>(null);
+  const [zone, setZone] = useState<{ from: number; to: number; peak: number } | null>(null);
+  const loads = loadIntervals(heart.map((p) => ({ m: p.m, v: p.v })), age);
   const smooth = smoothHeart(heart.map((p) => ({ ts: p.m * 60, value: p.v })));
   const hrValues = smooth.map((s) => s.value);
   if (!smooth.length && hours.every((v) => v === 0)) return empty(width);
@@ -36,7 +40,7 @@ export function DayActivityChart({
   const x = (minute: number) => GUTTER + (minute / 1440) * (width - GUTTER * 2);
   const yHr = (v: number) => 12 + (1 - (v - hrMin) / Math.max(1, hrMax - hrMin)) * (HEIGHT - 52);
   const yStep = (v: number) => HEIGHT - 18 - (v / stepsMax) * (HEIGHT * 0.32);
-  const barWidth = Math.max(3, (width - GUTTER * 2) / 24 - 3);
+  const barWidth = (width - GUTTER * 2) / 24;
   const segments = splitSegments(smooth, HR_SMOOTH_MAX_GAP);
 
   const pick = (e: GestureResponderEvent) => {
@@ -45,6 +49,7 @@ export function DayActivityChart({
       ? smooth.reduce((a, b) => (Math.abs(b.ts / 60 - minute) < Math.abs(a.ts / 60 - minute) ? b : a))
       : null;
     setTouch({ m: minute, hr: nearest ? nearest.value : null, steps: hours[Math.floor(minute / 60)] ?? 0 });
+    setZone(loads.find((z) => minute >= z.from - 15 && minute <= z.to + 15) ?? null);
   };
 
   return (
@@ -53,9 +58,23 @@ export function DayActivityChart({
       onMoveShouldSetResponder={() => true}
       onResponderGrant={pick}
       onResponderMove={pick}
-      onResponderRelease={() => setTouch(null)}
+      onResponderRelease={() => {
+        setTouch(null);
+        setZone(null);
+      }}
     >
       <Svg width={width} height={HEIGHT}>
+        {loads.map((z, i) => (
+          <Rect
+            key={`z${i}`}
+            x={x(z.from)}
+            y={8}
+            width={Math.max(3, x(z.to) - x(z.from))}
+            height={HEIGHT - 26}
+            fill={withAlpha(colors.accent, 0.1)}
+            rx={4}
+          />
+        ))}
         {hours.map((value, hour) =>
           value > 0 ? (
             <Rect
@@ -91,7 +110,12 @@ export function DayActivityChart({
           </SvgText>
         ))}
       </Svg>
-      {touch ? (
+      {zone ? (
+        <Text style={styles.touch}>
+          {formatMinute(zone.from)}–{formatMinute(zone.to)} · до {Math.round(zone.peak)} уд/мин ·{' '}
+          {Math.max(1, Math.round(zone.to - zone.from))} мин
+        </Text>
+      ) : touch ? (
         <Text style={styles.touch}>
           {formatMinute(touch.m)}
           {touch.hr !== null ? ` · ${Math.round(touch.hr)} уд/мин` : ''}
@@ -102,13 +126,22 @@ export function DayActivityChart({
   );
 }
 
+/** Пауза, после которой линию не тянем: не меньше 90 минут и не меньше трёх обычных интервалов. */
+export function gapFor(points: DayPoint[]): number {
+  if (points.length < 3) return 90 * 60;
+  const sorted = [...points].sort((a, b) => a.m - b.m);
+  const gaps = sorted.slice(1).map((p, i) => (p.m - sorted[i].m) * 60).sort((a, b) => a - b);
+  const median = gaps[gaps.length >> 1];
+  return Math.max(90 * 60, median * 3);
+}
+
 /** Общий график одного показателя за день: линия с разрывами и значение по нажатию. */
 export function DayLineChart({
   points,
   width,
   yMin,
   yMax,
-  maxGap = STRESS_MAX_GAP,
+  maxGap,
   guides = [],
   format = (v: number) => String(Math.round(v)),
 }: {
@@ -129,7 +162,7 @@ export function DayLineChart({
   const hi = yMax ?? Math.max(...values) + 2;
   const x = (m: number) => GUTTER + (m / 1440) * (width - GUTTER * 2);
   const y = (v: number) => 12 + (1 - (v - lo) / Math.max(1, hi - lo)) * (HEIGHT - 44);
-  const segments = splitSegments(sorted.map((p) => ({ ts: p.m * 60, value: p.v })), maxGap);
+  const segments = splitSegments(sorted.map((p) => ({ ts: p.m * 60, value: p.v })), maxGap ?? gapFor(sorted));
 
   const pick = (e: GestureResponderEvent) => {
     const minute = ((e.nativeEvent.locationX - GUTTER) / (width - GUTTER * 2)) * 1440;
@@ -189,7 +222,10 @@ export function PressureChart({ points, width }: { points: { m: number; sys: num
   const x = (m: number) => GUTTER + (m / 1440) * (width - GUTTER * 2);
   const y = (v: number) => 12 + (1 - (v - lo) / Math.max(1, hi - lo)) * (HEIGHT - 44);
   const line = (key: 'sys' | 'dia', color: string) =>
-    splitSegments(sorted.map((p) => ({ ts: p.m * 60, value: p[key] })), STRESS_MAX_GAP).map((seg, i) =>
+    splitSegments(
+      sorted.map((p) => ({ ts: p.m * 60, value: p[key] })),
+      gapFor(sorted.map((p) => ({ m: p.m, v: p.sys }))),
+    ).map((seg, i) =>
       seg.length === 1 ? (
         <Circle key={`${key}${i}`} cx={x(seg[0].ts / 60)} cy={y(seg[0].value)} r={4} fill={color} />
       ) : (

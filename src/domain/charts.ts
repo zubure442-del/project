@@ -1,5 +1,6 @@
 import { wallClock, type Sample } from '../codec';
 import { DEEP_MIN_STATE } from './sleep';
+import { HOUR_LOAD_HR_WEIGHT, HOUR_LOAD_STEPS_WEIGHT, cardioPointsFor, maxHeartRate } from './score';
 
 /** Подготовка данных для графиков. Только чистые функции: ни расчётов, ни побочных эффектов. */
 
@@ -80,6 +81,92 @@ export const STRESS_ZONE_BOUNDS = [30, 60, 80];
 export function stressZone(value: number): string | null {
   if (!(value > 0) || value > 100) return null;
   return (STRESS_ZONES.find((z) => value <= z.upTo) ?? STRESS_ZONES[STRESS_ZONES.length - 1]).label;
+}
+
+/**
+ * Самый активный час: шаги и пульс вместе, иначе тренировка без шагов не находится.
+ * нагрузка = W_STEPS × шаги_часа / макс_шагов + W_HR × очки_часа / макс_очков
+ */
+export function busiestHour(
+  stepsPerHour: number[],
+  heart: { m: number; v: number }[],
+  age: number | null,
+): number | null {
+  const maxHr = age === null ? null : maxHeartRate(age);
+  const cardio = new Array<number>(24).fill(0);
+  if (maxHr !== null) {
+    for (const p of heart) cardio[Math.min(23, Math.floor(p.m / 60))] += cardioPointsFor(p.v, maxHr);
+  }
+  const maxSteps = Math.max(...stepsPerHour, 0);
+  const maxCardio = Math.max(...cardio, 0);
+  if (maxSteps === 0 && maxCardio === 0) return null;
+
+  let best = 0;
+  let bestLoad = -1;
+  for (let hour = 0; hour < 24; hour++) {
+    const load =
+      HOUR_LOAD_STEPS_WEIGHT * (maxSteps ? stepsPerHour[hour] / maxSteps : 0) +
+      HOUR_LOAD_HR_WEIGHT * (maxCardio ? cardio[hour] / maxCardio : 0);
+    if (load > bestLoad) {
+      bestLoad = load;
+      best = hour;
+    }
+  }
+  return bestLoad > 0 ? best : null;
+}
+
+/** Отрезки, где пульс был в зонах, которые учитывает оценка активности. */
+export function loadIntervals(
+  heart: { m: number; v: number }[],
+  age: number | null,
+  maxGapMin = 45,
+): { from: number; to: number; peak: number }[] {
+  if (age === null) return [];
+  const maxHr = maxHeartRate(age);
+  const points = [...heart].sort((a, b) => a.m - b.m);
+  const out: { from: number; to: number; peak: number }[] = [];
+  for (const p of points) {
+    if (cardioPointsFor(p.v, maxHr) === 0) continue;
+    const last = out[out.length - 1];
+    if (last && p.m - last.to <= maxGapMin) {
+      last.to = p.m;
+      last.peak = Math.max(last.peak, p.v);
+    } else {
+      out.push({ from: p.m, to: p.m, peak: p.v });
+    }
+  }
+  return out;
+}
+
+/** Уровни волны сна: глубокий внизу, лёгкий вверху. */
+export const SLEEP_LEVEL: Record<'light' | 'deep', number> = { light: 0.35, deep: 1 };
+/** Окно сглаживания волны сна, минуты. */
+export const SLEEP_SMOOTH_MIN = 20;
+
+/**
+ * Волна сна: уровень фазы по минутам, сглаженный скользящим средним.
+ * Ничего кроме глубокого и лёгкого сна кольцо не различает, поэтому других фаз здесь нет.
+ */
+export function sleepWave(
+  segments: { from: number; to: number; stage: SleepStage }[],
+  smoothMin = SLEEP_SMOOTH_MIN,
+): { m: number; v: number }[] {
+  const real = segments.filter((s) => s.stage !== 'awake');
+  if (!real.length) return [];
+  const from = Math.min(...real.map((s) => s.from));
+  const to = Math.max(...real.map((s) => s.to));
+  const raw: number[] = [];
+  for (let m = from; m < to; m++) {
+    const seg = real.find((s) => m >= s.from && m < s.to);
+    raw.push(seg ? SLEEP_LEVEL[seg.stage as 'light' | 'deep'] : SLEEP_LEVEL.light);
+  }
+  const half = Math.max(1, Math.round(smoothMin / 2));
+  return raw.map((_, i) => {
+    const lo = Math.max(0, i - half);
+    const hi = Math.min(raw.length, i + half + 1);
+    const window = raw.slice(lo, hi);
+    return { m: from + i, v: window.reduce((a, b) => a + b, 0) / window.length };
+  });
 }
 
 /** Ярлык доли глубокого сна. Пороги в процентах от всего сна. */

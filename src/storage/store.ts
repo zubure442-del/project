@@ -16,6 +16,8 @@ export async function loadState(): Promise<VueloState> {
       lastSyncAt: parsed.lastSyncAt ?? null,
       syncFailed: parsed.syncFailed ?? false,
       battery: parsed.battery ?? null,
+      caloriesToday: parsed.caloriesToday ?? null,
+      caloriesDate: parsed.caloriesDate ?? null,
       ring: parsed.ring ?? null,
       age: parsed.age ?? null,
       profile: { ...EMPTY_PROFILE, ...(parsed.profile ?? {}) },

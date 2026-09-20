@@ -33,7 +33,7 @@ const EMPTY_SCORE = {
   activity: c(null),
   state: c(null),
   restingHr: null,
-  stateInputs: { hrv: false, restingHr: false },
+  stateInputs: { hrv: false, restingHr: false, spo2: false },
 };
 
 const scoreOf = (day: DaySnapshot) => ({

@@ -4,8 +4,8 @@ import { MIN_STEPS_FOR_DAY, hasData, visibleDays } from './week';
 
 const day = (over: Partial<DaySnapshot> = {}): DaySnapshot => ({
   date: '2026-09-20', total: 50, scores: { sleep: null, activity: 50, state: null }, steps: 0, sleep: null,
-  restingHr: null, restingHrSource: null, stateInputs: { hrv: false, restingHr: false },
-  heart: [], stress: [], summaryPoints: [], stepsByHour: new Array(24).fill(0), sleepSegments: [],
+  restingHr: null, restingHrSource: null, stateInputs: { hrv: false, restingHr: false, spo2: false },
+  heart: [], spo2: [], stress: [], summaryPoints: [], stepsByHour: new Array(24).fill(0), sleepSegments: [],
   estimates: { hrv: null, glucose: null, systolic: null, diastolic: null, stress: null },
   ...over,
 });

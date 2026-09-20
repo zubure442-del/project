@@ -44,6 +44,7 @@ export interface ScoreInput {
   /** Возраст для максимального пульса; null — неизвестен (кардио-бонус не начисляется). */
   age: number | null;
   hrv: number[];
+  spo2: number[];
 }
 
 export interface ComponentScore {
@@ -66,7 +67,7 @@ export interface DayScore {
   state: ComponentScore;
   restingHr: RestingHr | null;
   /** Какие входы «организма» удалось посчитать — для объяснения в интерфейсе. */
-  stateInputs: { hrv: boolean; restingHr: boolean };
+  stateInputs: { hrv: boolean; restingHr: boolean; spo2: boolean };
 }
 
 const clamp = (x: number, lo = 0, hi = 100) => Math.min(hi, Math.max(lo, x));
@@ -129,15 +130,27 @@ export function restingHeartRate(heart: Sample[], night: SleepSession | null): R
   return { value: medianOfLowest(smoothHeart(heart).map((s) => s.value), 0.1), source: 'day' };
 }
 
+/** Сколько входов из трёх нужно, чтобы выставить оценку «организма». */
+export const STATE_MIN_INPUTS = 2;
+/** Кислород: 100 при этом значении и выше. */
+export const SPO2_TARGET = 95;
+export const SPO2_PENALTY = 20;
+
 /**
- * «Организм» — среднее двух оценок: вариабельность ритма и пульс во сне.
- * Нужны обе: по одному входу оценка получалась бы на пустом месте.
+ * «Организм» — среднее доступных оценок: вариабельность, пульс во сне и кислород.
+ * Нужны хотя бы два входа: по одному оценка получалась бы на пустом месте.
  */
-export function stateScore(hrv: number[], restingHr: RestingHr | null): number | null {
-  if (!hrv.length || restingHr?.source !== 'night') return null;
-  const hrvScore = Math.min(100, (avg(hrv) / HRV_TARGET) * 100);
-  const pulseScore = clamp(100 - Math.max(0, restingHr.value - RESTING_HR_TARGET) * RESTING_HR_PENALTY);
-  return (hrvScore + pulseScore) / 2;
+export function stateScore(hrv: number[], restingHr: RestingHr | null, spo2: number[] = []): number | null {
+  const parts: number[] = [];
+  if (hrv.length) parts.push(Math.min(100, (avg(hrv) / HRV_TARGET) * 100));
+  if (restingHr?.source === 'night') {
+    parts.push(clamp(100 - Math.max(0, restingHr.value - RESTING_HR_TARGET) * RESTING_HR_PENALTY));
+  }
+  if (spo2.length) {
+    const a = avg(spo2);
+    parts.push(a >= SPO2_TARGET ? 100 : clamp(100 - (SPO2_TARGET - a) * SPO2_PENALTY));
+  }
+  return parts.length >= STATE_MIN_INPUTS ? avg(parts) : null;
 }
 
 export function computeDayScore(input: ScoreInput): DayScore {
@@ -145,7 +158,7 @@ export function computeDayScore(input: ScoreInput): DayScore {
   const scores: Record<ComponentId, number | null> = {
     sleep: sleepScore(input.night),
     activity: activityScore(input.steps, input.heart, input.age),
-    state: stateScore(input.hrv, restingHr),
+    state: stateScore(input.hrv, restingHr, input.spo2),
   };
   const present = (Object.keys(WEIGHTS) as ComponentId[]).filter((k) => scores[k] !== null);
   const weightSum = present.reduce((sum, k) => sum + WEIGHTS[k], 0);
@@ -160,6 +173,6 @@ export function computeDayScore(input: ScoreInput): DayScore {
     activity: comp('activity'),
     state: comp('state'),
     restingHr,
-    stateInputs: { hrv: input.hrv.length > 0, restingHr: restingHr?.source === 'night' },
+    stateInputs: { hrv: input.hrv.length > 0, restingHr: restingHr?.source === 'night', spo2: input.spo2.length > 0 },
   };
 }

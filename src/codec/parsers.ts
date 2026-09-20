@@ -35,8 +35,7 @@ export function parseSpo2(data: Uint8Array): Packet | null {
   if (data.length < 6) return null;
   const ts = u32le(data, 1);
   if (ts <= MIN_VALID_TS) return null;
-  const w = wallClock(ts);
-  const isDayEnd = w.hour === 23 && w.minute === 45 && w.second === 0;
+  const isDayEnd = isDayEndTs(ts);
 
   let minutes: Sample[] = [];
   for (let i = 0; i < Math.min(15, data.length - 5); i++) {
@@ -48,11 +47,25 @@ export function parseSpo2(data: Uint8Array): Packet | null {
   return { kind: 'spo2', slotStart: ts, isDayEnd, samples: minutes };
 }
 
-/** 0x16: подкоманда в [1]: 0xF0 начало, 0xFF конец, 0xA0 данные ([2..5] ts, две минуты по 6 подзамеров). */
+/**
+ * Конец суток: пакет с меткой 23:45:00. Так кольцо помечает последний пакет потока
+ * у 0x10, 0x55 и 0x40 — проверено на живом кольце 21.09.2026.
+ */
+export function isDayEndTs(ts: number): boolean {
+  const w = wallClock(ts);
+  return w.hour === 23 && w.minute === 45 && w.second === 0;
+}
+
+/**
+ * 0x16: подкоманда в [1]: 0xF0 заголовок, 0xAA отметка, 0xFF конец,
+ * 0xA0 данные ([2..5] ts, две минуты по 6 подзамеров).
+ * В заголовке байт 6 — сколько будет отметок aa; по ним и считаем конец потока.
+ */
 export function parseHeart(data: Uint8Array): Packet | null {
   if (data.length < 2) return null;
   const sub = data[1];
-  if (sub === 0xf0) return { kind: 'heart', phase: 'start' };
+  if (sub === 0xf0) return { kind: 'heart', phase: 'start', expected: data.length > 6 ? data[6] : 0 };
+  if (sub === 0xaa) return { kind: 'heart', phase: 'mark', index: data[2] };
   if (sub === 0xff) return { kind: 'heart', phase: 'end' };
   if (sub !== 0xa0 || data.length < 20) return null;
   const ts = u32le(data, 2);
@@ -77,7 +90,7 @@ export function parseMinuteSeries(data: Uint8Array, kind: 'steps' | 'sleep'): Pa
   for (let i = 5; i < data.length; i++) {
     if (data[i] !== NO_DATA) samples.push({ ts: ts + (i - 5) * 60, value: data[i] });
   }
-  return { kind, samples };
+  return { kind, isDayEnd: isDayEndTs(ts), samples };
 }
 
 /**
@@ -118,7 +131,7 @@ export function parseSummary(data: Uint8Array): Packet | null {
       records.push(rec);
     }
   });
-  return { kind: 'summary', records };
+  return { kind: 'summary', isDayEnd: isDayEndTs(ts), records };
 }
 
 /** Разбор любого входящего пакета по коду в байте 0. Никогда не бросает исключений. */
@@ -163,6 +176,9 @@ export function parsePacket(data: Uint8Array): Packet {
       break;
     case 0x99:
       parsed = { kind: 'autoMeasureAck', accepted: false };
+      break;
+    case 0x06:
+      parsed = { kind: 'busy' };
       break;
     case 0x90:
     case 0x91:

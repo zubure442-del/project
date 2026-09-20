@@ -89,8 +89,8 @@ describe('РЕАЛЬНЫЕ БАЙТЫ: сон приходит в ответ н�
     expect(r.sleep).toHaveLength(135);
     expect(r.steps.length).toBeGreaterThan(0);
     expect(r.packetCounts.sleep).toBe(9);
-    // запрос 0x11 всё равно отправляем: так описано в PROTOCOL.md
-    expect(sent.some((c) => c[0] === 0x11)).toBe(true);
+    // 0x11 не отправляем: на него приходит только пустая заглушка
+    expect(sent.some((c) => c[0] === 0x11)).toBe(false);
   });
 
   it('из этих минут собирается ночь с глубокой и лёгкой фазой', async () => {

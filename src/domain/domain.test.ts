@@ -94,7 +94,7 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
   const night = (light: number, deep: number) => ({
     start: T0 - 8 * 3600, end: T0 - 3600, deepMin: deep, lightMin: light, awakeMin: 0, date: '2026-09-18',
   });
-  const base: ScoreInput = { night: null, steps: null, heart: [], age: 30, hrv: [] };
+  const base: ScoreInput = { night: null, steps: null, heart: [], age: 30, hrv: [], spo2: [] };
 
   it('нет никаких данных — итог null, а не 0', () => {
     const r = computeDayScore(base);

@@ -1,6 +1,6 @@
 import { dateKey, wallClock, type HeartSample, type Sample, type SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
-import { HISTORY_DAYS } from './types';
+import { CACHE_DAYS } from './types';
 
 /**
  * Сырые ряды за день. Храним их целиком, а не только итоговые числа:
@@ -18,6 +18,8 @@ export interface DayRaw {
   heart: [number, number][];
   /** [минута, сист., диаст., стресс, глюкоза×10, HRV]; −1 — значения нет. */
   summary: [number, number, number, number, number, number][];
+  /** [минута, кислород в процентах]. */
+  spo2: [number, number][];
 }
 
 export type RawByDay = Record<string, DayRaw>;
@@ -28,7 +30,7 @@ const minuteOf = (ts: number) => {
   return w.hour * 60 + w.minute;
 };
 const NONE = -1;
-const emptyDay = (date: string): DayRaw => ({ date, steps: [], sleep: [], heart: [], summary: [] });
+const emptyDay = (date: string): DayRaw => ({ date, steps: [], sleep: [], heart: [], summary: [], spo2: [] });
 
 /** Раскладывает выгрузку по дням. Ночь целиком относится ко дню пробуждения. */
 export function splitByDay(sync: SyncResult): RawByDay {
@@ -39,6 +41,7 @@ export function splitByDay(sync: SyncResult): RawByDay {
     if (s.value > 0) day(dateKey(s.ts)).steps.push([minuteOf(s.ts), s.value]);
   }
   for (const s of sync.heart) day(dateKey(s.ts)).heart.push([minuteOf(s.ts), s.value]);
+  for (const s of sync.spo2) day(dateKey(s.ts)).spo2.push([minuteOf(s.ts), s.value]);
   for (const r of sync.summary) {
     day(dateKey(r.ts)).summary.push([
       minuteOf(r.ts),
@@ -72,14 +75,25 @@ export function mergeRaw(previous: RawByDay, incoming: RawByDay): RawByDay {
       sleep: fresh.sleep.length ? fresh.sleep : old.sleep,
       heart: fresh.heart.length ? fresh.heart : old.heart,
       summary: fresh.summary.length ? fresh.summary : old.summary,
+      spo2: fresh.spo2.length ? fresh.spo2 : old.spo2,
     };
   }
   return keepRecentDays(out);
 }
 
-export function keepRecentDays(raw: RawByDay): RawByDay {
-  const dates = Object.keys(raw).sort().slice(-HISTORY_DAYS);
+/** Автоочистка: держим CACHE_DAYS дней, остальное выбрасываем при запуске. */
+export function keepRecentDays(raw: RawByDay, limit = CACHE_DAYS): RawByDay {
+  const dates = Object.keys(raw).sort().slice(-limit);
   return Object.fromEntries(dates.map((d) => [d, raw[d]]));
+}
+
+/** Какие дни уже закрыты и полностью загружены: их не перезапрашиваем. */
+export function loadedDays(raw: RawByDay, today: string): Set<string> {
+  return new Set(
+    Object.values(raw)
+      .filter((d) => d.date < today && (d.steps.length > 0 || d.heart.length > 0 || d.summary.length > 0))
+      .map((d) => d.date),
+  );
 }
 
 /** Обратно в вид выгрузки, чтобы пересчитать сводки теми же функциями. */
@@ -88,12 +102,14 @@ export function toSyncResult(raw: RawByDay, battery: number | null = null): Sync
   const sleep: Sample[] = [];
   const heart: HeartSample[] = [];
   const summary: SummaryRecord[] = [];
+  const spo2: Sample[] = [];
 
   for (const day of Object.values(raw)) {
     const base = midnight(day.date);
     for (const [m, v] of day.steps) steps.push({ ts: base + m * 60, value: v });
     for (const [m, v] of day.sleep) sleep.push({ ts: base + m * 60, value: v });
     for (const [m, v] of day.heart) heart.push({ ts: base + m * 60, value: v, raw: [v] });
+    for (const [m, v] of day.spo2) spo2.push({ ts: base + m * 60, value: v });
     for (const [m, sys, dia, stress, glucose, hrv] of day.summary) {
       summary.push({
         ts: base + m * 60,
@@ -110,7 +126,7 @@ export function toSyncResult(raw: RawByDay, battery: number | null = null): Sync
     steps: byTs(steps),
     sleep: byTs(sleep),
     heart: byTs(heart),
-    spo2: [],
+    spo2: byTs(spo2),
     summary: byTs(summary),
     activity: null,
     battery,

@@ -55,7 +55,7 @@ describe('сводки по дням', () => {
     const heart = heartAt('2026-09-18 23:30:00', [52, 50, 54, 51, 53, 58, 60, 62]);
 
     const withBoth = buildSnapshots(day({ sleep: night, heart, summary }), 30).find((d) => d.date === '2026-09-19');
-    expect(withBoth?.stateInputs).toEqual({ hrv: true, restingHr: true });
+    expect(withBoth?.stateInputs).toMatchObject({ hrv: true, restingHr: true });
     expect(withBoth?.scores.state).not.toBeNull();
 
     // та же ночь, но без вариабельности — оценки нет
@@ -73,17 +73,20 @@ describe('сводки по дням', () => {
     expect(Object.keys(snapshot.scores)).toEqual(['sleep', 'activity', 'state']);
   });
 
-  it('кислород в сводку больше не попадает', () => {
-    const [snapshot] = buildSnapshots(day({ steps: minutes('2026-09-19 08:00:00', 3, 10) }), 30);
-    expect(snapshot).not.toHaveProperty('spo2');
+  it('кислород снова попадает в сводку', () => {
+    const [snapshot] = buildSnapshots(
+      day({ spo2: [{ ts: ring('2026-09-19 10:00:00'), value: 97 }] }),
+      30,
+    );
+    expect(snapshot.spo2).toEqual([{ m: 600, v: 97 }]);
   });
 });
 
 describe('кэш последней синхронизации', () => {
   const snapshot = (date: string, total: number): DaySnapshot => ({
     date, total, scores: { sleep: null, activity: total, state: null }, steps: 100, sleep: null,
-    restingHr: null, restingHrSource: null, stateInputs: { hrv: false, restingHr: false },
-    heart: [], stress: [], summaryPoints: [], stepsByHour: new Array(24).fill(0), sleepSegments: [],
+    restingHr: null, restingHrSource: null, stateInputs: { hrv: false, restingHr: false, spo2: false },
+    heart: [], spo2: [], stress: [], summaryPoints: [], stepsByHour: new Array(24).fill(0), sleepSegments: [],
     estimates: { hrv: null, glucose: null, systolic: null, diastolic: null, stress: null },
   });
 

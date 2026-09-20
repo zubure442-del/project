@@ -86,9 +86,22 @@ describe('СИНТЕТИЧЕСКИЕ: пульс 0x16', () => {
       { ts: t + 60, value: 80, raw: [80, 80, 80, 80, 80, 80] },
     ]);
   });
-  it('подкоманды начала и конца', () => {
-    expect(parsePacket(pkt(0x16, 0xf0))).toEqual({ kind: 'heart', phase: 'start' });
+  it('заголовок несёт число отметок, по ним и считается конец потока', () => {
+    expect(parsePacket(hexToBytes('16 f0 80 73 b0 6a 04 00 00 00 00 00 00 00 00 00 00 00 00 00'))).toEqual({
+      kind: 'heart',
+      phase: 'start',
+      expected: 4,
+    });
+    expect(parsePacket(hexToBytes('16 aa 03 10 7a b0 6a 02 00 00 00 00 00 00 00 00 00 00 00 00'))).toEqual({
+      kind: 'heart',
+      phase: 'mark',
+      index: 3,
+    });
     expect(parsePacket(pkt(0x16, 0xff))).toEqual({ kind: 'heart', phase: 'end' });
+  });
+
+  it('0x06 — кольцо занято', () => {
+    expect(parsePacket(pkt(0x06, 0x02))).toEqual({ kind: 'busy' });
   });
 });
 
@@ -96,6 +109,7 @@ describe('СИНТЕТИЧЕСКИЕ: шаги 0x10 и сон 0x11', () => {
   const t = ring('2026-09-18 07:00:00');
   it('255 — нет данных, 0 — настоящий ноль', () => {
     const p = parsePacket(pkt(0x10, ...u32(t), 0, 12, 255, 30));
+    expect(p.kind === 'steps' && p.isDayEnd).toBe(false);
     expect(p.kind === 'steps' && p.samples.slice(0, 3)).toEqual([
       { ts: t, value: 0 },
       { ts: t + 60, value: 12 },
@@ -122,6 +136,15 @@ describe('СИНТЕТИЧЕСКИЕ: сводка 0x55', () => {
   it('давление с сист. <= диаст. не принимается', () => {
     const p = parsePacket(pkt(0x55, ...u32(t), 80, 80, 30, 0, 0));
     expect(p.kind === 'summary' && p.records[0]).toMatchObject({ systolic: null, diastolic: null, stress: 30 });
+  });
+});
+
+describe('РЕАЛЬНЫЕ БАЙТЫ: маркер конца суток', () => {
+  it('пакет с меткой 23:45:00 помечает конец потока', () => {
+    const steps = parsePacket(hexToBytes('10 7c c1 b1 6a 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'));
+    expect(steps.kind === 'steps' && steps.isDayEnd).toBe(true);
+    const summary = parsePacket(hexToBytes('55 fc 6f b0 6a 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'));
+    expect(summary.kind === 'summary' && summary.isDayEnd).toBe(true);
   });
 });
 

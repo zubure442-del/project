@@ -1,3 +1,4 @@
+import type { AutoMeasurePeriod } from '../codec';
 import type { KnownRing } from '../ble';
 import type { RawByDay } from './raw';
 import type { ComponentId, ReportMode, SleepStage } from '../domain';
@@ -21,8 +22,10 @@ export interface DaySnapshot {
   /** Откуда взят пульс: ночь (пульс покоя) или минимум за день. */
   restingHrSource: 'night' | 'day' | null;
   /** Какие входы «организма» посчитаны — для объяснения в интерфейсе. */
-  stateInputs: { hrv: boolean; restingHr: boolean };
+  stateInputs: { hrv: boolean; restingHr: boolean; spo2: boolean };
   heart: DayPoint[];
+  /** Кислород за день: редкие одиночные замеры. */
+  spo2: DayPoint[];
   /** Напряжение (индекс стресса) по времени. */
   stress: DayPoint[];
   /** Точки сводки 0x55 по времени: для графиков давления, глюкозы и вариабельности. */
@@ -74,6 +77,10 @@ export interface VueloState {
   syncFailed: boolean;
   /** Профиль: нужен для 0x02 и расчёта пульсовых зон. */
   profile: Profile;
+  /** Частота автозамеров кольца, минуты: уходит в байт 6 команды 0x19. */
+  autoMeasureMin: AutoMeasurePeriod;
+  /** Когда получен заряд. */
+  batteryAt: number | null;
   /** Пользователь нажал «Начать» хотя бы раз: системный запрос Bluetooth уже показывали. */
   started: boolean;
 }
@@ -107,7 +114,9 @@ export const isProfileComplete = (p: Profile): boolean =>
 export const EMPTY_STATE: VueloState = {
   days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, battery: null,
   caloriesToday: null, caloriesDate: null,
-  ring: null, age: null, profile: EMPTY_PROFILE, started: false,
+  ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false,
 };
-/** Сколько дней показываем в недельной полосе. Кэш хранит ровно одну последнюю синхронизацию. */
+/** Сколько дней показываем в недельном графике. */
 export const HISTORY_DAYS = 7;
+/** Сколько дней держим в кэше; лишнее удаляется при запуске. */
+export const CACHE_DAYS = 30;

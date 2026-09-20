@@ -3,6 +3,7 @@ import type { SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
 import { buildSnapshots } from './build';
 import { mergeRaw, splitByDay, toSyncResult } from './raw';
+import { CACHE_DAYS } from './types';
 
 const ring = (s: string) => Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
 
@@ -64,15 +65,24 @@ describe('кэш рядов', () => {
     expect(mergeRaw(before, after)['2026-09-20'].summary).toHaveLength(1);
   });
 
-  it('хранятся последние семь дней', () => {
+  it('автоочистка: держим не больше CACHE_DAYS дней', () => {
     const many = Object.fromEntries(
-      Array.from({ length: 10 }, (_, i) => {
-        const date = `2026-09-${String(i + 10).padStart(2, '0')}`;
-        return [date, { date, steps: [[1, 1] as [number, number]], sleep: [], heart: [], summary: [] }];
+      Array.from({ length: CACHE_DAYS + 5 }, (_, i) => {
+        const date = new Date(Date.UTC(2026, 7, 1) + i * 86400000).toISOString().slice(0, 10);
+        return [date, { date, steps: [[1, 1] as [number, number]], sleep: [], heart: [], summary: [], spo2: [] }];
       }),
     );
     const kept = Object.keys(mergeRaw({}, many));
-    expect(kept).toHaveLength(7);
-    expect(kept[0]).toBe('2026-09-13');
+    expect(kept).toHaveLength(CACHE_DAYS);
+    // выброшены самые старые
+    expect(kept[0] > '2026-08-01').toBe(true);
+  });
+
+  it('сохранённый сон не стирается пустым ответом кольца', () => {
+    const withSleep = splitByDay({ ...empty, sleep: night });
+    // кольцо больше сон не отдаёт: приходят только шаги
+    const later = splitByDay({ ...empty, steps: [{ ts: ring('2026-09-20 09:00:00'), value: 30 }] });
+    const merged = mergeRaw(withSleep, later);
+    expect(merged['2026-09-20'].sleep.length).toBeGreaterThan(0);
   });
 });

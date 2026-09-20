@@ -39,15 +39,17 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
   const heartByDate = groupByDate(clean);
   const stepsByDate = groupByDate(sync.steps);
   const summaryByDate = groupByDate(sync.summary);
+  const spo2ByDate = groupByDate(sync.spo2);
 
   const dates = new Set<string>([
-    ...heartByDate.keys(), ...stepsByDate.keys(), ...summaryByDate.keys(),
+    ...heartByDate.keys(), ...stepsByDate.keys(), ...summaryByDate.keys(), ...spo2ByDate.keys(),
     ...sessions.map((s) => s.date),
   ]);
 
   const snapshots: DaySnapshot[] = [];
   for (const date of dates) {
     const heart = heartByDate.get(date) ?? [];
+    const spo2 = spo2ByDate.get(date) ?? [];
     const stepSamples = stepsByDate.get(date);
     const steps = stepSamples ? stepSamples.reduce((sum, s) => sum + s.value, 0) : null;
     const { night } = nightForDate(sessions, date);
@@ -60,6 +62,7 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
       steps,
       heart,
       age,
+      spo2: spo2.map((s) => s.value),
       hrv: summary.map((r) => r.hrv).filter((v): v is number => v !== null),
     });
 
@@ -73,6 +76,7 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
       restingHrSource: score.restingHr?.source ?? null,
       stateInputs: score.stateInputs,
       heart: toPoints(heart),
+      spo2: toPoints(spo2),
       stress: toPoints(
         summary.filter((r) => r.stress !== null).map((r) => ({ ts: r.ts, value: r.stress as number })),
       ),

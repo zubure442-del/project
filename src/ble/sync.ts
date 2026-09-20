@@ -2,6 +2,7 @@ import {
   activityCommand,
   archiveCommand,
   autoMeasureCommand,
+  type AutoMeasurePeriod,
   batteryCommand,
   parsePacket,
   prepareArchiveCommand,
@@ -19,6 +20,8 @@ export const IDLE_MS = 2000;
 export const FIRST_PACKET_MS = 2500;
 /** Тишина по запросу: один раз повторяем, потом считаем запрос неудачным и идём дальше. */
 export const STALL_MS = 10000;
+/** Сколько ждём после последней отметки aa, чтобы забрать хвост данных. */
+const TAIL_MS = 500;
 const GAP_BETWEEN_REQUESTS_MS = 500;
 const DAY_END_GRACE_MS = 500;
 const ACK_TIMEOUT_MS = 5000;
@@ -40,6 +43,7 @@ export interface RingProfile {
 export async function handshake(
   t: Transport,
   profile: RingProfile | null = null,
+  autoMeasureMin: AutoMeasurePeriod = 30,
   now = Date.now(),
   tzOffsetSeconds = -new Date().getTimezoneOffset() * 60,
 ) {
@@ -52,7 +56,7 @@ export async function handshake(
       const p = parsePacket(d);
       if (p.kind === 'autoMeasureAck') ack = p.accepted;
     });
-    await t.send(autoMeasureCommand(30));
+    await t.send(autoMeasureCommand(autoMeasureMin));
     const started = Date.now();
     while (ack === null && Date.now() - started < ACK_TIMEOUT_MS) await sleep(POLL_MS);
     off();
@@ -99,6 +103,8 @@ export interface SyncOptions {
   onProgress?: (fraction: number) => void;
   /** Каждый пришедший пакет с данными — для анимации. */
   onPacket?: () => void;
+  /** Данные по мере прихода: экран обновляется, не дожидаясь конца фазы. */
+  onData?: (partial: SyncResult) => void;
 }
 
 /** Запросов на один день: шаги, сон, пульс, сводка. */
@@ -152,6 +158,10 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
   let seen = 0;
   let finished = false;
   let dayEnd = false;
+  let busy = false;
+  let heartExpected = 0;
+  let heartMarks = 0;
+  let lastMarkAt = 0;
 
   const off = t.onPacket((d) => {
     const p = parsePacket(d);
@@ -159,8 +169,10 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     switch (p.kind) {
       case 'steps':
       case 'sleep':
+        // Сон приходит в окне запроса шагов: разбираем по коду пакета, а не по запросу.
         result[p.kind].push(...p.samples);
         result.packetCounts[p.kind]++;
+        if (p.isDayEnd) dayEnd = true;
         isData = true;
         break;
       case 'heart':
@@ -168,7 +180,13 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
           result.heart.push(...p.samples);
           result.packetCounts.heart++;
           isData = true;
-        } else if (p.phase === 'end') {
+        } else if (p.phase === 'start') {
+          heartExpected = p.expected;
+          heartMarks = 0;
+        } else if (p.phase === 'mark') {
+          heartMarks++;
+          lastMarkAt = Date.now();
+        } else {
           finished = true;
         }
         break;
@@ -181,6 +199,7 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
       case 'summary':
         result.summary.push(...p.records);
         result.packetCounts.summary++;
+        if (p.isDayEnd) dayEnd = true;
         isData = true;
         break;
       case 'battery':
@@ -188,6 +207,11 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
         break;
       case 'activity':
         result.activity = { steps: p.steps, distanceM: p.distanceM, calories: p.calories };
+        break;
+      case 'busy':
+        // Кольцо занято: ждём, повторять запрос бессмысленно.
+        busy = true;
+        lastRx = Date.now();
         break;
       case 'archiveEnd':
         finished = true;
@@ -204,36 +228,45 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
   const outOfTime = () => options.hardCapMs !== undefined && Date.now() - startedAt > options.hardCapMs;
 
   /**
-   * Отправляет запрос и ждёт, пока кольцо замолчит.
-   * Тишина дольше STALL_MS — один повтор; если и он пуст, запрос пропускаем,
-   * но выгрузку не прерываем: остальные данные могут прийти.
+   * Отправляет запрос и ждёт конца потока: маркер 23:45, счётчик отметок aa
+   * или тишина IDLE_MS. Повтор — только если за FIRST_PACKET_MS не пришло ничего
+   * и кольцо не ответило «занято».
    */
-  const request = async (kind: ArchiveKind, day: number, firstPacketMs: number, retries = 1) => {
-    let got = 0;
+  const request = async (kind: ArchiveKind, day: number, retries = 1) => {
     if (outOfTime()) {
       doneRequests++;
       report();
       return 0;
     }
+    let got = 0;
     for (let attempt = 0; attempt <= retries; attempt++) {
       seen = 0;
       finished = false;
       dayEnd = false;
+      busy = false;
+      heartExpected = 0;
+      heartMarks = 0;
+      lastMarkAt = 0;
       lastRx = 0;
       const started = Date.now();
       await t.send(archiveCommand(kind, day));
       for (;;) {
         await sleep(POLL_MS);
         const now = Date.now();
+        const heartDone = heartExpected > 0 && heartMarks >= heartExpected && now - lastMarkAt > TAIL_MS;
+        if (finished || heartDone) break;
+        if (dayEnd && now - lastRx > DAY_END_GRACE_MS) break;
         if (seen === 0) {
-          if (finished || now - started > (attempt === 0 ? firstPacketMs : STALL_MS)) break;
-        } else {
-          if (finished || now - lastRx > IDLE_MS) break;
-          if (dayEnd && now - lastRx > DAY_END_GRACE_MS) break;
+          const limit = attempt === 0 ? FIRST_PACKET_MS : STALL_MS;
+          // Пока кольцо говорит «занято», ждём: повторять запрос бессмысленно.
+          if (busy ? now - lastRx > STALL_MS : now - started > limit) break;
+        } else if (now - lastRx > IDLE_MS) {
+          break;
         }
       }
       got = seen;
-      if (got > 0) break;
+      options.onData?.(result);
+      if (got > 0 || busy) break;
     }
     await sleep(GAP_BETWEEN_REQUESTS_MS);
     doneRequests++;
@@ -247,10 +280,10 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     await sleep(500);
     for (let i = 0; i < days; i++) {
       const day = fromDay + i;
-      // Порядок: шаги (сон приходит в этом же окне), пульс, сводка.
-      // 0x40 (кислород) не запрашиваем: кольцо отдаёт его редко и ненадёжно.
-      for (const kind of ['steps', 'sleep', 'heart', 'summary'] as const) {
-        await request(kind, day, FIRST_PACKET_MS);
+      // 0x11 не запрашиваем: на него приходит только пустая заглушка,
+      // а сам сон кольцо отдаёт в окне запроса шагов.
+      for (const kind of ['steps', 'heart', 'summary', 'spo2'] as const) {
+        await request(kind, day);
       }
     }
     if (extras) {

@@ -21,11 +21,16 @@ export interface SummaryRecord {
 
 export type Packet =
   | { kind: 'spo2'; slotStart: number; isDayEnd: boolean; samples: Sample[] }
-  | { kind: 'heart'; phase: 'start' | 'end' }
+  /** Заголовок потока пульса: expected — сколько будет пакетов-отметок aa. */
+  | { kind: 'heart'; phase: 'start'; expected: number }
+  | { kind: 'heart'; phase: 'mark'; index: number }
+  | { kind: 'heart'; phase: 'end' }
   | { kind: 'heart'; phase: 'data'; samples: HeartSample[] }
-  | { kind: 'steps'; samples: Sample[] }
-  | { kind: 'sleep'; samples: Sample[] }
-  | { kind: 'summary'; records: SummaryRecord[] }
+  | { kind: 'steps'; isDayEnd: boolean; samples: Sample[] }
+  | { kind: 'sleep'; isDayEnd: boolean; samples: Sample[] }
+  | { kind: 'summary'; isDayEnd: boolean; records: SummaryRecord[] }
+  /** 0x06 — кольцо занято: надо ждать, а не повторять запрос. */
+  | { kind: 'busy' }
   | { kind: 'activity'; steps: number; distanceM: number; calories: number }
   | { kind: 'battery'; percent: number }
   | { kind: 'functions'; mask: Uint8Array }

@@ -19,6 +19,7 @@ export default function SleepTab() {
       busy={busy}
       progress={progress}
       demo={state.demo}
+      battery={state.battery}
       onSync={sync}
       onForgetDemo={() => setDemo(false)}
       onOpenSettings={() => router.push('/settings')}

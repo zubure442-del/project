@@ -135,26 +135,42 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
     expect(computeDayScore({ ...base, steps: 5000, age: null, heart: series([160, 160]) }).activity.score).toBe(35);
   });
   it('состояние: среднее доступных частей; низкий SpO2 снижает', () => {
-    expect(computeDayScore({ ...base, spo2: [95, 95] }).state.score).toBe(100);
-    expect(computeDayScore({ ...base, spo2: [90] }).state.score).toBe(0);
+    // одного входа мало: оценка не выставляется
+    expect(computeDayScore({ ...base, spo2: [95, 95] }).state.score).toBeNull();
+    expect(computeDayScore({ ...base, spo2: [98], hrv: [65] }).state.score).toBe(100);
+    expect(computeDayScore({ ...base, spo2: [90], hrv: [65] }).state.score).toBe(50);
     expect(computeDayScore({ ...base, spo2: [98], hrv: [32.5] }).state.score).toBe(75);
   });
   it('пульс покоя берётся из окна сна', () => {
     const n = night(336, 84);
     const heart = [50, 52, 55, 58, 90].map((value, i) => ({ ts: n.start + i * 1800, value }));
-    expect(computeDayScore({ ...base, night: n, heart }).restingHr).toBe(50);
+    expect(computeDayScore({ ...base, night: n, heart }).restingHr).toEqual({ value: 50, source: 'night' });
   });
 });
 
 describe('шаблонный отчёт', () => {
   const sc = (sleep: number | null, activity: number | null, state: number | null) => {
     const c = (v: number | null) => ({ score: v, weight: v === null ? 0 : 1 });
-    return { total: 50, sleep: c(sleep), activity: c(activity), state: c(state), restingHr: null };
+    return { total: 50, sleep: c(sleep), activity: c(activity), state: c(state), restingHr: null,
+      stateInputs: { spo2: false, hrv: false, restingHr: false } };
   };
-  it('фраз 30–40', () => {
+  it('фраз хватает на все три времени суток и без повторов', () => {
     const n = Object.keys(allTemplates()).length;
     expect(n).toBeGreaterThanOrEqual(30);
-    expect(n).toBeLessThanOrEqual(40);
+    expect(n).toBeLessThanOrEqual(60);
+  });
+  it('днём говорим «пока», без прошедшего времени про вечер', () => {
+    const past = /прош[её]л день|день получился|день вышел|был[о]? мало движения|день выдался/i;
+    for (const mode of ['morning', 'day'] as const) {
+      for (const focus of [null, 30, 60]) {
+        const r = buildTemplateReport({
+          mode,
+          score: sc(focus, focus, focus),
+          recentTemplateIds: [],
+        });
+        expect(r.text).not.toMatch(past);
+      }
+    }
   });
   it('упор на самую слабую составляющую', () => {
     expect(buildTemplateReport({ mode: 'morning', score: sc(30, 20, 80), recentTemplateIds: [] }).focus).toBe('sleep');

@@ -1,13 +1,12 @@
 import {
   activityCommand,
   archiveCommand,
-  batteryCommand,
   autoMeasureCommand,
+  batteryCommand,
   parsePacket,
   prepareArchiveCommand,
   setTimeCommand,
   type HeartSample,
-  type Packet,
   type Sample,
   type SummaryRecord,
 } from '../codec';
@@ -50,53 +49,6 @@ export async function handshake(t: Transport, now = Date.now(), tzOffsetSeconds 
 
 type ArchiveKind = 'steps' | 'sleep' | 'heart' | 'spo2' | 'summary';
 
-interface Collected {
-  packets: Packet[];
-  answered: boolean;
-}
-
-/** Отправляет запрос архива и собирает ответы до паузы IDLE_MS (или служебного конца). */
-async function collect(
-  t: Transport,
-  kind: ArchiveKind,
-  day: number,
-  firstPacketMs: number,
-  retries: number,
-): Promise<Collected> {
-  const wanted = kind === 'heart' ? 'heart' : kind;
-  let packets: Packet[] = [];
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    packets = [];
-    let lastRx = 0;
-    let finished = false;
-    let dayEnd = false;
-    const off = t.onPacket((d) => {
-      const p = parsePacket(d);
-      if (p.kind === 'archiveEnd' || (p.kind === 'heart' && p.phase === 'end')) finished = true;
-      if (p.kind !== wanted) return;
-      packets.push(p);
-      lastRx = Date.now();
-      if (p.kind === 'spo2' && p.isDayEnd) dayEnd = true;
-    });
-    const started = Date.now();
-    await t.send(archiveCommand(kind, day));
-    for (;;) {
-      await sleep(POLL_MS);
-      const now = Date.now();
-      if (packets.length === 0) {
-        if (finished || now - started > firstPacketMs) break;
-      } else {
-        if (finished || now - lastRx > IDLE_MS) break;
-        if (dayEnd && now - lastRx > DAY_END_GRACE_MS) break;
-      }
-    }
-    off();
-    if (packets.length > 0) break;
-  }
-  await sleep(GAP_BETWEEN_REQUESTS_MS);
-  return { packets, answered: packets.length > 0 };
-}
-
 export interface SyncResult {
   steps: Sample[];
   sleep: Sample[];
@@ -105,7 +57,7 @@ export interface SyncResult {
   summary: SummaryRecord[];
   /** Сводка за сегодня от кольца (0x03), если пришла. */
   activity: { steps: number; distanceM: number; calories: number } | null;
-  /** Заряд, если кольцо прислало его само. */
+  /** Заряд в процентах (0x0B). */
   battery: number | null;
   /** Сколько пакетов пришло по каждому виду данных — для диагностики. */
   packetCounts: Record<ArchiveKind, number>;
@@ -117,7 +69,15 @@ export interface SyncOptions {
   onProgress?: (message: string) => void;
 }
 
-/** Выгрузка архивов по дням. Дубли по метке времени схлопываются (позже пришедшее заменяет). */
+/**
+ * Выгрузка архивов по дням.
+ *
+ * Важно: кольцо отвечает не строго на «свою» команду. На запрос шагов (0x10) оно присылает
+ * сначала весь сон за этот день (0x11), а потом шаги; на сам запрос 0x11 приходит только
+ * пустое подтверждение. Поэтому входящие пакеты разбираются одним обработчиком и
+ * раскладываются по виду данных, а не по тому, какой запрос сейчас ждёт ответа.
+ * Запросы при этом отправляются все — как описано в PROTOCOL.md.
+ */
 export async function runSync(t: Transport, options: SyncOptions = {}): Promise<SyncResult> {
   const days = options.days ?? 7;
   const say = options.onProgress ?? (() => {});
@@ -125,11 +85,85 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     steps: [], sleep: [], heart: [], spo2: [], summary: [], activity: null, battery: null,
     packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 },
   };
+
+  /** Признаки активности кольца для текущего запроса. */
+  let lastRx = 0;
+  let seen = 0;
+  let finished = false;
+  let dayEnd = false;
+
   const off = t.onPacket((d) => {
     const p = parsePacket(d);
-    if (p.kind === 'battery') result.battery = p.percent;
-    if (p.kind === 'activity') result.activity = { steps: p.steps, distanceM: p.distanceM, calories: p.calories };
+    let isData = false;
+    switch (p.kind) {
+      case 'steps':
+      case 'sleep':
+        result[p.kind].push(...p.samples);
+        result.packetCounts[p.kind]++;
+        isData = true;
+        break;
+      case 'heart':
+        if (p.phase === 'data') {
+          result.heart.push(...p.samples);
+          result.packetCounts.heart++;
+          isData = true;
+        } else if (p.phase === 'end') {
+          finished = true;
+        }
+        break;
+      case 'spo2':
+        result.spo2.push(...p.samples);
+        result.packetCounts.spo2++;
+        if (p.isDayEnd) dayEnd = true;
+        isData = true;
+        break;
+      case 'summary':
+        result.summary.push(...p.records);
+        result.packetCounts.summary++;
+        isData = true;
+        break;
+      case 'battery':
+        result.battery = p.percent;
+        break;
+      case 'activity':
+        result.activity = { steps: p.steps, distanceM: p.distanceM, calories: p.calories };
+        break;
+      case 'archiveEnd':
+        finished = true;
+        break;
+    }
+    if (isData) {
+      seen++;
+      lastRx = Date.now();
+    }
   });
+
+  /** Отправляет запрос и ждёт, пока кольцо замолчит. Данные копит обработчик выше. */
+  const request = async (kind: ArchiveKind, day: number, firstPacketMs: number, retries = 0) => {
+    let got = 0;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      seen = 0;
+      finished = false;
+      dayEnd = false;
+      lastRx = 0;
+      const started = Date.now();
+      await t.send(archiveCommand(kind, day));
+      for (;;) {
+        await sleep(POLL_MS);
+        const now = Date.now();
+        if (seen === 0) {
+          if (finished || now - started > firstPacketMs) break;
+        } else {
+          if (finished || now - lastRx > IDLE_MS) break;
+          if (dayEnd && now - lastRx > DAY_END_GRACE_MS) break;
+        }
+      }
+      got = seen;
+      if (got > 0) break;
+    }
+    await sleep(GAP_BETWEEN_REQUESTS_MS);
+    return got;
+  };
 
   try {
     await t.send(prepareArchiveCommand());
@@ -138,22 +172,12 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     for (let day = 0; day < days; day++) {
       say(`День −${day}`);
       for (const kind of ['steps', 'sleep', 'heart'] as const) {
-        const c = await collect(t, kind, day, FIRST_PACKET_MS, 0);
-        for (const p of c.packets) {
-          if (p.kind === 'steps' || p.kind === 'sleep') result[p.kind].push(...p.samples);
-          if (p.kind === 'heart' && p.phase === 'data') result.heart.push(...p.samples);
-        }
-        result.packetCounts[kind] += c.packets.length;
+        await request(kind, day, FIRST_PACKET_MS);
       }
       const patient = spo2Answered || day === 0;
-      const s = await collect(t, 'spo2', day, patient ? FIRST_PACKET_SPO2_MS : FIRST_PACKET_MS, patient ? 1 : 0);
-      if (s.answered) spo2Answered = true;
-      for (const p of s.packets) if (p.kind === 'spo2') result.spo2.push(...p.samples);
-      result.packetCounts.spo2 += s.packets.length;
-
-      const m = await collect(t, 'summary', day, FIRST_PACKET_MS, 0);
-      for (const p of m.packets) if (p.kind === 'summary') result.summary.push(...p.records);
-      result.packetCounts.summary += m.packets.length;
+      const got = await request('spo2', day, patient ? FIRST_PACKET_SPO2_MS : FIRST_PACKET_MS, patient ? 1 : 0);
+      if (got > 0) spo2Answered = true;
+      await request('summary', day, FIRST_PACKET_MS);
     }
     // 0x03 — активность за сегодня, 0x0B — заряд. Оба разовые, не по дням (PROTOCOL.md, раздел 3).
     await t.send(activityCommand());

@@ -1,6 +1,7 @@
 import type { ComponentId, DayScore } from './score';
 
-export type ReportMode = 'morning' | 'evening';
+/** morning — до 11:00 про ночь, day — до 18:00 про текущий день, evening — итог дня. */
+export type ReportMode = 'morning' | 'day' | 'evening';
 
 export interface ReportInput {
   mode: ReportMode;
@@ -28,6 +29,10 @@ const NO_DATA: Pool = {
   'nodata-2': 'Данных за этот период недостаточно. Наденьте кольцо и обновите данные.',
 };
 const GOOD: Record<ReportMode, Pool> = {
+  day: {
+    'd-good-1': 'Пока всё идёт ровно. Держите привычный ритм.',
+    'd-good-2': 'Показатели пока в хорошем диапазоне.',
+  },
   morning: {
     'm-good-1': 'Ночь выглядит спокойной. Можно держать привычный ритм.',
     'm-good-2': 'Показатели после ночи в хорошем диапазоне. Хорошее утро для привычных дел.',
@@ -41,6 +46,39 @@ const GOOD: Record<ReportMode, Pool> = {
 };
 /** Советы по самой слабой составляющей. low — ниже 50, mid — 50–75. */
 const ADVICE: Record<ReportMode, Partial<Record<ComponentId, { low: Pool; mid: Pool }>>> = {
+  // Днём говорим только о том, что происходит сейчас: «пока», без прошедшего времени.
+  day: {
+    activity: {
+      low: {
+        'd-act-low-1': 'Движения пока немного. Ещё есть время выйти на прогулку.',
+        'd-act-low-2': 'Шагов пока мало. День ещё не закончился.',
+      },
+      mid: {
+        'd-act-mid-1': 'Шаги пока набираются. До привычной отметки ещё немного.',
+        'd-act-mid-2': 'Активность пока средняя. Прогулка добавит шагов.',
+      },
+    },
+    sleep: {
+      low: {
+        'd-sleep-low-1': 'Прошлая ночь была короткой. Сегодня держите темп поспокойнее.',
+        'd-sleep-low-2': 'Сна было мало. Не перегружайте остаток дня.',
+      },
+      mid: {
+        'd-sleep-mid-1': 'Сон прошлой ночи средний. Сегодня лучше не затягивать с отбоем.',
+        'd-sleep-mid-2': 'Ночью можно было поспать чуть больше. Учтите это к вечеру.',
+      },
+    },
+    state: {
+      low: {
+        'd-state-low-1': 'Показатели организма пока сдержанные. Выбирайте нагрузку по самочувствию.',
+        'd-state-low-2': 'Пока показатели невысокие. Подойдёт спокойный темп.',
+      },
+      mid: {
+        'd-state-mid-1': 'Показатели пока в середине диапазона. Не спешите.',
+        'd-state-mid-2': 'Организм пока держится на среднем уровне.',
+      },
+    },
+  },
   morning: {
     sleep: {
       low: {
@@ -109,8 +147,8 @@ const ADVICE: Record<ReportMode, Partial<Record<ComponentId, { low: Pool; mid: P
 
 /** Все шаблоны — для проверки и подсчёта. */
 export function allTemplates(): Pool {
-  const out: Pool = { ...NO_DATA, ...GOOD.morning, ...GOOD.evening };
-  for (const mode of ['morning', 'evening'] as const) {
+  const out: Pool = { ...NO_DATA, ...GOOD.morning, ...GOOD.day, ...GOOD.evening };
+  for (const mode of ['morning', 'day', 'evening'] as const) {
     for (const c of Object.values(ADVICE[mode])) Object.assign(out, c?.low, c?.mid);
   }
   return out;

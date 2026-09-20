@@ -12,6 +12,8 @@ export interface ScreenProps {
   busy: boolean;
   progress: string | null;
   demo: boolean;
+  /** Заряд кольца в процентах, если известен. */
+  battery?: number | null;
   onSync: () => void;
   onForgetDemo: () => void;
   onOpenSettings?: () => void;
@@ -19,7 +21,7 @@ export interface ScreenProps {
 }
 
 /** Общий каркас вкладки: шапка с кнопкой синхронизации, строка статуса, обновление свайпом. */
-export function Screen({ title, statusText, busy, progress, demo, onSync, onForgetDemo, onOpenSettings, children }: ScreenProps) {
+export function Screen({ title, statusText, busy, progress, demo, battery, onSync, onForgetDemo, onOpenSettings, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
   return (
     <View style={styles.root}>
@@ -39,6 +41,11 @@ export function Screen({ title, statusText, busy, progress, demo, onSync, onForg
         </View>
         <View style={styles.statusRow}>
           <Text style={styles.status}>{progress ?? statusText}</Text>
+          {battery != null ? (
+            <View style={styles.battery}>
+              <Text style={styles.batteryText}>Кольцо {battery}%</Text>
+            </View>
+          ) : null}
           {demo ? (
             <Pressable onPress={onForgetDemo} hitSlop={8}>
               <Text style={styles.demo}>убрать</Text>
@@ -97,6 +104,8 @@ export const styles = StyleSheet.create({
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs, flexWrap: 'wrap' },
   status: { color: colors.textMuted, fontSize: 13 },
   demo: { color: colors.accent, fontSize: 13 },
+  battery: { backgroundColor: colors.card, borderColor: colors.cardBorder, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
+  batteryText: { color: colors.textMuted, fontSize: 12 },
   scroll: { flex: 1 },
 
   card: {

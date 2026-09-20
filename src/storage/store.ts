@@ -13,6 +13,7 @@ export async function loadState(): Promise<VueloState> {
       days: parsed.days ?? [],
       reports: parsed.reports ?? [],
       lastSyncAt: parsed.lastSyncAt ?? null,
+      battery: parsed.battery ?? null,
       age: parsed.age ?? null,
       demo: false,
     };

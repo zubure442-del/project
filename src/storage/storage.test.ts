@@ -66,7 +66,8 @@ describe('сводки по дням', () => {
 describe('история', () => {
   const day = (date: string, total: number): DaySnapshot => ({
     date, total, scores: { sleep: null, activity: total, state: null }, steps: 100, sleep: null,
-    restingHr: null, heart: [], spo2: [], stress: [], stepsByHour: new Array(24).fill(0), sleepSegments: [],
+    restingHr: null, restingHrSource: null, stateInputs: { spo2: false, hrv: false, restingHr: false },
+    heart: [], spo2: [], stress: [], stepsByHour: new Array(24).fill(0), sleepSegments: [],
     estimates: { hrv: null, glucose: null, systolic: null, diastolic: null, stress: null },
   });
 

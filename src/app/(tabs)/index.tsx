@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import type { ComponentId } from '../../domain';
 import { COMPONENT_LABEL, Card, Ring, Screen, Stat, colors, spacing, styles as ui } from '../../ui';
-import { reportMode, reportTitle, useVuelo } from '../../state';
+import { lastSpo2, reportMode, reportTitle, useVuelo } from '../../state';
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 
@@ -11,6 +11,7 @@ export default function TodayTab() {
   const { today, report, state, busy, progress, statusText, sync, setDemo } = useVuelo();
   const { width } = useWindowDimensions();
   const sleep = today?.sleep;
+  const oxygen = lastSpo2(state.days);
 
   return (
     <Screen
@@ -19,6 +20,7 @@ export default function TodayTab() {
       busy={busy}
       progress={progress}
       demo={state.demo}
+      battery={state.battery}
       onSync={sync}
       onForgetDemo={() => setDemo(false)}
       onOpenSettings={() => router.push('/settings')}
@@ -62,11 +64,15 @@ export default function TodayTab() {
         <View style={ui.statRow}>
           <Stat label="Сон" value={sleep ? `${Math.floor(sleep.totalMin / 60)}ч ${sleep.totalMin % 60}м` : '—'} />
           <Stat label="Шаги" value={today?.steps != null ? String(today.steps) : '—'} />
-          <Stat label="Пульс покоя" value={today?.restingHr != null ? String(today.restingHr) : '—'} unit="уд/мин" />
+          <Stat
+            label={today?.restingHrSource === 'day' ? 'Мин. пульс за день' : 'Пульс покоя'}
+            value={today?.restingHr != null ? String(today.restingHr) : '—'}
+            unit="уд/мин"
+          />
           <Stat
             label="Кислород"
-            value={today?.spo2.length ? `${today.spo2[today.spo2.length - 1].v}` : '—'}
-            unit={today?.spo2.length ? '%' : undefined}
+            value={oxygen ? `${oxygen.value} %` : '—'}
+            unit={oxygen && !today?.spo2.length ? `· ${oxygen.when}` : undefined}
           />
         </View>
       </Card>

@@ -1,4 +1,5 @@
 import type { Sample } from '../codec/types';
+import { smoothHeart } from './heart';
 import type { SleepSession } from './sleep';
 import { sleepMinutes } from './sleep';
 
@@ -29,12 +30,20 @@ export interface ComponentScore {
   weight: number;
 }
 
+export interface RestingHr {
+  value: number;
+  /** night — пульс покоя за ночь; day — запасной расчёт: минимум за день. */
+  source: 'night' | 'day';
+}
+
 export interface DayScore {
   total: number | null;
   sleep: ComponentScore;
   activity: ComponentScore;
   state: ComponentScore;
-  restingHr: number | null;
+  restingHr: RestingHr | null;
+  /** Какие входы «организма» удалось посчитать — для объяснения в интерфейсе. */
+  stateInputs: { spo2: boolean; hrv: boolean; restingHr: boolean };
 }
 
 const clamp = (x: number, lo = 0, hi = 100) => Math.min(hi, Math.max(lo, x));
@@ -72,28 +81,48 @@ export function activityScore(steps: number | null, heart: Sample[], age: number
   return Math.min(100, stepScore * 0.7 + bonus * 4);
 }
 
-/** Пульс покоя: медиана самых низких 25% замеров за ночь (нужно не меньше 3 замеров). */
-export function restingHeartRate(heart: Sample[], night: SleepSession | null): number | null {
-  if (!night) return null;
-  const values = heart
-    .filter((s) => s.ts >= night.start && s.ts <= night.end)
-    .map((s) => s.value)
-    .sort((a, b) => a - b);
-  if (values.length < 3) return null;
-  const low = values.slice(0, Math.max(1, Math.floor(values.length / 4)));
+const medianOfLowest = (values: number[], share: number): number => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const low = sorted.slice(0, Math.max(1, Math.round(sorted.length * share)));
   const mid = low.length >> 1;
   return Math.round(low.length % 2 ? low[mid] : (low[mid - 1] + low[mid]) / 2);
+};
+
+const MIN_NIGHT_SAMPLES = 3;
+const MIN_DAY_SAMPLES = 5;
+
+/**
+ * Пульс покоя: медиана самых низких 25 % замеров за ночь.
+ * Если ночи нет, запасной вариант — медиана нижних 10 % сглаженных замеров за день;
+ * это уже не пульс покоя, а минимум за день, поэтому источник возвращается отдельно.
+ */
+export function restingHeartRate(heart: Sample[], night: SleepSession | null): RestingHr | null {
+  if (night) {
+    const atNight = heart.filter((s) => s.ts >= night.start && s.ts <= night.end).map((s) => s.value);
+    if (atNight.length >= MIN_NIGHT_SAMPLES) return { value: medianOfLowest(atNight, 0.25), source: 'night' };
+  }
+  if (heart.length < MIN_DAY_SAMPLES) return null;
+  return { value: medianOfLowest(smoothHeart(heart).map((s) => s.value), 0.1), source: 'day' };
 }
 
-export function stateScore(spo2: number[], hrv: number[], restingHr: number | null): number | null {
+/** Сколько входов из трёх нужно, чтобы оценка «организма» вообще выставлялась. */
+export const STATE_MIN_INPUTS = 2;
+
+/**
+ * «Организм» — среднее трёх оценок: кислород, вариабельность и пульс покоя.
+ * По одному входу оценку не выставляем: например, один хороший замер кислорода
+ * давал бы 100 из 100 на пустом месте.
+ */
+export function stateScore(spo2: number[], hrv: number[], restingHr: RestingHr | null): number | null {
   const parts: number[] = [];
   if (spo2.length) {
     const a = avg(spo2);
     parts.push(a >= 95 ? 100 : clamp(100 - (95 - a) * 20));
   }
   if (hrv.length) parts.push(Math.min(100, (avg(hrv) / 65) * 100));
-  if (restingHr !== null) parts.push(clamp(100 - Math.max(0, restingHr - 60) * 2.5));
-  return parts.length ? avg(parts) : null;
+  // Минимум за день вместо ночного пульса покоя — не то же самое, в оценку не берём.
+  if (restingHr?.source === 'night') parts.push(clamp(100 - Math.max(0, restingHr.value - 60) * 2.5));
+  return parts.length >= STATE_MIN_INPUTS ? avg(parts) : null;
 }
 
 export function computeDayScore(input: ScoreInput): DayScore {
@@ -110,5 +139,12 @@ export function computeDayScore(input: ScoreInput): DayScore {
     weight: scores[k] === null ? 0 : WEIGHTS[k] / weightSum,
   });
   const total = weightSum === 0 ? null : Math.round(present.reduce((sum, k) => sum + WEIGHTS[k] * (scores[k] as number), 0) / weightSum);
-  return { total, sleep: comp('sleep'), activity: comp('activity'), state: comp('state'), restingHr };
+  return {
+    total,
+    sleep: comp('sleep'),
+    activity: comp('activity'),
+    state: comp('state'),
+    restingHr,
+    stateInputs: { spo2: input.spo2.length > 0, hrv: input.hrv.length > 0, restingHr: restingHr?.source === 'night' },
+  };
 }

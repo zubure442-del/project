@@ -1,10 +1,13 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from 'react-native-svg';
 import { HR_SMOOTH_MAX_GAP, niceTicks, smoothHeart, splitSegments, type SleepStage } from '../domain';
 import type { DayPoint, DaySnapshot } from '../storage';
 import { Plot } from './Plot';
 import { colors, spacing, withAlpha } from './theme';
+
+/** Стресс: разрыв больше 45 минут линией не затягиваем. */
+export const STRESS_MAX_GAP = 45 * 60;
 
 const STAGE_COLOR: Record<SleepStage, string> = {
   deep: colors.accent,
@@ -66,21 +69,75 @@ export function Spo2Chart({ points, width }: { points: DayPoint[]; width: number
   );
 }
 
-/** Напряжение за день: линия 0–100. */
+/** Стресс за день: линия 0–100 с порогами 30 и 60; при разрыве больше 45 минут линия рвётся. */
 export function StressChart({ points, width }: { points: DayPoint[]; width: number }) {
   const sorted = [...points].sort((a, b) => a.m - b.m);
+  const segments = splitSegments(sorted.map((p) => ({ ts: p.m * 60, value: p.v })), STRESS_MAX_GAP);
   return (
-    <Plot width={width} yMin={0} yMax={100} yTicks={[0, 30, 60, 100]} empty={sorted.length < 2}>
+    <Plot width={width} yMin={0} yMax={100} yTicks={[0, 30, 60, 100]} empty={!sorted.length}>
       {(s) => (
-        <Path
-          d={sorted.map((p, i) => `${i ? 'L' : 'M'}${s.x(p.m)} ${s.y(p.v)}`).join(' ')}
-          stroke={colors.accent}
-          strokeWidth={2}
-          strokeLinejoin="round"
-          fill="none"
-        />
+        <>
+          {segments.map((seg, i) =>
+            seg.length === 1 ? (
+              <Circle key={i} cx={s.x(seg[0].ts / 60)} cy={s.y(seg[0].value)} r={3} fill={colors.accent} />
+            ) : (
+              <Path
+                key={i}
+                d={seg.map((p, j) => `${j ? 'L' : 'M'}${s.x(p.ts / 60)} ${s.y(p.value)}`).join(' ')}
+                stroke={colors.accent}
+                strokeWidth={2}
+                strokeLinejoin="round"
+                fill="none"
+              />
+            ),
+          )}
+        </>
       )}
     </Plot>
+  );
+}
+
+/** Кислород за несколько дней: ось по дням, а не наложение суток. */
+export function Spo2DaysChart({ days, width }: { days: { date: string; points: DayPoint[] }[]; width: number }) {
+  const height = 150;
+  const gutter = 36;
+  const plotWidth = width - gutter;
+  const slot = days.length ? plotWidth / days.length : plotWidth;
+  const yMin = 90;
+  const yMax = 100;
+  const y = (v: number) => height - 20 - ((Math.max(yMin, v) - yMin) / (yMax - yMin)) * (height - 30);
+  const empty = days.every((d) => !d.points.length);
+  if (empty) {
+    return (
+      <View style={{ width, height, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={styles.emptyText}>Замеров пока нет</Text>
+      </View>
+    );
+  }
+  return (
+    <Svg width={width} height={height}>
+      {[90, 92, 94, 96, 98, 100].map((v) => (
+        <React.Fragment key={v}>
+          <Line x1={gutter} x2={width} y1={y(v)} y2={y(v)} stroke={colors.track} strokeWidth={1} />
+          <SvgText x={gutter - 6} y={y(v) + 4} fill={colors.textMuted} fontSize={11} textAnchor="end">
+            {`${v}%`}
+          </SvgText>
+        </React.Fragment>
+      ))}
+      {days.map((d, i) => (
+        <React.Fragment key={d.date}>
+          {i > 0 ? (
+            <Line x1={gutter + i * slot} x2={gutter + i * slot} y1={8} y2={height - 20} stroke={colors.track} strokeWidth={1} />
+          ) : null}
+          {d.points.map((p, j) => (
+            <Circle key={j} cx={gutter + i * slot + (p.m / 1440) * slot} cy={y(p.v)} r={3.2} fill={colors.accent} />
+          ))}
+          <SvgText x={gutter + (i + 0.5) * slot} y={height - 4} fill={colors.textMuted} fontSize={12} textAnchor="middle">
+            {dayLabel(d.date)}
+          </SvgText>
+        </React.Fragment>
+      ))}
+    </Svg>
   );
 }
 
@@ -174,18 +231,24 @@ export const WEEK_METRIC_CAPTION: Record<WeekMetric, string> = {
   steps: 'Шаги за день',
 };
 
-function weekValue(day: DaySnapshot, metric: WeekMetric): number | null {
+function weekValue(day: DaySnapshot | null, metric: WeekMetric): number | null {
+  if (!day) return null;
   if (metric === 'total') return day.total;
   if (metric === 'steps') return day.steps;
   return day.sleep ? Math.round((day.sleep.totalMin / 60) * 10) / 10 : null;
+}
+
+export interface WeekDay {
+  date: string;
+  day: DaySnapshot | null;
 }
 
 const WEEK_DAY = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 const dayLabel = (date: string) => WEEK_DAY[new Date(`${date}T12:00:00Z`).getUTCDay()];
 
 /** Неделя: столбцы с подписанными значениями над ними. */
-export function WeekChart({ days, metric, width }: { days: DaySnapshot[]; metric: WeekMetric; width: number }) {
-  const values = days.map((d) => weekValue(d, metric));
+export function WeekChart({ days, metric, width }: { days: WeekDay[]; metric: WeekMetric; width: number }) {
+  const values = days.map((d) => weekValue(d.day, metric));
   const max = Math.max(...values.map((v) => v ?? 0), 1);
   const height = 150;
   const gap = 10;

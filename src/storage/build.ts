@@ -72,7 +72,9 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
       scores: { sleep: score.sleep.score, activity: score.activity.score, state: score.state.score },
       steps,
       sleep: night ? { totalMin: sleepMinutes(night), deepMin: night.deepMin, lightMin: night.lightMin } : null,
-      restingHr: score.restingHr,
+      restingHr: score.restingHr?.value ?? null,
+      restingHrSource: score.restingHr?.source ?? null,
+      stateInputs: score.stateInputs,
       heart: toPoints(heart),
       spo2: toPoints(spo2),
       stress: toPoints(

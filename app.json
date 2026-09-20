@@ -13,7 +13,7 @@
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.vuelo.app",
+      "bundleIdentifier": "ru.vuelo.ring",
       "infoPlist": {
         "EXDevMenuShowFloatingActionButton": false
       }

@@ -3,12 +3,12 @@ import { Alert } from 'react-native';
 import { RingBle, handshake, runSync } from '../ble';
 import type { Report } from '../domain';
 import { EMPTY_STATE, addReport, loadState, saveState, type DaySnapshot, type VueloState } from '../storage';
-import { applySync, demoSync, findToday, reportMode, reportToShow, savedReport, syncStatusText, todayKey } from './day';
+import { applySync, demoSync, findToday, reportMode, reportToShow, savedReport, syncStatusText, todayKey, weekDays } from './day';
 
 interface Vuelo {
   state: VueloState;
   today: DaySnapshot | null;
-  week: DaySnapshot[];
+  week: { date: string; day: DaySnapshot | null }[];
   report: Report | null;
   busy: boolean;
   progress: string | null;
@@ -91,7 +91,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     return {
       state,
       today,
-      week: state.days,
+      week: weekDays(state.days),
       report: reportToShow(state, today) ?? savedReport(state),
       busy,
       progress,

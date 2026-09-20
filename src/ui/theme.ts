@@ -1,20 +1,20 @@
-/** Тёмный фон, один акцентный цвет, крупные тонкие цифры. Акцент — тёплый янтарный. */
+/** Тёмный фон, один акцентный цвет. Цветом выделяем только данные. */
 export const colors = {
   bg: '#0B0B0F',
   card: '#15151C',
-  cardBorder: '#24242F',
   accent: '#F2A93B',
-  /** Концы градиента главной дуги: от густого янтаря к светлому золоту. */
+  /** Концы градиента главной дуги. */
   arcFrom: '#C9721F',
   arcTo: '#FFD27A',
-  track: '#22222D',
+  track: '#23232E',
   text: '#F4F4F6',
   textMuted: '#A8A8B8',
   textFaint: '#7A7A88',
 } as const;
 
 export const spacing = { xs: 6, sm: 10, md: 16, lg: 24, xl: 36 } as const;
-export const radius = { card: 20, pill: 999 } as const;
+/** Один радиус на все карточки. */
+export const radius = { card: 18, pill: 999 } as const;
 
 export const COMPONENT_LABEL = { sleep: 'Сон', activity: 'Активность', state: 'Организм' } as const;
 

@@ -1,32 +1,18 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import {
-  Card,
-  Screen,
-  Stat,
-  StepsHourChart,
-  WEEK_METRIC_CAPTION,
-  WEEK_METRIC_LABEL,
-  WeekChart,
-  colors,
-  radius,
-  spacing,
-  styles as ui,
-  type WeekMetric,
-} from '../../ui';
-import { useVuelo } from '../../state';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { findDay, todayKey, useVuelo } from '../../state';
+import { Card, InfoButton, Screen, Stat, StepsHourChart, WeekStrip, colors, spacing, styles as ui } from '../../ui';
 
-const METRICS: WeekMetric[] = ['total', 'sleep', 'steps'];
-
-/** «Активность»: шаги по часам и неделя с переключателем показателя. */
 export default function ActivityTab() {
-  const { today, week, state, busy, progress, statusText, sync, setDemo } = useVuelo();
+  const { week, state, busy, progress, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const [metric, setMetric] = useState<WeekMetric>('total');
-  const chartWidth = width - spacing.md * 4;
-  const hours = today?.stepsByHour ?? [];
-  const bestHour = hours.length ? hours.indexOf(Math.max(...hours)) : null;
+  const [picked, setPicked] = useState<string | null>(null);
+  const [metric, setMetric] = useState('score');
+  const date = picked ?? todayKey();
+  const day = findDay(state.days, date);
+  const hours = day?.stepsByHour ?? [];
+  const best = hours.length ? hours.indexOf(Math.max(...hours)) : -1;
 
   return (
     <Screen
@@ -34,49 +20,55 @@ export default function ActivityTab() {
       statusText={statusText}
       busy={busy}
       progress={progress}
-      demo={state.demo}
       battery={state.battery}
       onSync={sync}
-      onForgetDemo={() => setDemo(false)}
-      onOpenSettings={() => router.push('/settings')}
+      onOpenRing={() => router.push('/ring')}
     >
-      <Card title="Шаги по часам" note="сегодня">
-        <StepsHourChart hours={hours} width={chartWidth} />
-      </Card>
+      <WeekStrip
+        days={week}
+        metrics={[
+          { id: 'score', label: 'Оценка', value: (d) => d.scores.activity },
+          { id: 'steps', label: 'Шаги', value: (d) => d.steps },
+        ]}
+        metricId={metric}
+        onMetric={setMetric}
+        selected={date}
+        onSelect={setPicked}
+      />
 
-      <Card title="За день">
+      <Card>
         <View style={ui.statRow}>
-          <Stat label="Шаги" value={today?.steps != null ? String(today.steps) : '—'} />
-          <Stat
-            label="Самый активный час"
-            value={bestHour !== null && hours[bestHour] > 0 ? `${bestHour}:00` : '—'}
-          />
-          <Stat label="Оценка активности" value={today?.scores.activity != null ? String(today.scores.activity) : '—'} unit="из 100" />
+          <Stat label="Шаги" value={day?.steps != null ? String(day.steps) : '—'} />
+          <Stat label="Активный час" value={best >= 0 && hours[best] > 0 ? `${best}:00` : '—'} />
         </View>
       </Card>
 
-      <Card title="Неделя" note={WEEK_METRIC_CAPTION[metric]}>
-        <View style={styles.switcher}>
-          {METRICS.map((m) => (
-            <Pressable
-              key={m}
-              onPress={() => setMetric(m)}
-              style={[styles.tab, metric === m && styles.tabActive]}
-            >
-              <Text style={[styles.tabText, metric === m && styles.tabTextActive]}>{WEEK_METRIC_LABEL[m]}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <WeekChart days={week} metric={metric} width={chartWidth} />
+      {picked ? (
+        <Card title="Шаги по часам">
+          <StepsHourChart hours={hours} width={width - spacing.md * 4} />
+        </Card>
+      ) : (
+        <Card>
+          <Text style={styles.hint}>Выберите день наверху, чтобы увидеть шаги по часам.</Text>
+        </Card>
+      )}
+
+      <Card
+        title="Оценка активности"
+        right={
+          <InfoButton
+            title="Оценка активности"
+            text="Основа — шаги: десять тысяч дают максимум. Время с высоким пульсом добавляет сверху. Оценка растёт в течение дня, поэтому утром она всегда низкая."
+          />
+        }
+      >
+        <Text style={styles.score}>{day?.scores.activity ?? '—'}</Text>
       </Card>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  switcher: { flexDirection: 'row', gap: spacing.xs, marginBottom: spacing.md },
-  tab: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: colors.track },
-  tabActive: { backgroundColor: colors.accent },
-  tabText: { color: colors.textMuted, fontSize: 13, fontWeight: '500' },
-  tabTextActive: { color: colors.bg },
+  score: { color: colors.text, fontSize: 40, fontWeight: '200' },
+  hint: { color: colors.textMuted, fontSize: 15, lineHeight: 22 },
 });

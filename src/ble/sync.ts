@@ -16,7 +16,6 @@ import { sleep, type Transport } from './transport';
 export const IDLE_MS = 2000;
 /** Сколько ждём ПЕРВЫЙ пакет: кольцу нужно время поднять данные из памяти. */
 export const FIRST_PACKET_MS = 2500;
-export const FIRST_PACKET_SPO2_MS = 4000;
 const GAP_BETWEEN_REQUESTS_MS = 500;
 const DAY_END_GRACE_MS = 500;
 const ACK_TIMEOUT_MS = 5000;
@@ -168,15 +167,13 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
   try {
     await t.send(prepareArchiveCommand());
     await sleep(500);
-    let spo2Answered = false;
     for (let day = 0; day < days; day++) {
       say(`День −${day}`);
       for (const kind of ['steps', 'sleep', 'heart'] as const) {
         await request(kind, day, FIRST_PACKET_MS);
       }
-      const patient = spo2Answered || day === 0;
-      const got = await request('spo2', day, patient ? FIRST_PACKET_SPO2_MS : FIRST_PACKET_MS, patient ? 1 : 0);
-      if (got > 0) spo2Answered = true;
+      // 0x40 (кислород) не запрашиваем: кольцо отдаёт его редко и ненадёжно.
+      // Разбор пакета остался в кодеке на случай, если понадобится вернуть.
       await request('summary', day, FIRST_PACKET_MS);
     }
     // 0x03 — активность за сегодня, 0x0B — заряд. Оба разовые, не по дням (PROTOCOL.md, раздел 3).

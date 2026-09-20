@@ -9,7 +9,7 @@ export default function TabsLayout() {
         sceneStyle: { backgroundColor: colors.bg },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textFaint,
-        tabBarStyle: { backgroundColor: '#101017', borderTopColor: colors.cardBorder },
+        tabBarStyle: { backgroundColor: '#101017', borderTopColor: colors.track },
         tabBarLabelStyle: { fontSize: 11 },
       }}
     >

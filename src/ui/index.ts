@@ -3,5 +3,7 @@ export * from './Logo';
 export * from './Plot';
 export * from './Ring';
 export * from './Screen';
+export * from './Sheet';
 export * from './TabIcons';
 export * from './theme';
+export * from './WeekStrip';

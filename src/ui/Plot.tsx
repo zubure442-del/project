@@ -4,7 +4,7 @@ import Svg, { Line, Text as SvgText } from 'react-native-svg';
 import { formatMinute } from '../domain';
 import { colors } from './theme';
 
-export const EMPTY_TEXT = 'Замеров пока нет';
+export const EMPTY_TEXT = 'Нет данных';
 
 export interface Scale {
   /** Минуты от полуночи → координата X. */
@@ -28,8 +28,6 @@ interface PlotProps {
   yMax: number;
   yTicks: number[];
   yFormat?: (value: number) => string;
-  /** Подписи слева вместо чисел (для гипнограммы). */
-  yLabels?: { value: number; label: string }[];
   empty?: boolean;
   children: (scale: Scale) => ReactNode;
 }
@@ -46,7 +44,6 @@ export function Plot({
   yMax,
   yTicks,
   yFormat = (v) => String(Math.round(v)),
-  yLabels,
   empty = false,
   children,
 }: PlotProps) {
@@ -72,7 +69,7 @@ export function Plot({
     bottom,
   };
   const timeTicks = xTicks ?? [0, 360, 720, 1080, 1440];
-  const valueTicks = yLabels ?? yTicks.map((value) => ({ value, label: yFormat(value) }));
+  const valueTicks = yTicks.map((value) => ({ value, label: yFormat(value) }));
 
   return (
     <Svg width={width} height={height}>

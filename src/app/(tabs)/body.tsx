@@ -1,47 +1,32 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import {
-  Card,
-  HeartChart,
-  Screen,
-  Spo2Chart,
-  Spo2DaysChart,
-  Stat,
-  StressChart,
-  colors,
-  spacing,
-  styles as ui,
-} from '../../ui';
-import { stressZone } from '../../domain';
-import { lastSpo2, spo2Days, useVuelo } from '../../state';
 import { router } from 'expo-router';
+import { useState } from 'react';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { stressZone } from '../../domain';
+import { findDay, todayKey, useVuelo } from '../../state';
+import { Card, HeartChart, InfoButton, Screen, Stat, StressChart, WeekStrip, colors, spacing, styles as ui } from '../../ui';
 
 const STRESS_HELP =
-  'Индекс кольца от 0 до 100, четыре зоны: 0–30 низкий, 31–60 умеренный, 61–80 повышенный, ' +
-  '81–100 высокий. Кольцо оценивает его по пульсовой волне — это оценка, а не медицинский ' +
-  'показатель, и в итог Vuelo он не входит. Значение 0 замером не считается.';
+  'Кольцо оценивает напряжение по пульсовой волне: 0–30 низкий, 31–60 умеренный, 61–80 повышенный, ' +
+  '81–100 высокий. Это оценка, а не медицинский показатель, и в итог она не входит.';
 
-/** «Тело»: пульс, кислород, стресс и оценочные показатели. */
+const STATE_HELP =
+  'Среднее двух оценок: вариабельность ритма и пульс во сне. Нужны обе — по одной цифре оценка была бы ' +
+  'случайной. Вариабельность 65 мс и пульс 60 уд/мин дают максимум.';
+
+const ESTIMATE_HELP =
+  'Кольцо не измеряет давление и глюкозу, а оценивает их по пульсовой волне. Числа показаны как есть, ' +
+  'выводов по ним приложение не делает и в итог их не берёт.';
+
 export default function BodyTab() {
-  const { today, state, busy, progress, statusText, sync, setDemo } = useVuelo();
+  const { week, state, busy, progress, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const [stressHelp, setStressHelp] = useState(false);
+  const [picked, setPicked] = useState(todayKey());
+  const [metric, setMetric] = useState('score');
+  const day = findDay(state.days, picked);
   const chartWidth = width - spacing.md * 4;
-
-  const days = state.days;
-  const recent = spo2Days(days);
-  const showDays = !today?.spo2.length && recent.length > 1;
-  const last = lastSpo2(days);
-  const est = today?.estimates;
-  const num = (v: number | null | undefined, digits = 0) =>
-    v === null || v === undefined ? '—' : v.toFixed(digits);
-
-  const inputs = today?.stateInputs;
-  const missing = inputs
-    ? [!inputs.spo2 && 'кислорода', !inputs.hrv && 'вариабельности', !inputs.restingHr && 'пульса покоя'].filter(
-        Boolean,
-      )
-    : [];
+  const est = day?.estimates;
+  const heart = day?.heart ?? [];
+  const values = heart.map((p) => p.v);
 
   return (
     <Screen
@@ -49,75 +34,66 @@ export default function BodyTab() {
       statusText={statusText}
       busy={busy}
       progress={progress}
-      demo={state.demo}
       battery={state.battery}
       onSync={sync}
-      onForgetDemo={() => setDemo(false)}
-      onOpenSettings={() => router.push('/settings')}
+      onOpenRing={() => router.push('/ring')}
     >
-      <Card title="Пульс" note="точки — замеры, линия — сглажено">
-        <HeartChart points={today?.heart ?? []} width={chartWidth} />
-        <Text style={styles.inline}>
-          {today?.restingHr != null
-            ? `${today.restingHrSource === 'night' ? 'Пульс покоя' : 'Мин. пульс за день'}: ${today.restingHr} уд/мин`
-            : 'Пульс покоя появится после ночи с кольцом.'}
-        </Text>
+      <WeekStrip
+        days={week}
+        metrics={[
+          { id: 'score', label: 'Организм', value: (d) => d.scores.state },
+          { id: 'pulse', label: 'Пульс во сне', value: (d) => (d.restingHrSource === 'night' ? d.restingHr : null) },
+          { id: 'stress', label: 'Стресс', value: (d) => d.estimates.stress },
+        ]}
+        metricId={metric}
+        onMetric={setMetric}
+        selected={picked}
+        onSelect={setPicked}
+      />
+
+      <Card title="Пульс">
+        <HeartChart points={heart} width={chartWidth} />
+        {values.length ? (
+          <Text style={styles.range}>
+            {Math.min(...values)} · {Math.max(...values)} уд/мин
+          </Text>
+        ) : null}
       </Card>
 
-      <Card title="Кислород в крови" note={showDays ? 'сегодня замеров нет, показаны последние дни' : 'редкие замеры'}>
-        {showDays ? (
-          <Spo2DaysChart days={recent} width={chartWidth} />
-        ) : (
-          <Spo2Chart points={today?.spo2 ?? []} width={chartWidth} />
-        )}
-        <Text style={styles.inline}>
-          {last ? `Последний замер: ${last.value} % · ${last.when}` : 'Кольцо мерит кислород редко и только при неподвижной руке.'}
-        </Text>
+      <Card
+        title="Стресс"
+        right={<InfoButton title="Стресс" text={STRESS_HELP} />}
+      >
+        <StressChart points={day?.stress ?? []} width={chartWidth} />
+        {est?.stress != null ? (
+          <Text style={styles.range}>
+            {Math.round(est.stress)} · {stressZone(Math.round(est.stress)) ?? '—'}
+          </Text>
+        ) : null}
       </Card>
 
-      <Card>
-        <Pressable onPress={() => setStressHelp((v) => !v)} hitSlop={6}>
-          <Text style={ui.cardTitle}>Стресс {stressHelp ? '⌃' : 'ⓘ'}</Text>
-        </Pressable>
-        {stressHelp ? <Text style={styles.help}>{STRESS_HELP}</Text> : null}
-        <StressChart points={today?.stress ?? []} width={chartWidth} />
-        <Text style={styles.inline}>
-          {est?.stress != null
-            ? `Среднее за день: ${Math.round(est.stress)} · ${stressZone(Math.round(est.stress)) ?? '—'}`
-            : 'За сегодня замеров нет.'}
-        </Text>
-      </Card>
-
-      <Card title="Организм" note={today?.scores.state != null ? 'из 100' : 'недостаточно данных'}>
-        <Text style={styles.score}>{today?.scores.state ?? '—'}</Text>
-        <Text style={ui.disclaimer}>
-          Среднее трёх оценок: кислород (100 при 95 % и выше), вариабельность (100 при 65 мс) и пульс покоя за ночь
-          (100 при 60 уд/мин и ниже). Нужны хотя бы два входа из трёх, иначе оценка не выставляется: по одному замеру
-          кислорода получилось бы 100 из 100 на пустом месте.
-          {missing.length ? ` Сейчас не хватает: ${missing.join(', ')}.` : ''}
-        </Text>
-      </Card>
-
-      <Card title="Оценка" note="не измерение, выводов не делаем">
+      <Card title="Организм" right={<InfoButton title="Организм" text={STATE_HELP} />}>
         <View style={ui.statRow}>
-          <Stat label="Вариабельность" value={num(est?.hrv)} unit={est?.hrv != null ? 'мс' : undefined} />
-          <Stat label="Глюкоза" value={num(est?.glucose, 1)} unit={est?.glucose != null ? 'ммоль/л' : undefined} />
+          <Stat label="Оценка" value={day?.scores.state != null ? String(day.scores.state) : '—'} />
           <Stat
-            label="Давление"
-            value={est?.systolic != null ? `${Math.round(est.systolic)}/${Math.round(est.diastolic ?? 0)}` : '—'}
+            label="Пульс во сне"
+            value={day?.restingHrSource === 'night' && day.restingHr != null ? String(day.restingHr) : '—'}
+            unit="уд/мин"
           />
+          <Stat label="Вариабельность" value={est?.hrv != null ? String(Math.round(est.hrv)) : '—'} unit="мс" />
         </View>
-        <Text style={ui.disclaimer}>
-          Глюкозу и давление кольцо оценивает по пульсовой волне, а не измеряет. Приложение показывает эти числа как
-          есть и не делает по ним выводов. В итог Vuelo они не входят.
-        </Text>
+      </Card>
+
+      <Card title="Оценка кольца" right={<InfoButton title="Оценка кольца" text={ESTIMATE_HELP} />}>
+        <View style={ui.statRow}>
+          <Stat label="Давление · оценка" value={est?.systolic != null ? `${Math.round(est.systolic)}/${Math.round(est.diastolic ?? 0)}` : '—'} />
+          <Stat label="Глюкоза · оценка" value={est?.glucose != null ? est.glucose.toFixed(1) : '—'} unit="ммоль/л" />
+        </View>
       </Card>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  inline: { color: colors.textMuted, fontSize: 13, marginTop: spacing.sm },
-  help: { color: colors.textMuted, fontSize: 13, lineHeight: 19, marginBottom: spacing.sm },
-  score: { color: colors.text, fontSize: 44, fontWeight: '100', marginBottom: spacing.sm },
+  range: { color: colors.textMuted, fontSize: 14, marginTop: spacing.xs },
 });

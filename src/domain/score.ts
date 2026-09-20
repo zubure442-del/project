@@ -19,7 +19,6 @@ export interface ScoreInput {
   heart: Sample[];
   /** Возраст для максимального пульса; null — неизвестен (кардио-бонус не начисляется). */
   age: number | null;
-  spo2: number[];
   hrv: number[];
 }
 
@@ -43,7 +42,7 @@ export interface DayScore {
   state: ComponentScore;
   restingHr: RestingHr | null;
   /** Какие входы «организма» удалось посчитать — для объяснения в интерфейсе. */
-  stateInputs: { spo2: boolean; hrv: boolean; restingHr: boolean };
+  stateInputs: { hrv: boolean; restingHr: boolean };
 }
 
 const clamp = (x: number, lo = 0, hi = 100) => Math.min(hi, Math.max(lo, x));
@@ -105,24 +104,15 @@ export function restingHeartRate(heart: Sample[], night: SleepSession | null): R
   return { value: medianOfLowest(smoothHeart(heart).map((s) => s.value), 0.1), source: 'day' };
 }
 
-/** Сколько входов из трёх нужно, чтобы оценка «организма» вообще выставлялась. */
-export const STATE_MIN_INPUTS = 2;
-
 /**
- * «Организм» — среднее трёх оценок: кислород, вариабельность и пульс покоя.
- * По одному входу оценку не выставляем: например, один хороший замер кислорода
- * давал бы 100 из 100 на пустом месте.
+ * «Организм» — среднее двух оценок: вариабельность ритма и пульс во сне.
+ * Нужны обе: по одному входу оценка получалась бы на пустом месте.
  */
-export function stateScore(spo2: number[], hrv: number[], restingHr: RestingHr | null): number | null {
-  const parts: number[] = [];
-  if (spo2.length) {
-    const a = avg(spo2);
-    parts.push(a >= 95 ? 100 : clamp(100 - (95 - a) * 20));
-  }
-  if (hrv.length) parts.push(Math.min(100, (avg(hrv) / 65) * 100));
-  // Минимум за день вместо ночного пульса покоя — не то же самое, в оценку не берём.
-  if (restingHr?.source === 'night') parts.push(clamp(100 - Math.max(0, restingHr.value - 60) * 2.5));
-  return parts.length >= STATE_MIN_INPUTS ? avg(parts) : null;
+export function stateScore(hrv: number[], restingHr: RestingHr | null): number | null {
+  if (!hrv.length || restingHr?.source !== 'night') return null;
+  const hrvScore = Math.min(100, (avg(hrv) / 65) * 100);
+  const pulseScore = clamp(100 - Math.max(0, restingHr.value - 60) * 2.5);
+  return (hrvScore + pulseScore) / 2;
 }
 
 export function computeDayScore(input: ScoreInput): DayScore {
@@ -130,7 +120,7 @@ export function computeDayScore(input: ScoreInput): DayScore {
   const scores: Record<ComponentId, number | null> = {
     sleep: sleepScore(input.night),
     activity: activityScore(input.steps, input.heart, input.age),
-    state: stateScore(input.spo2, input.hrv, restingHr),
+    state: stateScore(input.hrv, restingHr),
   };
   const present = (Object.keys(WEIGHTS) as ComponentId[]).filter((k) => scores[k] !== null);
   const weightSum = present.reduce((sum, k) => sum + WEIGHTS[k], 0);
@@ -145,6 +135,6 @@ export function computeDayScore(input: ScoreInput): DayScore {
     activity: comp('activity'),
     state: comp('state'),
     restingHr,
-    stateInputs: { spo2: input.spo2.length > 0, hrv: input.hrv.length > 0, restingHr: restingHr?.source === 'night' },
+    stateInputs: { hrv: input.hrv.length > 0, restingHr: restingHr?.source === 'night' },
   };
 }

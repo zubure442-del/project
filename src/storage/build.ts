@@ -38,18 +38,16 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
   const { clean } = cleanHeart(sync.heart);
   const heartByDate = groupByDate(clean);
   const stepsByDate = groupByDate(sync.steps);
-  const spo2ByDate = groupByDate(sync.spo2);
   const summaryByDate = groupByDate(sync.summary);
 
   const dates = new Set<string>([
-    ...heartByDate.keys(), ...stepsByDate.keys(), ...spo2ByDate.keys(), ...summaryByDate.keys(),
+    ...heartByDate.keys(), ...stepsByDate.keys(), ...summaryByDate.keys(),
     ...sessions.map((s) => s.date),
   ]);
 
   const snapshots: DaySnapshot[] = [];
   for (const date of dates) {
     const heart = heartByDate.get(date) ?? [];
-    const spo2 = spo2ByDate.get(date) ?? [];
     const stepSamples = stepsByDate.get(date);
     const steps = stepSamples ? stepSamples.reduce((sum, s) => sum + s.value, 0) : null;
     const { night } = nightForDate(sessions, date);
@@ -62,7 +60,6 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
       steps,
       heart,
       age,
-      spo2: spo2.map((s) => s.value),
       hrv: summary.map((r) => r.hrv).filter((v): v is number => v !== null),
     });
 
@@ -76,7 +73,6 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
       restingHrSource: score.restingHr?.source ?? null,
       stateInputs: score.stateInputs,
       heart: toPoints(heart),
-      spo2: toPoints(spo2),
       stress: toPoints(
         summary.filter((r) => r.stress !== null).map((r) => ({ ts: r.ts, value: r.stress as number })),
       ),
@@ -100,9 +96,7 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
   return snapshots.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-/** Новые сводки поверх старых, храним последние 7 дней. */
-export function mergeSnapshots(previous: DaySnapshot[], incoming: DaySnapshot[]): DaySnapshot[] {
-  const byDate = new Map(previous.map((d) => [d.date, d]));
-  for (const day of incoming) byDate.set(day.date, day);
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-HISTORY_DAYS);
+/** Кэш хранит одну последнюю синхронизацию: оставляем её последние дни. */
+export function keepLastDays(days: DaySnapshot[]): DaySnapshot[] {
+  return [...days].sort((a, b) => a.date.localeCompare(b.date)).slice(-HISTORY_DAYS);
 }

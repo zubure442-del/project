@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fixtures from '../../reference/sample_packets.json';
-import { command, formatWall, hexToBytes } from '../codec';
+import { command, hexToBytes } from '../codec';
 import { base64ToBytes, bytesToBase64 } from './base64';
 import { handshake, runSync } from './sync';
 import type { Transport } from './transport';
@@ -66,16 +66,14 @@ describe('СИНТЕТИЧЕСКИЕ (поддельное кольцо): рук
 
 describe('выгрузка с реальными пакетами 0x40 и поддельным кольцом', () => {
   const byDay = new Map(fixtures.cases.map((c) => [c.day_offset, c.packets.map(hexToBytes)]));
-  it('собирает SpO2 за 3 дня, конец по паузе или маркеру 23:45', async () => {
+  it('кислород больше не запрашивается', async () => {
     const { transport, sent } = fakeRing((c) => (c[0] === 0x40 ? (byDay.get(c[1]) ?? []) : []));
     const p = runSync(transport, { days: 3 });
     await vi.runAllTimersAsync();
     const r = await p;
     expect(sent[0][0]).toBe(0x13);
-    expect(r.spo2).toHaveLength(16); // 0 + 15 + 1
-    expect(formatWall(r.spo2[0].ts)).toBe('2026-09-17 21:15:00');
-    expect(r.packetCounts.spo2).toBe(1 + 16 + 2);
-    expect(r.steps).toEqual([]);
+    expect(sent.some((c) => c[0] === 0x40)).toBe(false);
+    expect(r.spo2).toEqual([]);
     expect(r.activity).toBeNull();
   });
   it('запросы идут по одному: архивы по дням, затем активность и заряд', async () => {
@@ -84,8 +82,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
     await vi.runAllTimersAsync();
     await p;
     const codes = sent.map((c) => c[0]);
-    expect(codes.slice(0, 6)).toEqual([0x13, 0x10, 0x11, 0x16, 0x40, 0x40]); // 0x40 повторён: в тишине один повтор
-    expect(codes.slice(6)).toEqual([0x55, 0x03, 0x0b]);
+    expect(codes).toEqual([0x13, 0x10, 0x11, 0x16, 0x55, 0x03, 0x0b]);
   });
   it('пассивный заряд 0x0B и сводка 0x03 попадают в результат', async () => {
     const { transport } = fakeRing((c) =>

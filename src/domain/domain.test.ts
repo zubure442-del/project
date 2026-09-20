@@ -88,10 +88,13 @@ describe('СИНТЕТИЧЕСКИЕ: сон', () => {
 });
 
 describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
+  const nightHeart = (n: { start: number; end: number }) =>
+    [50, 52, 55, 58].map((value, i) => ({ ts: n.start + i * 1800, value }));
+
   const night = (light: number, deep: number) => ({
     start: T0 - 8 * 3600, end: T0 - 3600, deepMin: deep, lightMin: light, awakeMin: 0, date: '2026-09-18',
   });
-  const base: ScoreInput = { night: null, steps: null, heart: [], age: 30, spo2: [], hrv: [] };
+  const base: ScoreInput = { night: null, steps: null, heart: [], age: 30, hrv: [] };
 
   it('нет никаких данных — итог null, а не 0', () => {
     const r = computeDayScore(base);
@@ -108,7 +111,7 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
     expect(r.activity.weight).toBe(0);
   });
   it('веса 15/70/15 при полных данных', () => {
-    const r = computeDayScore({ ...base, night: night(336, 84), steps: 10000, spo2: [98], hrv: [65], heart: [] });
+    const r = computeDayScore({ ...base, night: night(336, 84), steps: 10000, hrv: [65], heart: nightHeart(night(336, 84)) });
     expect(r.sleep.weight).toBeCloseTo(0.15);
     expect(r.activity.weight).toBeCloseTo(0.7);
     expect(r.state.weight).toBeCloseTo(0.15);
@@ -117,7 +120,7 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
     expect(r.total).toBe(79);
   });
   it('итог растёт по мере шагов в течение дня', () => {
-    const at = (steps: number) => computeDayScore({ ...base, night: night(336, 84), steps, spo2: [98] }).total as number;
+    const at = (steps: number) => computeDayScore({ ...base, night: night(336, 84), steps }).total as number;
     expect(at(0)).toBeLessThan(at(3000));
     expect(at(3000)).toBeLessThan(at(9000));
   });
@@ -134,12 +137,15 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
   it('без возраста бонус не начисляется, но и ничего не ломается', () => {
     expect(computeDayScore({ ...base, steps: 5000, age: null, heart: series([160, 160]) }).activity.score).toBe(35);
   });
-  it('состояние: среднее доступных частей; низкий SpO2 снижает', () => {
-    // одного входа мало: оценка не выставляется
-    expect(computeDayScore({ ...base, spo2: [95, 95] }).state.score).toBeNull();
-    expect(computeDayScore({ ...base, spo2: [98], hrv: [65] }).state.score).toBe(100);
-    expect(computeDayScore({ ...base, spo2: [90], hrv: [65] }).state.score).toBe(50);
-    expect(computeDayScore({ ...base, spo2: [98], hrv: [32.5] }).state.score).toBe(75);
+  it('организм: среднее вариабельности и пульса во сне', () => {
+    const n = night(336, 84);
+    // нужны оба входа: только вариабельность или только пульс не считаются
+    expect(computeDayScore({ ...base, hrv: [65] }).state.score).toBeNull();
+    expect(computeDayScore({ ...base, night: n, heart: nightHeart(n) }).state.score).toBeNull();
+    // вариабельность 65 -> 100, пульс во сне 50 -> 100
+    expect(computeDayScore({ ...base, night: n, heart: nightHeart(n), hrv: [65] }).state.score).toBe(100);
+    // вариабельность 32.5 -> 50, пульс тот же 100 -> среднее 75
+    expect(computeDayScore({ ...base, night: n, heart: nightHeart(n), hrv: [32.5] }).state.score).toBe(75);
   });
   it('пульс покоя берётся из окна сна', () => {
     const n = night(336, 84);

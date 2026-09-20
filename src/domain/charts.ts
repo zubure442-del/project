@@ -81,3 +81,15 @@ export function stressZone(value: number): string | null {
   if (!(value > 0) || value > 100) return null;
   return (STRESS_ZONES.find((z) => value <= z.upTo) ?? STRESS_ZONES[STRESS_ZONES.length - 1]).label;
 }
+
+/** Ярлык доли глубокого сна. Пороги в процентах от всего сна. */
+export const DEEP_SHARE_STEPS = [
+  { below: 10, label: 'мало' },
+  { below: 15, label: 'нормально' },
+  { below: 20, label: 'хорошо' },
+] as const;
+export const DEEP_SHARE_BEST = 'отлично';
+
+export function deepShareLabel(percent: number): string {
+  return (DEEP_SHARE_STEPS.find((s) => percent < s.below)?.label ?? DEEP_SHARE_BEST);
+}

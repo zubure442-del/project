@@ -2,11 +2,21 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { Alert } from 'react-native';
 import { RingBle, handshake, runSync, type KnownRing } from '../ble';
 import type { Report } from '../domain';
-import { EMPTY_STATE, addReport, loadState, saveState, type DaySnapshot, type VueloState } from '../storage';
-import { applySync, demoSync, findToday, reportMode, reportToShow, savedReport, syncStatusText, todayKey, weekDays } from './day';
+import {
+  EMPTY_STATE,
+  addReport,
+  buildSnapshots,
+  clearState,
+  loadState,
+  saveState,
+  type DaySnapshot,
+  type VueloState,
+} from '../storage';
+import { applySync, findDay, reportMode, reportToShow, syncStatusText, todayKey, weekDays } from './day';
 
 interface Vuelo {
   state: VueloState;
+  ready: boolean;
   today: DaySnapshot | null;
   week: { date: string; day: DaySnapshot | null }[];
   report: Report | null;
@@ -14,8 +24,9 @@ interface Vuelo {
   progress: string | null;
   statusText: string;
   sync: () => void;
-  /** Переключатель демо-данных в настройках. По умолчанию выключен. */
-  setDemo: (on: boolean) => void;
+  forgetRing: () => void;
+  finishOnboarding: () => void;
+  dayAt: (date: string) => DaySnapshot | null;
 }
 
 const Context = createContext<Vuelo | null>(null);
@@ -26,58 +37,56 @@ export function useVuelo(): Vuelo {
   return value;
 }
 
-/** Одно состояние на все вкладки: данные читаются с телефона один раз. */
 export function VueloProvider({ children }: { children: ReactNode }) {
-  const [stored, setStored] = useState<VueloState>(EMPTY_STATE);
-  /**
-   * Демо-режим держим только в памяти: так он не затирает настоящие данные
-   * и не остаётся включённым после перезапуска.
-   */
-  const [demoState, setDemoState] = useState<VueloState | null>(null);
-  const state = demoState ?? stored;
+  const [state, setState] = useState<VueloState>(EMPTY_STATE);
+  const [ready, setReady] = useState(false);
   const [ring, setRing] = useState<RingBle | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
 
+  // Кэш показываем сразу, не дожидаясь кольца.
   useEffect(() => {
-    void loadState().then(setStored);
-  }, []);
-
-  const persist = useCallback(async (next: VueloState, report: Report) => {
-    const withReport: VueloState = {
-      ...next,
-      reports: addReport(next.reports, {
-        date: todayKey(),
-        mode: reportMode(new Date()),
-        templateId: report.templateId,
-        text: report.text,
-      }),
-    };
-    setDemoState(null);
-    setStored(withReport);
-    await saveState(withReport);
+    void loadState().then((loaded) => {
+      setState(loaded);
+      setReady(true);
+    });
   }, []);
 
   const sync = useCallback(() => {
     if (busy) return;
     void (async () => {
       setBusy(true);
-      const device = ring ?? new RingBle(stored.ring);
+      const device = ring ?? new RingBle(state.ring);
       if (!ring) setRing(device);
       let known: KnownRing | null = null;
       try {
         device.onStatus = (s) =>
-          setProgress(s === 'scanning' ? 'Ищу кольцо…' : s === 'connecting' ? 'Подключаюсь…' : null);
-        // Запоминаем кольцо: в следующий раз подключимся по идентификатору, без поиска в эфире.
+          setProgress(s === 'scanning' ? 'Ищу кольцо' : s === 'connecting' ? 'Подключаюсь' : null);
         device.onKnown = (k) => {
           known = k;
         };
         await device.connect();
-        setProgress('Настраиваю кольцо…');
+        setProgress('Настраиваю кольцо');
         await handshake(device);
-        const result = await runSync(device, { onProgress: (m) => setProgress(`Выгружаю: ${m}`) });
-        const next = applySync({ ...stored, ring: known ?? stored.ring }, result);
-        await persist(next.state, next.report);
+        const result = await runSync(device, { onProgress: setProgress });
+        const days = buildSnapshots(result, state.age);
+        // Пустая выгрузка кэш не трогает: лучше показать вчерашние данные, чем пустой экран.
+        if (!days.length) {
+          Alert.alert('Кольцо не отдало данные', 'Попробуйте ещё раз через минуту.');
+          return;
+        }
+        const next = applySync({ ...state, ring: known ?? state.ring }, days, result);
+        const withReport: VueloState = {
+          ...next.state,
+          reports: addReport(next.state.reports, {
+            date: todayKey(),
+            mode: reportMode(new Date()),
+            templateId: next.report.templateId,
+            text: next.report.text,
+          }),
+        };
+        setState(withReport);
+        await saveState(withReport);
       } catch (e) {
         Alert.alert('Не вышло', e instanceof Error ? e.message : String(e));
       } finally {
@@ -85,26 +94,43 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         setBusy(false);
       }
     })();
-  }, [busy, persist, ring, stored]);
+  }, [busy, ring, state]);
 
-  const setDemo = useCallback((on: boolean) => {
-    setDemoState(on ? applySync({ ...EMPTY_STATE, age: 30 }, demoSync(), new Date(), true).state : null);
+  const forgetRing = useCallback(() => {
+    void (async () => {
+      await ring?.disconnect();
+      setRing(null);
+      const next = await clearState();
+      setState({ ...next, onboarded: state.onboarded });
+      await saveState({ ...next, onboarded: state.onboarded });
+    })();
+  }, [ring, state.onboarded]);
+
+  const finishOnboarding = useCallback(() => {
+    setState((prev) => {
+      const next = { ...prev, onboarded: true };
+      void saveState(next);
+      return next;
+    });
   }, []);
 
   const value = useMemo<Vuelo>(() => {
-    const today = findToday(state.days) ?? (state.demo ? (state.days.at(-1) ?? null) : null);
+    const today = findDay(state.days, todayKey());
     return {
       state,
+      ready,
       today,
       week: weekDays(state.days),
-      report: reportToShow(state, today) ?? savedReport(state),
+      report: reportToShow(state, today),
       busy,
       progress,
       statusText: syncStatusText(state),
       sync,
-      setDemo,
+      forgetRing,
+      finishOnboarding,
+      dayAt: (date: string) => findDay(state.days, date),
     };
-  }, [busy, progress, setDemo, state, sync]);
+  }, [busy, finishOnboarding, forgetRing, progress, ready, state, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

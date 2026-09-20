@@ -1,62 +1,42 @@
 import type { ReactNode } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Logo } from './Logo';
-import { GearIcon } from './TabIcons';
+import Svg, { Path } from 'react-native-svg';
 import { colors, radius, spacing } from './theme';
 
 export interface ScreenProps {
   title: string;
-  /** «Синхронизировано 5 мин назад» или почему этого ещё не было. */
   statusText: string;
   busy: boolean;
   progress: string | null;
-  demo: boolean;
-  /** Заряд кольца в процентах, если известен. */
-  battery?: number | null;
+  battery: number | null;
   onSync: () => void;
-  onForgetDemo: () => void;
-  onOpenSettings?: () => void;
+  onOpenRing: () => void;
   children: ReactNode;
 }
 
-/** Общий каркас вкладки: шапка с кнопкой синхронизации, строка статуса, обновление свайпом. */
-export function Screen({ title, statusText, busy, progress, demo, battery, onSync, onForgetDemo, onOpenSettings, children }: ScreenProps) {
+/** Каркас вкладки: название, заряд, значок обновления. Основной способ обновить — потянуть вниз. */
+export function Screen({ title, statusText, busy, progress, battery, onSync, onOpenRing, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <View style={styles.headerRow}>
-          <Logo size={26} />
+        <View style={styles.row}>
           <Text style={styles.title}>{title}</Text>
           <View style={styles.spacer} />
-          <Pressable style={[styles.syncButton, busy && styles.syncBusy]} onPress={onSync} disabled={busy}>
-            {busy ? <ActivityIndicator size="small" color={colors.bg} /> : <Text style={styles.syncText}>Обновить</Text>}
+          <Pressable onPress={onOpenRing} hitSlop={10} style={styles.battery}>
+            <Text style={styles.batteryText}>{battery === null ? '—' : `${battery} %`}</Text>
           </Pressable>
-          {onOpenSettings ? (
-            <Pressable style={styles.gear} onPress={onOpenSettings} hitSlop={8}>
-              <GearIcon color={colors.textMuted} size={22} />
-            </Pressable>
-          ) : null}
+          <Pressable onPress={onSync} disabled={busy} hitSlop={10} style={styles.refresh}>
+            {busy ? <ActivityIndicator size="small" color={colors.textMuted} /> : <RefreshIcon />}
+          </Pressable>
         </View>
-        <View style={styles.statusRow}>
-          <Text style={styles.status}>{progress ?? statusText}</Text>
-          {battery != null ? (
-            <View style={styles.battery}>
-              <Text style={styles.batteryText}>Кольцо {battery}%</Text>
-            </View>
-          ) : null}
-          {demo ? (
-            <Pressable onPress={onForgetDemo} hitSlop={8}>
-              <Text style={styles.demo}>убрать</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        <Text style={styles.status}>{progress ?? statusText}</Text>
       </View>
+
       <ScrollView
-        style={styles.scroll}
         contentContainerStyle={{ paddingBottom: spacing.xl }}
-        refreshControl={<RefreshControl refreshing={busy} onRefresh={onSync} tintColor={colors.accent} />}
+        refreshControl={<RefreshControl refreshing={busy} onRefresh={onSync} tintColor={colors.textMuted} />}
       >
         {children}
       </ScrollView>
@@ -64,14 +44,29 @@ export function Screen({ title, statusText, busy, progress, demo, battery, onSyn
   );
 }
 
-/** Карточка с заголовком. */
-export function Card({ title, note, children }: { title?: string; note?: string; children: ReactNode }) {
+function RefreshIcon() {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24">
+      <Path
+        d="M20 12a8 8 0 1 1-2.6-5.9"
+        stroke={colors.textMuted}
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        fill="none"
+      />
+      <Path d="M20 3.5V9h-5.5" stroke={colors.textMuted} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </Svg>
+  );
+}
+
+/** Карточка: одна мысль, без рамок и заголовков капслоком. */
+export function Card({ title, right, children }: { title?: string; right?: ReactNode; children: ReactNode }) {
   return (
     <View style={styles.card}>
-      {title ? (
+      {title || right ? (
         <View style={styles.cardHead}>
-          <Text style={styles.cardTitle}>{title}</Text>
-          {note ? <Text style={styles.cardNote}>{note}</Text> : null}
+          {title ? <Text style={styles.cardTitle}>{title}</Text> : <View style={styles.spacer} />}
+          {right}
         </View>
       ) : null}
       {children}
@@ -82,49 +77,39 @@ export function Card({ title, note, children }: { title?: string; note?: string;
 export function Stat({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
     <View style={styles.stat}>
-      <Text style={styles.statLabel}>{label}</Text>
       <Text style={styles.statValue}>
         {value}
         {unit ? <Text style={styles.statUnit}> {unit}</Text> : null}
       </Text>
+      <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
 }
 
 export const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  header: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm, backgroundColor: colors.bg },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  title: { color: colors.text, fontSize: 21, fontWeight: '500' },
+  header: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  title: { color: colors.text, fontSize: 28, fontWeight: '600' },
   spacer: { flex: 1 },
-  syncButton: { backgroundColor: colors.accent, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8, minWidth: 56, alignItems: 'center' },
-  gear: { padding: 4 },
-  syncBusy: { opacity: 0.5 },
-  syncText: { color: colors.bg, fontSize: 13, fontWeight: '600' },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs, flexWrap: 'wrap' },
-  status: { color: colors.textMuted, fontSize: 13 },
-  demo: { color: colors.accent, fontSize: 13 },
-  battery: { backgroundColor: colors.card, borderColor: colors.cardBorder, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
-  batteryText: { color: colors.textMuted, fontSize: 12 },
-  scroll: { flex: 1 },
+  battery: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, backgroundColor: colors.card },
+  batteryText: { color: colors.textMuted, fontSize: 13 },
+  refresh: { padding: 2 },
+  status: { color: colors.textFaint, fontSize: 13, marginTop: 4 },
 
   card: {
     backgroundColor: colors.card,
-    borderColor: colors.cardBorder,
-    borderWidth: 1,
     borderRadius: radius.card,
     marginHorizontal: spacing.md,
     marginTop: spacing.sm,
     padding: spacing.md,
   },
-  cardHead: { flexDirection: 'row', alignItems: 'baseline', gap: spacing.sm, marginBottom: spacing.sm, flexWrap: 'wrap' },
-  cardTitle: { color: colors.textMuted, fontSize: 13, fontWeight: '600', letterSpacing: 0.6, textTransform: 'uppercase' },
-  cardNote: { color: colors.textMuted, fontSize: 12.5, flexShrink: 1 },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  cardTitle: { color: colors.text, fontSize: 17, fontWeight: '500', flex: 1 },
 
-  stat: { width: '50%', marginBottom: spacing.md },
-  statLabel: { color: colors.textMuted, fontSize: 13, marginBottom: 3 },
-  statValue: { color: colors.text, fontSize: 24, fontWeight: '200' },
-  statUnit: { color: colors.textMuted, fontSize: 13, fontWeight: '400' },
-  statRow: { flexDirection: 'row', flexWrap: 'wrap' },
-  disclaimer: { color: colors.textMuted, fontSize: 12.5, lineHeight: 18 },
+  statRow: { flexDirection: 'row', flexWrap: 'wrap', rowGap: spacing.md },
+  stat: { width: '50%' },
+  statValue: { color: colors.text, fontSize: 26, fontWeight: '300' },
+  statUnit: { color: colors.textMuted, fontSize: 14 },
+  statLabel: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
 });

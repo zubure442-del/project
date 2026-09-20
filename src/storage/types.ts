@@ -20,9 +20,8 @@ export interface DaySnapshot {
   /** Откуда взят пульс: ночь (пульс покоя) или минимум за день. */
   restingHrSource: 'night' | 'day' | null;
   /** Какие входы «организма» посчитаны — для объяснения в интерфейсе. */
-  stateInputs: { spo2: boolean; hrv: boolean; restingHr: boolean };
+  stateInputs: { hrv: boolean; restingHr: boolean };
   heart: DayPoint[];
-  spo2: DayPoint[];
   /** Напряжение (индекс стресса) по времени. */
   stress: DayPoint[];
   /** Шаги по часам суток: ровно 24 числа. */
@@ -56,9 +55,10 @@ export interface VueloState {
   ring: KnownRing | null;
   /** Возраст для расчёта пульсовых зон; null — не спрашивали. */
   age: number | null;
-  /** Данные выдуманы для показа интерфейса. На диск такое состояние не пишется. */
-  demo: boolean;
+  /** Онбординг пройден. */
+  onboarded: boolean;
 }
 
-export const EMPTY_STATE: VueloState = { days: [], reports: [], lastSyncAt: null, battery: null, ring: null, age: null, demo: false };
+export const EMPTY_STATE: VueloState = { days: [], reports: [], lastSyncAt: null, battery: null, ring: null, age: null, onboarded: false };
+/** Сколько дней показываем в недельной полосе. Кэш хранит ровно одну последнюю синхронизацию. */
 export const HISTORY_DAYS = 7;

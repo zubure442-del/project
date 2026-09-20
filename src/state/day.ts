@@ -24,6 +24,21 @@ export const todayKey = (now = new Date()) => dateKey(nowRingTs(now.getTime(), -
 export const findDay = (days: DaySnapshot[], date: string): DaySnapshot | null =>
   days.find((d) => d.date === date) ?? null;
 
+/** Есть ли за день хоть что-то: шаги, сон или пульс. */
+export const dayHasAnything = (day: DaySnapshot | null): boolean =>
+  !!day && ((day.steps ?? 0) > 0 || day.sleep !== null || day.heart.length > 0);
+
+/**
+ * Какой день открывать. Если за сегодня ещё пусто, показываем последний день с данными,
+ * а как только данные за сегодня появятся, возвращаемся на сегодня.
+ */
+export function defaultDay(days: DaySnapshot[], now = new Date()): string {
+  const today = todayKey(now);
+  if (dayHasAnything(findDay(days, today))) return today;
+  const last = [...days].reverse().find(dayHasAnything);
+  return last?.date ?? today;
+}
+
 /** Семь календарных дней подряд, последний — сегодня. День без данных остаётся пустым. */
 export function weekDays(days: DaySnapshot[], now = new Date()): { date: string; day: DaySnapshot | null }[] {
   const byDate = new Map(days.map((d) => [d.date, d]));

@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, formulaText } from '../../domain';
-import { findDay, todayKey, useVuelo } from '../../state';
+import { findDay, useSelectedDay, useVuelo } from '../../state';
 import { Card, HeroRing, InfoButton, Screen, SleepWave, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
 
 const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
@@ -9,7 +8,7 @@ const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minut
 export default function SleepTab() {
   const { week, state, phase, progress, packets, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const [picked, setPicked] = useState(todayKey());
+  const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
   const sleep = day?.sleep;
   const chartWidth = width - spacing.md * 4;

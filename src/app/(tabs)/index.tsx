@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STEPS_GOAL, formulaText, type ComponentId } from '../../domain';
-import { findDay, todayKey, useVuelo } from '../../state';
+import { findDay, todayKey, useSelectedDay, useVuelo } from '../../state';
 import {
   BiometryBanner,
   COMPONENT_LABEL,
@@ -19,13 +18,10 @@ import {
 } from '../../ui';
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
-/** Заголовок «Совет · Яндекс ИИ» включим, когда появится сервер-посредник. */
-export const ADVICE_YANDEX_LABEL = __DEV__;
-
 export default function TodayTab() {
   const { week, report, state, phase, progress, packets, statusText, sync, profileReady } = useVuelo();
   const { width } = useWindowDimensions();
-  const [picked, setPicked] = useState(todayKey());
+  const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
   const chartWidth = width - spacing.md * 4;
   const steps = day?.steps ?? null;
@@ -92,7 +88,7 @@ export default function TodayTab() {
         ) : (
           <Skeleton height={64} />
         )}
-        {ADVICE_YANDEX_LABEL ? <Text style={styles.poweredBy}>Powered by YandexGPT</Text> : null}
+        <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
       </Card>
 
       <Card title="Неделя" right={<InfoButton title={FORMULAS.total.title} text={formulaText('total')} />}>

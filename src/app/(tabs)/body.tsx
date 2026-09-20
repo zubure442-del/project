@@ -1,13 +1,12 @@
-import { useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STRESS_ZONE_BOUNDS, formulaText } from '../../domain';
-import { findDay, todayKey, useVuelo } from '../../state';
+import { findDay, useSelectedDay, useVuelo } from '../../state';
 import { Card, DayLineChart, HeroRing, InfoButton, PressureChart, Screen, WeekChart, spacing } from '../../ui';
 
 export default function BodyTab() {
   const { week, state, phase, progress, packets, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const [picked, setPicked] = useState(todayKey());
+  const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
   const chartWidth = width - spacing.md * 4;
   const points = day?.summaryPoints ?? [];

@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, busiestHour, formulaText, loadIntervals } from '../../domain';
-import { findDay, todayKey, useVuelo } from '../../state';
+import { findDay, todayKey, useSelectedDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
   BiometryBanner,
@@ -21,7 +20,7 @@ import {
 export default function ActivityTab() {
   const { week, state, phase, progress, packets, statusText, sync, profileReady } = useVuelo();
   const { width } = useWindowDimensions();
-  const [picked, setPicked] = useState(todayKey());
+  const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
   const age = profileAge(state.profile);
   const hours = day?.stepsByHour ?? [];

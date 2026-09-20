@@ -1,4 +1,4 @@
-import type { ComponentId } from '../domain';
+import type { ComponentId, SleepStage } from '../domain';
 
 /** Одна точка графика: секунды от начала дня + значение. Так день хранится компактно. */
 export interface DayPoint {
@@ -18,6 +18,12 @@ export interface DaySnapshot {
   restingHr: number | null;
   heart: DayPoint[];
   spo2: DayPoint[];
+  /** Напряжение (индекс стресса) по времени. */
+  stress: DayPoint[];
+  /** Шаги по часам суток: ровно 24 числа. */
+  stepsByHour: number[];
+  /** Отрезки гипнограммы. Минуты от полуночи этого дня; вечер накануне — отрицательные. */
+  sleepSegments: { from: number; to: number; stage: SleepStage }[];
   /** Оценочные показатели: показываем, но в итог не берём. */
   estimates: {
     hrv: number | null;

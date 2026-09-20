@@ -29,15 +29,36 @@ export function savedReport(state: VueloState, now = new Date()): Report | null 
   return stored ? { text: stored.text, focus: null, templateId: stored.templateId } : null;
 }
 
+/**
+ * Отчёт для показа. Сохранённый за сегодня, иначе собранный из текущих данных.
+ * Без второго шага карточка пропадала при смене утра на вечер, пока нет новой синхронизации.
+ */
+export function reportToShow(state: VueloState, today: DaySnapshot | null, now = new Date()): Report | null {
+  const stored = savedReport(state, now);
+  if (stored) return stored;
+  if (!today) return null;
+  return buildTemplateReport({
+    mode: reportMode(now),
+    score: scoreOf(today),
+    recentTemplateIds: recentTemplateIds(state.reports),
+  });
+}
+
+const scoreOf = (day: DaySnapshot) => ({
+  total: day.total,
+  sleep: c(day.scores.sleep),
+  activity: c(day.scores.activity),
+  state: c(day.scores.state),
+  restingHr: day.restingHr,
+});
+
 export function applySync(state: VueloState, sync: SyncResult, now = new Date(), demo = false): { state: VueloState; report: Report } {
   const days = mergeSnapshots(state.days, buildSnapshots(sync, state.age));
   const today = findToday(days, now);
   const mode = reportMode(now);
   const report = buildTemplateReport({
     mode,
-    score: today
-      ? { total: today.total, sleep: c(today.scores.sleep), activity: c(today.scores.activity), state: c(today.scores.state), restingHr: today.restingHr }
-      : { total: null, sleep: c(null), activity: c(null), state: c(null), restingHr: null },
+    score: today ? scoreOf(today) : { total: null, sleep: c(null), activity: c(null), state: c(null), restingHr: null },
     recentTemplateIds: recentTemplateIds(state.reports),
   });
   return { state: { ...state, days, lastSyncAt: now.getTime(), demo }, report };
@@ -54,4 +75,16 @@ export function demoSync(now = new Date()) {
   const when = new Date(now);
   if (when.getHours() < 12) when.setHours(20, 30, 0, 0);
   return buildDemoSync({ now: when });
+}
+
+/** Строка статуса для шапки: когда в последний раз получили данные от кольца. */
+export function syncStatusText(state: VueloState, now = Date.now()): string {
+  if (state.demo) return 'Показаны демо-данные';
+  if (state.lastSyncAt === null) return 'Ещё не синхронизировано';
+  const minutes = Math.floor((now - state.lastSyncAt) / 60000);
+  if (minutes < 1) return 'Синхронизировано только что';
+  if (minutes < 60) return `Синхронизировано ${minutes} мин назад`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Синхронизировано ${hours} ч назад`;
+  return `Синхронизировано ${Math.floor(hours / 24)} дн назад`;
 }

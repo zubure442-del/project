@@ -41,6 +41,20 @@ describe('сводки по дням', () => {
     expect(day.estimates.systolic).toBeGreaterThan(100);
     expect(Object.keys(day.scores)).toEqual(['sleep', 'activity', 'state']);
   });
+  it('гипнограмма покрывает ночь, шаги разложены по часам', () => {
+    const day = demo().find((d) => d.sleep !== null)!;
+    expect(day.sleepSegments.length).toBeGreaterThan(3);
+    expect(day.sleepSegments[0].from).toBeLessThan(0); // сон начался накануне вечером
+    expect(day.sleepSegments.every((s) => s.to > s.from)).toBe(true);
+    expect(day.stepsByHour).toHaveLength(24);
+    expect(day.stepsByHour.reduce((a, b) => a + b, 0)).toBe(day.steps);
+  });
+  it('напряжение сохраняется точками, а не только средним', () => {
+    const day = demo().at(-1)!;
+    expect(day.stress.length).toBeGreaterThan(3);
+    expect(day.estimates.stress).not.toBeNull();
+  });
+
   it('пустая выгрузка не даёт ни одного дня', () => {
     expect(buildSnapshots(
       { steps: [], sleep: [], heart: [], spo2: [], summary: [], activity: null, battery: null,
@@ -52,7 +66,7 @@ describe('сводки по дням', () => {
 describe('история', () => {
   const day = (date: string, total: number): DaySnapshot => ({
     date, total, scores: { sleep: null, activity: total, state: null }, steps: 100, sleep: null,
-    restingHr: null, heart: [], spo2: [],
+    restingHr: null, heart: [], spo2: [], stress: [], stepsByHour: new Array(24).fill(0), sleepSegments: [],
     estimates: { hrv: null, glucose: null, systolic: null, diastolic: null, stress: null },
   });
 

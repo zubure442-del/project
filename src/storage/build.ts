@@ -1,6 +1,6 @@
 import { dateKey, wallClock, type Sample, type SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
-import { buildSleepSessions, cleanHeart, computeDayScore, nightForDate, sleepMinutes } from '../domain';
+import { buildSleepSessions, cleanHeart, computeDayScore, hypnogramSegments, nightForDate, sleepMinutes, stepsByHour } from '../domain';
 import { HISTORY_DAYS, type DayPoint, type DaySnapshot } from './types';
 
 const minuteOfDay = (ts: number) => {
@@ -21,6 +21,9 @@ const groupByDate = <T extends { ts: number }>(items: T[]): Map<string, T[]> => 
   }
   return out;
 };
+
+/** Полночь дня как кольцевая метка: метки кольца — это «настенное» время в UTC. */
+const midnightTs = (date: string) => Date.parse(`${date}T00:00:00Z`) / 1000;
 
 function average(values: number[]): number | null {
   return values.length ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10 : null;
@@ -72,6 +75,17 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
       restingHr: score.restingHr,
       heart: toPoints(heart),
       spo2: toPoints(spo2),
+      stress: toPoints(
+        summary.filter((r) => r.stress !== null).map((r) => ({ ts: r.ts, value: r.stress as number })),
+      ),
+      stepsByHour: stepsByHour(stepSamples ?? []),
+      sleepSegments: night
+        ? hypnogramSegments(sync.sleep.filter((s) => s.ts >= night.start && s.ts <= night.end)).map((seg) => ({
+            from: (seg.from - midnightTs(date)) / 60,
+            to: (seg.to - midnightTs(date)) / 60,
+            stage: seg.stage,
+          }))
+        : [],
       estimates: {
         hrv: pick('hrv'),
         glucose: pick('glucose'),

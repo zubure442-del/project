@@ -3,6 +3,15 @@ import { buildTemplateReport, type Report, type ReportMode } from '../domain';
 import { keepLastDays, recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
 import type { SyncResult } from '../ble/sync';
 
+/** Если данные свежее десяти минут, к кольцу не идём. */
+export const CACHE_FRESH_MS = 10 * 60 * 1000;
+/** Заряд старше этого времени показываем приглушённым. */
+export const BATTERY_STALE_MS = 30 * 60 * 1000;
+
+/** Данные считаются свежими, если последняя удачная синхронизация была недавно. */
+export const isFresh = (state: VueloState, now = Date.now()) =>
+  state.lastSyncAt !== null && !state.syncFailed && now - state.lastSyncAt < CACHE_FRESH_MS;
+
 /** До 11:00 — про ночь, до 18:00 — про текущий день, позже — итог дня. */
 export const reportMode = (now: Date): ReportMode =>
   now.getHours() < 11 ? 'morning' : now.getHours() < 18 ? 'day' : 'evening';

@@ -24,6 +24,15 @@ export const CARDIO_ZONES = [
   { from: 0.7, points: 1 },
   { from: 0.6, points: 0.5 },
 ] as const;
+/** Порог нагрузки: нижняя граница зон, которые учитывает оценка активности. */
+export const ACTIVE_HR_RATIO = CARDIO_ZONES[CARDIO_ZONES.length - 1].from;
+/** Короче этого эпизод нагрузки не считаем. */
+export const MIN_EPISODE_MIN = 10;
+/** Соседние эпизоды с паузой до этого склеиваем. */
+export const MERGE_GAP_MIN = 20;
+/** Дырка между замерами больше этой интервал не перекрывает. */
+export const MAX_SAMPLE_GAP_MIN = 45;
+
 /** Веса комбинированной нагрузки часа: шаги и кардио. */
 export const HOUR_LOAD_STEPS_WEIGHT = 0.5;
 export const HOUR_LOAD_HR_WEIGHT = 0.5;

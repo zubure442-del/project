@@ -22,14 +22,21 @@ import {
   type Profile,
   type VueloState,
 } from '../storage';
-import { applySync, findDay, reportMode, reportToShow, syncStatusText, todayKey, weekDays } from './day';
+import {
+  CACHE_FRESH_MS,
+  applySync,
+  findDay,
+  isFresh,
+  reportMode,
+  reportToShow,
+  syncStatusText,
+  todayKey,
+  weekDays,
+} from './day';
 
-/** Если данные свежее десяти минут, к кольцу не идём. */
-export const CACHE_FRESH_MS = 10 * 60 * 1000;
+
 /** Старое имя оставлено, чтобы не ломать импорты. */
 export const FRESH_MS = CACHE_FRESH_MS;
-/** Заряд старше этого времени показываем приглушённым. */
-export const BATTERY_STALE_MS = 30 * 60 * 1000;
 /** Первая фаза: сегодня и вчера — ночь через полночь кольцо отдаёт двумя днями. */
 export const FIRST_PHASE_DAYS = 2;
 export const TOTAL_DAYS = 7;
@@ -72,10 +79,6 @@ export function useVuelo(): Vuelo {
   if (!value) throw new Error('useVuelo вне VueloProvider');
   return value;
 }
-
-/** Данные считаются свежими, если последняя удачная синхронизация была недавно. */
-export const isFresh = (state: VueloState, now = Date.now()) =>
-  state.lastSyncAt !== null && !state.syncFailed && now - state.lastSyncAt < CACHE_FRESH_MS;
 
 /** Календарная дата для смещения в днях назад. */
 const dateForOffset = (offset: number, now = new Date()): string =>

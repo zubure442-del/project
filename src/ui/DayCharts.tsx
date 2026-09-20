@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
-import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, Path, Pattern, Rect, Text as SvgText } from 'react-native-svg';
 import { HR_SMOOTH_MAX_GAP, formatMinute, loadIntervals, smoothHeart, splitSegments, type SleepStage } from '../domain';
 import type { DayPoint, DaySnapshot } from '../storage';
 import { colors, spacing, withAlpha } from './theme';
@@ -15,41 +15,48 @@ const empty = (width: number, text = 'Нет данных') => (
   </View>
 );
 
-/** Пульс и шаги по часам на одном поле: линия сверху, слабые столбики под ней. */
+/** Минимальная ширина прямоугольника нагрузки, чтобы короткий эпизод был заметен. */
+const MIN_ZONE_WIDTH = 6;
+/** Запас по вертикали вокруг пульса эпизода. */
+const ZONE_PADDING = 0.15;
+const PULSE_TICKS = [60, 90, 120, 150, 180, 200];
+
+/**
+ * Пульс за день: сглаженная линия на всю ширину, шкала пульса слева, часы внизу.
+ * Поверх линии штрихованные прямоугольники — эпизоды нагрузки.
+ */
 export function DayActivityChart({
   heart,
-  hours,
   width,
   age,
+  onZones,
 }: {
   heart: DayPoint[];
-  hours: number[];
   width: number;
   age: number | null;
+  onZones?: (zones: { from: number; to: number }[]) => void;
 }) {
-  const [touch, setTouch] = useState<{ m: number; hr: number | null; steps: number } | null>(null);
-  const [zone, setZone] = useState<{ from: number; to: number; peak: number } | null>(null);
-  const loads = loadIntervals(heart.map((p) => ({ m: p.m, v: p.v })), age);
+  const [picked, setPicked] = useState<{ from: number; to: number; peak: number } | null>(null);
   const smooth = smoothHeart(heart.map((p) => ({ ts: p.m * 60, value: p.v })));
-  const hrValues = smooth.map((s) => s.value);
-  if (!smooth.length && hours.every((v) => v === 0)) return empty(width);
+  const zones = loadIntervals(heart.map((p) => ({ m: p.m, v: p.v })), age);
 
-  const hrMin = hrValues.length ? Math.min(...hrValues) - 5 : 40;
-  const hrMax = hrValues.length ? Math.max(...hrValues) + 5 : 120;
-  const stepsMax = Math.max(...hours, 1);
-  const x = (minute: number) => GUTTER + (minute / 1440) * (width - GUTTER * 2);
-  const yHr = (v: number) => 12 + (1 - (v - hrMin) / Math.max(1, hrMax - hrMin)) * (HEIGHT - 52);
-  const yStep = (v: number) => HEIGHT - 18 - (v / stepsMax) * (HEIGHT * 0.32);
-  const barWidth = (width - GUTTER * 2) / 24;
+  useEffect(() => onZones?.(zones.map((z) => ({ from: z.from, to: z.to }))), [onZones, zones]);
+
+  if (smooth.length < 2) return empty(width);
+
+  const values = smooth.map((p) => p.value);
+  const yMin = Math.min(PULSE_TICKS[0], Math.min(...values) - 5);
+  const yMax = Math.max(PULSE_TICKS[PULSE_TICKS.length - 1], Math.max(...values) + 5);
+  const gutter = 34;
+  const plot = width - gutter;
+  const x = (m: number) => gutter + (m / 1440) * plot;
+  const y = (v: number) => 10 + (1 - (v - yMin) / (yMax - yMin)) * (HEIGHT - 32);
+  const ticks = PULSE_TICKS.filter((t) => t >= yMin && t <= yMax);
   const segments = splitSegments(smooth, HR_SMOOTH_MAX_GAP);
 
   const pick = (e: GestureResponderEvent) => {
-    const minute = Math.max(0, Math.min(1439, ((e.nativeEvent.locationX - GUTTER) / (width - GUTTER * 2)) * 1440));
-    const nearest = smooth.length
-      ? smooth.reduce((a, b) => (Math.abs(b.ts / 60 - minute) < Math.abs(a.ts / 60 - minute) ? b : a))
-      : null;
-    setTouch({ m: minute, hr: nearest ? nearest.value : null, steps: hours[Math.floor(minute / 60)] ?? 0 });
-    setZone(loads.find((z) => minute >= z.from - 15 && minute <= z.to + 15) ?? null);
+    const minute = ((e.nativeEvent.locationX - gutter) / plot) * 1440;
+    setPicked(zones.find((z) => minute >= z.from - 10 && minute <= z.to + 10) ?? null);
   };
 
   return (
@@ -58,43 +65,53 @@ export function DayActivityChart({
       onMoveShouldSetResponder={() => true}
       onResponderGrant={pick}
       onResponderMove={pick}
-      onResponderRelease={() => {
-        setTouch(null);
-        setZone(null);
-      }}
+      onResponderRelease={() => setPicked(null)}
     >
       <Svg width={width} height={HEIGHT}>
-        {loads.map((z, i) => (
-          <Rect
-            key={`z${i}`}
-            x={x(z.from)}
-            y={8}
-            width={Math.max(3, x(z.to) - x(z.from))}
-            height={HEIGHT - 26}
-            fill={withAlpha(colors.accent, 0.1)}
-            rx={4}
-          />
+        <Defs>
+          <Pattern id="load-hatch" patternUnits="userSpaceOnUse" width={6} height={6}>
+            <Path d="M0 6 L6 0" stroke={colors.accent} strokeWidth={1.2} strokeOpacity={0.75} />
+          </Pattern>
+        </Defs>
+
+        {ticks.map((t) => (
+          <React.Fragment key={t}>
+            <Line x1={gutter} x2={width} y1={y(t)} y2={y(t)} stroke={colors.track} strokeWidth={1} />
+            <SvgText x={gutter - 6} y={y(t) + 4} fill={colors.textFaint} fontSize={11} textAnchor="end">
+              {t}
+            </SvgText>
+          </React.Fragment>
         ))}
-        {hours.map((value, hour) =>
-          value > 0 ? (
+
+        {zones.map((z, i) => {
+          const span = Math.max(1, z.peak - z.low);
+          const top = y(Math.min(yMax, z.peak + span * ZONE_PADDING));
+          const bottom = y(Math.max(yMin, z.low - span * ZONE_PADDING));
+          const left = x(z.from);
+          const zoneWidth = Math.max(MIN_ZONE_WIDTH, x(z.to) - left);
+          return (
             <Rect
-              key={hour}
-              x={x(hour * 60 + 30) - barWidth / 2}
-              y={yStep(value)}
-              width={barWidth}
-              height={Math.max(2, HEIGHT - 18 - yStep(value))}
+              key={i}
+              x={left}
+              y={top}
+              width={zoneWidth}
+              height={Math.max(8, bottom - top)}
+              fill="url(#load-hatch)"
+              stroke={colors.accent}
+              strokeWidth={1}
+              strokeOpacity={0.6}
               rx={2}
-              fill={withAlpha(colors.accent, 0.22)}
             />
-          ) : null,
-        )}
+          );
+        })}
+
         {segments.map((seg, i) =>
           seg.length === 1 ? (
-            <Circle key={i} cx={x(seg[0].ts / 60)} cy={yHr(seg[0].value)} r={4} fill={colors.accent} />
+            <Circle key={i} cx={x(seg[0].ts / 60)} cy={y(seg[0].value)} r={4} fill={colors.accent} />
           ) : (
             <Path
               key={i}
-              d={seg.map((p, j) => `${j ? 'L' : 'M'}${x(p.ts / 60)} ${yHr(p.value)}`).join(' ')}
+              d={seg.map((p, j) => `${j ? 'L' : 'M'}${x(p.ts / 60)} ${y(p.value)}`).join(' ')}
               stroke={colors.accent}
               strokeWidth={2}
               strokeLinecap="round"
@@ -103,23 +120,24 @@ export function DayActivityChart({
             />
           ),
         )}
-        {touch ? <Line x1={x(touch.m)} x2={x(touch.m)} y1={8} y2={HEIGHT - 18} stroke={colors.textFaint} strokeWidth={1} /> : null}
+
         {[0, 360, 720, 1080, 1440].map((m) => (
-          <SvgText key={m} x={x(m)} y={HEIGHT - 2} fill={colors.textFaint} fontSize={11} textAnchor={m === 0 ? 'start' : m === 1440 ? 'end' : 'middle'}>
+          <SvgText
+            key={m}
+            x={x(m)}
+            y={HEIGHT - 2}
+            fill={colors.textFaint}
+            fontSize={11}
+            textAnchor={m === 0 ? 'start' : m === 1440 ? 'end' : 'middle'}
+          >
             {formatMinute(m)}
           </SvgText>
         ))}
       </Svg>
-      {zone ? (
+      {picked ? (
         <Text style={styles.touch}>
-          {formatMinute(zone.from)}–{formatMinute(zone.to)} · до {Math.round(zone.peak)} уд/мин ·{' '}
-          {Math.max(1, Math.round(zone.to - zone.from))} мин
-        </Text>
-      ) : touch ? (
-        <Text style={styles.touch}>
-          {formatMinute(touch.m)}
-          {touch.hr !== null ? ` · ${Math.round(touch.hr)} уд/мин` : ''}
-          {touch.steps > 0 ? ` · ${touch.steps} шагов` : ''}
+          {formatMinute(picked.from)}–{formatMinute(picked.to)} · {Math.round(picked.to - picked.from)} мин · до{' '}
+          {Math.round(picked.peak)} уд/мин
         </Text>
       ) : null}
     </View>

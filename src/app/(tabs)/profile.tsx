@@ -1,10 +1,11 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useVuelo } from '../../state';
-import { PROFILE_LIMITS, profileAge, type Goal, type Profile, type Sex } from '../../storage';
+import { BATTERY_STALE_MS, useVuelo } from '../../state';
+import { AUTO_MEASURE_PERIODS, type AutoMeasurePeriod } from '../../codec';
+import { EMPTY_PROFILE, PROFILE_LIMITS, profileAge, type Goal, type Profile, type Sex } from '../../storage';
 import { Card, colors, radius, spacing } from '../../ui';
 
 const DISCLAIMER =
@@ -22,12 +23,31 @@ const GOALS: { id: Goal; label: string }[] = [
 ];
 
 export default function ProfileTab() {
-  const { state, statusText, saveProfile, forgetRing } = useVuelo();
+  const { state, statusText, saveProfile, forgetRing, setAutoMeasure, clearData } = useVuelo();
   const insets = useSafeAreaInsets();
   const [about, setAbout] = useState(false);
   const [taps, setTaps] = useState(0);
   const [draft, setDraft] = useState<Profile>(state.profile);
   const version = Constants.expoConfig?.version ?? '1.0.0';
+  // Время берём из состояния, а не из Date.now() при отрисовке: иначе экран считается «грязным».
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 60_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, []);
+  const battery = useMemo(() => {
+    if (state.batteryAt === null) return { stale: false, time: '' };
+    const d = new Date(state.batteryAt);
+    return {
+      stale: now > 0 && now - state.batteryAt > BATTERY_STALE_MS,
+      time: `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`,
+    };
+  }, [now, state.batteryAt]);
 
   const commit = (patch: Partial<Profile>) => {
     const next = { ...draft, ...patch };
@@ -52,6 +72,23 @@ export default function ProfileTab() {
       { text: 'Отмена', style: 'cancel' },
       { text: 'Забыть', style: 'destructive', onPress: forgetRing },
     ]);
+
+  const wipe = () =>
+    Alert.alert(
+      'Очистить данные?',
+      'Будут удалены данные, история, биометрия и логи. Сон за прошлые дни с кольца восстановить, возможно, не получится. Продолжить?',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Очистить',
+          style: 'destructive',
+          onPress: () => {
+            clearData();
+            setDraft(EMPTY_PROFILE);
+          },
+        },
+      ],
+    );
 
   const onVersion = () => {
     const next = taps + 1;
@@ -86,7 +123,9 @@ export default function ProfileTab() {
       <Card>
         <View style={styles.line}>
           <Text style={styles.label}>Заряд кольца</Text>
-          <Text style={styles.value}>{state.battery === null ? '—' : `${state.battery} %`}</Text>
+          <Text style={[styles.value, battery.stale && styles.stale]}>
+            {state.battery === null ? '—' : `${state.battery} %${battery.time ? ` · ${battery.time}` : ''}`}
+          </Text>
         </View>
         <View style={styles.line}>
           <Text style={styles.label}>Синхронизация</Text>
@@ -111,6 +150,24 @@ export default function ProfileTab() {
         {profileAge(draft) !== null ? <Text style={styles.note}>Возраст {profileAge(draft)}</Text> : null}
       </Card>
 
+      <Card title="Кольцо">
+        <View style={styles.line}>
+          <Text style={styles.label}>Частота автозамеров</Text>
+          <View style={styles.chips}>
+            {AUTO_MEASURE_PERIODS.map((m: AutoMeasurePeriod) => (
+              <Pressable
+                key={m}
+                onPress={() => setAutoMeasure(m)}
+                style={[styles.chip, state.autoMeasureMin === m && styles.chipOn]}
+              >
+                <Text style={[styles.chipText, state.autoMeasureMin === m && styles.chipTextOn]}>{m}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+        <Text style={styles.note}>Чаще замеры, быстрее садится батарея</Text>
+      </Card>
+
       <Card title="Цель">
         {GOALS.map((g) => (
           <Pressable key={g.id} onPress={() => commit({ goal: g.id })} style={styles.goal}>
@@ -127,6 +184,9 @@ export default function ProfileTab() {
         </Pressable>
         <Pressable style={styles.line} onPress={forget}>
           <Text style={styles.danger}>Забыть кольцо</Text>
+        </Pressable>
+        <Pressable style={styles.line} onPress={wipe}>
+          <Text style={styles.label}>Очистить данные</Text>
         </Pressable>
       </Card>
     </ScrollView>
@@ -176,6 +236,7 @@ const styles = StyleSheet.create({
   line: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, gap: spacing.sm },
   label: { color: colors.textMuted, fontSize: 15, flex: 1 },
   value: { color: colors.text, fontSize: 15 },
+  stale: { color: colors.textFaint },
   input: { color: colors.text, fontSize: 16, minWidth: 64, textAlign: 'right', paddingVertical: 2 },
   chips: { flexDirection: 'row', gap: spacing.xs },
   chip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.track },

@@ -1,6 +1,15 @@
 import { wallClock, type Sample } from '../codec';
 import { DEEP_MIN_STATE } from './sleep';
-import { HOUR_LOAD_HR_WEIGHT, HOUR_LOAD_STEPS_WEIGHT, cardioPointsFor, maxHeartRate } from './score';
+import {
+  ACTIVE_HR_RATIO,
+  HOUR_LOAD_HR_WEIGHT,
+  HOUR_LOAD_STEPS_WEIGHT,
+  MAX_SAMPLE_GAP_MIN,
+  MERGE_GAP_MIN,
+  MIN_EPISODE_MIN,
+  cardioPointsFor,
+  maxHeartRate,
+} from './score';
 
 /** Подготовка данных для графиков. Только чистые функции: ни расчётов, ни побочных эффектов. */
 
@@ -115,27 +124,36 @@ export function busiestHour(
   return bestLoad > 0 ? best : null;
 }
 
-/** Отрезки, где пульс был в зонах, которые учитывает оценка активности. */
+/**
+ * Эпизоды нагрузки: непрерывные отрезки, где пульс не ниже ACTIVE_HR_RATIO от максимума.
+ * Соседние склеиваем, если пауза меньше MERGE_GAP_MIN; через дырку в данных не тянем.
+ */
 export function loadIntervals(
   heart: { m: number; v: number }[],
   age: number | null,
-  maxGapMin = 45,
-): { from: number; to: number; peak: number }[] {
+): { from: number; to: number; peak: number; low: number }[] {
   if (age === null) return [];
-  const maxHr = maxHeartRate(age);
+  const active = maxHeartRate(age) * ACTIVE_HR_RATIO;
   const points = [...heart].sort((a, b) => a.m - b.m);
-  const out: { from: number; to: number; peak: number }[] = [];
-  for (const p of points) {
-    if (cardioPointsFor(p.v, maxHr) === 0) continue;
-    const last = out[out.length - 1];
-    if (last && p.m - last.to <= maxGapMin) {
+  const raw: { from: number; to: number; peak: number; low: number }[] = [];
+
+  points.forEach((p, i) => {
+    if (p.v < active) return;
+    const previous = points[i - 1];
+    const last = raw[raw.length - 1];
+    const gapFromLast = last ? p.m - last.to : Infinity;
+    // Через дырку между замерами интервал не растягиваем: там кольцо просто не мерило.
+    const holeBefore = previous ? p.m - previous.m > MAX_SAMPLE_GAP_MIN : false;
+    if (last && gapFromLast <= MERGE_GAP_MIN && !holeBefore) {
       last.to = p.m;
       last.peak = Math.max(last.peak, p.v);
+      last.low = Math.min(last.low, p.v);
     } else {
-      out.push({ from: p.m, to: p.m, peak: p.v });
+      raw.push({ from: p.m, to: p.m, peak: p.v, low: p.v });
     }
-  }
-  return out;
+  });
+
+  return raw.filter((z) => z.to - z.from >= MIN_EPISODE_MIN);
 }
 
 /** Уровни волны сна: глубокий внизу, лёгкий вверху. */

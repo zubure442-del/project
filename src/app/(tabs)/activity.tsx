@@ -42,7 +42,7 @@ export default function ActivityTab() {
       banner={profileReady ? undefined : <BiometryBanner />}
     >
       <View style={styles.hero}>
-        <HeroRing value={day?.scores.activity ?? null} />
+        <HeroRing value={day?.scores.activity ?? null} calibrating={!!day && day.scores.activity === null} />
         {day?.steps != null ? (
           <Text style={styles.summary}>
             {day.steps.toLocaleString('ru-RU')} шагов

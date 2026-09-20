@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BATTERY_STALE_MS, useVuelo } from '../../state';
-import { AUTO_MEASURE_PERIODS, type AutoMeasurePeriod } from '../../codec';
 import { EMPTY_PROFILE, PROFILE_LIMITS, profileAge, type Goal, type Profile, type Sex } from '../../storage';
 import { Card, colors, radius, spacing } from '../../ui';
 
@@ -23,7 +22,7 @@ const GOALS: { id: Goal; label: string }[] = [
 ];
 
 export default function ProfileTab() {
-  const { state, statusText, saveProfile, forgetRing, setAutoMeasure, clearData } = useVuelo();
+  const { state, statusText, saveProfile, forgetRing, clearData } = useVuelo();
   const insets = useSafeAreaInsets();
   const [about, setAbout] = useState(false);
   const [taps, setTaps] = useState(0);
@@ -148,24 +147,6 @@ export default function ProfileTab() {
         <Field label="Вес, кг" value={draft.weightKg} onChange={(t) => number(t, 'weightKg')} onBlur={() => blur('weightKg')} />
         <Field label="Год рождения" value={draft.birthYear} onChange={(t) => number(t, 'birthYear')} onBlur={() => blur('birthYear')} />
         {profileAge(draft) !== null ? <Text style={styles.note}>Возраст {profileAge(draft)}</Text> : null}
-      </Card>
-
-      <Card title="Кольцо">
-        <View style={styles.line}>
-          <Text style={styles.label}>Частота автозамеров</Text>
-          <View style={styles.chips}>
-            {AUTO_MEASURE_PERIODS.map((m: AutoMeasurePeriod) => (
-              <Pressable
-                key={m}
-                onPress={() => setAutoMeasure(m)}
-                style={[styles.chip, state.autoMeasureMin === m && styles.chipOn]}
-              >
-                <Text style={[styles.chipText, state.autoMeasureMin === m && styles.chipTextOn]}>{m}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-        <Text style={styles.note}>Чаще замеры, быстрее садится батарея</Text>
       </Card>
 
       <Card title="Цель">

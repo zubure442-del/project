@@ -1,5 +1,5 @@
 import { dateKey, nowRingTs } from '../codec';
-import { buildTemplateReport, type Report, type ReportMode } from '../domain';
+import { buildTemplateReport, formatMinute, type Report, type ReportMode } from '../domain';
 import { keepLastDays, recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
 import type { SyncResult } from '../ble/sync';
 
@@ -24,19 +24,45 @@ export const todayKey = (now = new Date()) => dateKey(nowRingTs(now.getTime(), -
 export const findDay = (days: DaySnapshot[], date: string): DaySnapshot | null =>
   days.find((d) => d.date === date) ?? null;
 
-/** Есть ли за день хоть что-то: шаги, сон или пульс. */
+const MONTHS = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+
+/** Последний замер кислорода за всю историю: значение и когда. */
+export function latestSpo2(days: DaySnapshot[]): { value: number; when: string } | null {
+  for (const day of [...days].sort((a, b) => b.date.localeCompare(a.date))) {
+    const last = day.spo2[day.spo2.length - 1];
+    if (!last) continue;
+    const [, month, dayNo] = day.date.split('-');
+    return {
+      value: last.v,
+      when: `${Number(dayNo)} ${MONTHS[Number(month) - 1]} ${formatMinute(last.m)}`,
+    };
+  }
+  return null;
+}
+
+/** Граница суток: до этого часа по умолчанию показываем вчерашний день. */
+export const DAY_START_HOUR = 4;
+
+/** Есть ли за день хоть что-то: шаги, сон, пульс, сводка или кислород. */
 export const dayHasAnything = (day: DaySnapshot | null): boolean =>
-  !!day && ((day.steps ?? 0) > 0 || day.sleep !== null || day.heart.length > 0);
+  !!day &&
+  ((day.steps ?? 0) > 0 ||
+    day.sleep !== null ||
+    day.heart.length > 0 ||
+    day.spo2.length > 0 ||
+    day.summaryPoints.length > 0);
 
 /**
- * Какой день открывать. Если за сегодня ещё пусто, показываем последний день с данными,
- * а как только данные за сегодня появятся, возвращаемся на сегодня.
+ * Какой день открывать. До четырёх утра это ещё «вчера»: ночь не закончилась.
+ * Если за нужный день пусто, показываем последний день с данными.
  */
 export function defaultDay(days: DaySnapshot[], now = new Date()): string {
   const today = todayKey(now);
-  if (dayHasAnything(findDay(days, today))) return today;
+  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const preferred = now.getHours() < DAY_START_HOUR ? yesterday : today;
+  if (dayHasAnything(findDay(days, preferred))) return preferred;
   const last = [...days].reverse().find(dayHasAnything);
-  return last?.date ?? today;
+  return last?.date ?? preferred;
 }
 
 /** Семь календарных дней подряд, последний — сегодня. День без данных остаётся пустым. */

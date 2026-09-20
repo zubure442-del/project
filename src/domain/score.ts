@@ -152,7 +152,8 @@ export const SPO2_PENALTY = 20;
 export function stateScore(hrv: number[], restingHr: RestingHr | null, spo2: number[] = []): number | null {
   const parts: number[] = [];
   if (hrv.length) parts.push(Math.min(100, (avg(hrv) / HRV_TARGET) * 100));
-  if (restingHr?.source === 'night') {
+  // Нет ночи — берём минимум за день: он хуже, но лучше, чем совсем без входа.
+  if (restingHr) {
     parts.push(clamp(100 - Math.max(0, restingHr.value - RESTING_HR_TARGET) * RESTING_HR_PENALTY));
   }
   if (spo2.length) {
@@ -182,6 +183,6 @@ export function computeDayScore(input: ScoreInput): DayScore {
     activity: comp('activity'),
     state: comp('state'),
     restingHr,
-    stateInputs: { hrv: input.hrv.length > 0, restingHr: restingHr?.source === 'night', spo2: input.spo2.length > 0 },
+    stateInputs: { hrv: input.hrv.length > 0, restingHr: restingHr !== null, spo2: input.spo2.length > 0 },
   };
 }

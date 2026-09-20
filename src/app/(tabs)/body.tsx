@@ -1,10 +1,10 @@
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STRESS_ZONE_BOUNDS, formulaText } from '../../domain';
-import { findDay, useSelectedDay, useVuelo } from '../../state';
-import { Card, DayLineChart, HeroRing, InfoButton, PressureChart, Screen, WeekChart, spacing } from '../../ui';
+import { findDay, latestSpo2, useSelectedDay, useVuelo } from '../../state';
+import { BiometryBanner, Card, DayLineChart, HeroRing, InfoButton, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
 
 export default function BodyTab() {
-  const { week, state, phase, progress, packets, statusText, sync } = useVuelo();
+  const { week, state, phase, progress, packets, statusText, sync, profileReady } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
@@ -17,6 +17,8 @@ export default function BodyTab() {
     .filter((p) => p.systolic !== null && p.diastolic !== null)
     .map((p) => ({ m: p.m, sys: p.systolic as number, dia: p.diastolic as number }));
   const stress = day?.stress ?? [];
+  const spo2 = day?.spo2 ?? [];
+  const lastSpo2 = latestSpo2(state.days);
 
   return (
     <Screen
@@ -27,9 +29,10 @@ export default function BodyTab() {
       progress={progress}
       packets={packets}
       onSync={sync}
+      banner={profileReady ? undefined : <BiometryBanner />}
     >
       <View style={styles.hero}>
-        <HeroRing value={day?.scores.state ?? null} />
+        <HeroRing value={day?.scores.state ?? null} calibrating={!!day && day.scores.state === null} />
       </View>
 
       <Card title="Неделя" right={<InfoButton title={FORMULAS.state.title} text={formulaText('state')} />}>
@@ -40,6 +43,18 @@ export default function BodyTab() {
       {stress.length ? (
         <Card title="Стресс" right={<InfoButton title={FORMULAS.stress.title} text={formulaText('stress')} />}>
           <DayLineChart points={stress} width={chartWidth} yMin={0} yMax={100} guides={STRESS_ZONE_BOUNDS} />
+        </Card>
+      ) : null}
+
+      {spo2.length ? (
+        <Card title="Кислород" right={<InfoButton title={FORMULAS.state.title} text={formulaText('state')} />}>
+          <DayLineChart points={spo2} width={chartWidth} yMin={90} yMax={100} format={(v) => `${Math.round(v)} %`} />
+        </Card>
+      ) : lastSpo2 ? (
+        <Card>
+          <Text style={styles.line}>
+            Кислород · последний замер {lastSpo2.value} % · {lastSpo2.when}
+          </Text>
         </Card>
       ) : null}
 
@@ -66,4 +81,5 @@ export default function BodyTab() {
 
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: spacing.md },
+  line: { color: colors.textMuted, fontSize: 15 },
 });

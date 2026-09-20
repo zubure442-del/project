@@ -18,11 +18,14 @@ export function HeroRing({
   size = 190,
   caption,
   hapticOnChange = true,
+  calibrating = false,
 }: {
   value: number | null;
   size?: number;
   caption?: string;
   hapticOnChange?: boolean;
+  /** Данных не хватило: кольцо пунктиром, вместо числа слово «Калибровка». */
+  calibrating?: boolean;
 }) {
   const thickness = Math.max(8, size * 0.055);
   const r = (size - thickness) / 2;
@@ -80,7 +83,16 @@ export function HeroRing({
             <Stop offset="1" stopColor={colors.arcTo} stopOpacity={0} />
           </RadialGradient>
         </Defs>
-        <Circle cx={cx} cy={cx} r={r} stroke={colors.track} strokeWidth={thickness} fill="none" />
+        <Circle
+          cx={cx}
+          cy={cx}
+          r={r}
+          stroke={colors.track}
+          strokeWidth={thickness}
+          fill="none"
+          strokeDasharray={calibrating ? '6 8' : undefined}
+          strokeLinecap={calibrating ? 'round' : undefined}
+        />
         <AnimatedCircle
           cx={cx}
           cy={cx}
@@ -95,7 +107,11 @@ export function HeroRing({
         <AnimatedCircle r={thickness * 2.4} fill="url(#hero-glow)" animatedProps={tipProps} />
       </Svg>
       <View style={styles.center} pointerEvents="none">
-        <Text style={[styles.value, { fontSize: size * 0.34 }]}>{value === null ? '—' : shown}</Text>
+        {calibrating ? (
+          <Text style={[styles.calibrating, { fontSize: size * 0.13 }]}>Калибровка</Text>
+        ) : (
+          <Text style={[styles.value, { fontSize: size * 0.34 }]}>{value === null ? '—' : shown}</Text>
+        )}
         {caption ? <Text style={styles.caption}>{caption}</Text> : null}
       </View>
     </View>
@@ -105,5 +121,6 @@ export function HeroRing({
 const styles = StyleSheet.create({
   center: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   value: { color: colors.text, fontWeight: '200', letterSpacing: -1 },
+  calibrating: { color: colors.textMuted, fontWeight: '300' },
   caption: { color: colors.textMuted, fontSize: 14, marginTop: 2 },
 });

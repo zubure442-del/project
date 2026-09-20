@@ -17,5 +17,9 @@ export const hasData = (day: DaySnapshot | null): day is DaySnapshot =>
  */
 export function visibleDays<T extends { date: string; day: DaySnapshot | null }>(days: T[]): T[] {
   const first = days.findIndex((d) => hasData(d.day));
-  return first < 0 ? [] : days.slice(first);
+  if (first < 0) return [];
+  // Хвостовые дни без данных тоже не рисуем: пустой «Пн» справа выглядит как провал.
+  let last = days.length - 1;
+  while (last > first && !hasData(days[last].day)) last--;
+  return days.slice(first, last + 1);
 }

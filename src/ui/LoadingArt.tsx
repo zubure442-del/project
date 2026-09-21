@@ -41,51 +41,77 @@ function VectorArt({ index, size }: { index: number; size: number }) {
   );
 }
 
-function StageLayer({ index, visible, fadeMs }: { index: number; visible: boolean; fadeMs: number }) {
-  const [broken, setBroken] = useState(false);
-  const opacity = useSharedValue(visible ? 1 : 0);
-  useEffect(() => {
-    opacity.value = withTiming(visible ? 1 : 0, { duration: fadeMs });
-  }, [fadeMs, opacity, visible]);
-  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
-  return (
-    <Animated.View style={[StyleSheet.absoluteFill, styles.center, style]} pointerEvents="none">
-      {broken ? (
-        <VectorArt index={index} size={220} />
-      ) : (
-        <Image source={STAGE_IMAGES[index]} style={styles.image} resizeMode="cover" onError={() => setBroken(true)} />
-      )}
-    </Animated.View>
-  );
-}
+/** Контейнер рисунка — 4:5; файлы 859×1280 и 1031×1280 вписываются «cover» по центру. */
+export const ART_ASPECT = 4 / 5;
 
 /**
- * Крупный рисунок этапа. Все четыре смонтированы сразу — так они декодируются заранее
- * и смена идёт мгновенным затуханием, без мигания.
+ * Крупный рисунок этапа: ОДНА картинка в ОДНОМ контейнере с пропорциями 4:5.
+ * Раньше четыре картинки лежали стопкой, и у 3-й и 4-й снизу проступал лишний кусок.
+ * Смена — затуханием контейнера; все файлы подгружаются заранее, без скрытых слоёв.
  */
 export function StageArt({ stage, fadeMs }: { stage: number; fadeMs: number }) {
+  const [shown, setShown] = useState(stage);
+  const [broken, setBroken] = useState<Record<number, boolean>>({});
+  const opacity = useSharedValue(1);
+
+  useEffect(() => {
+    STAGE_IMAGES.forEach((src) => {
+      const { uri } = Image.resolveAssetSource(src);
+      if (uri) void Image.prefetch(uri).catch(() => undefined);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (stage === shown) return;
+    if (fadeMs === 0) {
+      const timer = setTimeout(() => setShown(stage), 0);
+      return () => clearTimeout(timer);
+    }
+    opacity.value = withTiming(0, { duration: fadeMs });
+    const timer = setTimeout(() => {
+      setShown(stage);
+      opacity.value = withTiming(1, { duration: fadeMs });
+    }, fadeMs);
+    return () => clearTimeout(timer);
+  }, [fadeMs, opacity, shown, stage]);
+
+  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  const index = shown - 1;
+
   return (
     <View style={styles.root}>
-      {STAGE_IMAGES.map((_, i) => (
-        <StageLayer key={i} index={i} visible={stage === i + 1} fadeMs={fadeMs} />
-      ))}
-      {/* Низ рисунка растворяется в фоне. */}
-      <Svg style={styles.fade} width="100%" height="100%" preserveAspectRatio="none" pointerEvents="none">
-        <Defs>
-          <LinearGradient id="loadingFade" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={colors.bg} stopOpacity={0} />
-            <Stop offset="1" stopColor={colors.bg} stopOpacity={1} />
-          </LinearGradient>
-        </Defs>
-        <Rect width="100%" height="100%" fill="url(#loadingFade)" />
-      </Svg>
+      <Animated.View style={[styles.frame, style]}>
+        {broken[index] ? (
+          <View style={styles.center}>
+            <VectorArt index={index} size={220} />
+          </View>
+        ) : (
+          <Image
+            source={STAGE_IMAGES[index]}
+            style={styles.image}
+            resizeMode="cover"
+            onError={() => setBroken((prev) => ({ ...prev, [index]: true }))}
+          />
+        )}
+        {/* Низ рисунка мягко растворяется в фоне — в том же контейнере, без второго слоя картинки. */}
+        <Svg style={styles.fade} viewBox="0 0 1 1" preserveAspectRatio="none">
+          <Defs>
+            <LinearGradient id="loadingFade" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={colors.bg} stopOpacity={0} />
+              <Stop offset="1" stopColor={colors.bg} stopOpacity={1} />
+            </LinearGradient>
+          </Defs>
+          <Rect x={0} y={0} width={1} height={1} fill="url(#loadingFade)" />
+        </Svg>
+      </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, overflow: 'hidden' },
-  center: { alignItems: 'center', justifyContent: 'center' },
+  root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  frame: { height: '100%', maxWidth: '100%', aspectRatio: ART_ASPECT, overflow: 'hidden' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   image: { width: '100%', height: '100%' },
-  fade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '22%' },
+  fade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '25%' },
 });

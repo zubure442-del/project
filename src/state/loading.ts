@@ -1,62 +1,73 @@
 /**
- * Реальные этапы загрузки: 1 — поиск, соединение, рукопожатие; 2 — запросы по дням;
- * 3 — разбор и расчёты; 4 — запись кэша. От них зависят кольцо-прогресс и строка статуса.
- * Карточки с рисунками от этапов НЕ зависят: они листаются равными интервалами.
+ * Ход загрузки для экрана. Процент считается по ОЖИДАЕМЫМ длительностям частей загрузки
+ * (подключение, запросы по дням, разовые запросы, запись), а не по числу запросов:
+ * так он растёт равномерно по времени. Слайды меняются по четвертям процента.
  */
 export type LoadStage = 1 | 2 | 3 | 4;
 
-/** Сколько карточек с рисунками. */
-export const SLIDE_COUNT = 4;
-/** Карточки показываем, только если предстоит загрузить столько дней или больше (первый запуск, после очистки). */
-export const SLIDES_MIN_DAYS = 3;
-/** Ожидаемая длительность загрузки, пока своей истории нет. */
-export const DEFAULT_EXPECTED_MS = 40000;
-/** Интервал карточки — четверть ожидаемой длительности, но в этих пределах. */
-export const SLIDE_MIN_MS = 4000;
-export const SLIDE_MAX_MS = 12000;
+/** Из чего состоит загрузка: подключение с рукопожатием, четыре запроса на день, разовые 0x03/0x0B, запись. */
+export type SegmentKind = 'connect' | 'steps' | 'heart' | 'summary' | 'spo2' | 'extras' | 'finalize';
+export const DAY_SEGMENTS: SegmentKind[] = ['steps', 'heart', 'summary', 'spo2'];
+
+/** Ожидаемые длительности, пока своей истории нет: 9 с на день из четырёх запросов. */
+export const DEFAULT_DAY_MS = 9000;
+export const DEFAULT_SEGMENT_MS: Record<SegmentKind, number> = {
+  connect: 4000,
+  steps: DEFAULT_DAY_MS / 4,
+  heart: DEFAULT_DAY_MS / 4,
+  summary: DEFAULT_DAY_MS / 4,
+  spo2: DEFAULT_DAY_MS / 4,
+  extras: 500,
+  finalize: 300,
+};
 /** По скольким последним удачным загрузкам берём медиану. */
 export const DURATION_HISTORY = 3;
-/** Загрузка кончилась раньше карточек: текущая держится ещё не дольше этого и идёт переход. */
-export const FINISH_HOLD_MS = 2500;
+/** Идущая часть загрузки не засчитывается больше, чем на эту долю, пока не кончится. */
+export const SEGMENT_CAP = 0.95;
+
+/** Сколько карточек с рисунками. */
+export const SLIDE_COUNT = 4;
+/** Карточки показываем при первом запуске или если предстоит загрузить столько дней или больше. */
+export const SLIDES_MIN_DAYS = 3;
+/** Каждая карточка на экране не меньше этого, даже если процент перескочил. */
+export const SLIDE_MIN_MS = 3000;
+/** После этого процента на последней карточке подпись «Почти готово». */
+export const ALMOST_DONE = 0.95;
 /** Быстрый экран без карточек: после конца загрузки ещё столько, и всего не меньше QUICK_MIN_MS. */
 export const QUICK_HOLD_MS = 400;
 export const QUICK_MIN_MS = 1200;
 /** Смена карточки и рисунка — затухание. */
 export const STAGE_FADE_MS = 200;
 
-/** Доля общего процента на каждый этап: основное время уходит на запросы. */
-export const STAGE_BANDS: Record<LoadStage, [number, number]> = {
-  1: [0, 0.1],
-  2: [0.1, 0.9],
-  3: [0.9, 0.95],
-  4: [0.95, 1],
-};
+export type DurationHistory = Partial<Record<SegmentKind, number[]>>;
 
 /** Ход загрузки. Живёт вне React-состояния, чтобы вкладки не перерисовывались по пакетам. */
 export interface LoadProgress {
+  /** Реальный этап: 1 — подключение, 2 — запросы, 3 — расчёты, 4 — запись. От него статус. */
   stage: LoadStage;
-  /** Доля выполненных запросов внутри этапа 2, 0..1. */
-  fraction: number;
   packets: number;
-  /** Загрузка закончилась (успешно или нет). */
   finished: boolean;
   startedAt: number;
   finishedAt: number | null;
   /** Длинная загрузка: показываем карточки с рисунками. Иначе — быстрый экран. */
   slides: boolean;
-  /** Интервал листания карточек. */
-  intervalMs: number;
+  /** Ожидаемая длительность каждой части загрузки по порядку, мс. */
+  plan: number[];
+  /** Какая часть идёт сейчас и с какого момента. */
+  segment: number;
+  segmentStartedAt: number;
 }
 
 export const INITIAL_PROGRESS: LoadProgress = {
   stage: 1,
-  fraction: 0,
   packets: 0,
   finished: false,
   startedAt: 0,
   finishedAt: null,
   slides: false,
-  intervalMs: DEFAULT_EXPECTED_MS / SLIDE_COUNT,
+  plan: [DEFAULT_SEGMENT_MS.connect],
+  segment: 0,
+  segmentStartedAt: 0,
 };
 
 const median = (values: number[]) => {
@@ -65,50 +76,72 @@ const median = (values: number[]) => {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 };
 
-/** Ожидаемая длительность: медиана последних удачных загрузок того же типа. */
-export function expectedDuration(history: readonly number[]): number {
-  const recent = history.slice(-DURATION_HISTORY);
-  return recent.length ? median(recent) : DEFAULT_EXPECTED_MS;
+/** Ожидаемая длительность части: медиана последних удачных загрузок, иначе по умолчанию. */
+export function expectedMs(kind: SegmentKind, history: DurationHistory): number {
+  const recent = (history[kind] ?? []).slice(-DURATION_HISTORY);
+  return recent.length ? median(recent) : DEFAULT_SEGMENT_MS[kind];
 }
 
-/** Интервал карточки: I = clamp(T / 4, 4 с, 12 с). */
-export const slideInterval = (history: readonly number[]) =>
-  Math.min(SLIDE_MAX_MS, Math.max(SLIDE_MIN_MS, expectedDuration(history) / SLIDE_COUNT));
-
-/** Новая длительность в историю: храним только последние DURATION_HISTORY. */
-export const recordDuration = (history: readonly number[], ms: number) => [...history, ms].slice(-DURATION_HISTORY);
-
-/** Какая карточка сейчас (1..4). После четвёртой остаётся она. */
-export const slideAt = (elapsed: number, interval: number) =>
-  Math.min(SLIDE_COUNT, Math.floor(Math.max(0, elapsed) / interval) + 1);
-
-/** Номер карточки на экране: после конца загрузки листание останавливается. */
-export function currentSlide(p: LoadProgress, now: number): number {
-  const at = p.finished && p.finishedAt !== null ? Math.min(now, p.finishedAt) : now;
-  return slideAt(at - p.startedAt, p.intervalMs);
+/** Части загрузки по порядку — ровно в том порядке, в каком их проходит выгрузка. */
+export function loadSegments(dayCount: number): SegmentKind[] {
+  return ['connect', ...Array.from({ length: dayCount }, () => DAY_SEGMENTS).flat(), 'extras', 'finalize'];
 }
 
-/** Подпись под кольцом: «Шаг N из 4» или «Почти готово», если загрузка дольше всех карточек. */
-export function slideCaption(p: LoadProgress, now: number): string {
-  const late = !p.finished && now - p.startedAt >= SLIDE_COUNT * p.intervalMs;
-  return late ? 'Почти готово' : `Шаг ${currentSlide(p, now)} из ${SLIDE_COUNT}`;
-}
+export const loadPlan = (dayCount: number, history: DurationHistory) =>
+  loadSegments(dayCount).map((kind) => expectedMs(kind, history));
 
-/** Когда уходить на главный экран; null — загрузка ещё идёт. */
-export function leaveAt(p: LoadProgress): number | null {
-  if (!p.finished || p.finishedAt === null) return null;
-  if (!p.slides) return Math.max(p.finishedAt + QUICK_HOLD_MS, p.startedAt + QUICK_MIN_MS);
-  const slide = slideAt(p.finishedAt - p.startedAt, p.intervalMs);
-  const cardEnd = slide < SLIDE_COUNT ? p.startedAt + slide * p.intervalMs : Infinity;
-  return p.finishedAt + Math.min(FINISH_HOLD_MS, Math.max(0, cardEnd - p.finishedAt));
-}
-
-/** Общий процент по реальному ходу загрузки. */
-export function realPercent(p: LoadProgress): number {
+/** Процент по ожидаемым длительностям: прошедшие части целиком, идущая — по времени, но не больше 95 %. */
+export function plannedPercent(p: LoadProgress, now: number): number {
   if (p.finished) return 1;
-  const [from, to] = STAGE_BANDS[p.stage];
-  const inside = p.stage === 2 ? Math.min(1, Math.max(0, p.fraction)) : 0;
-  return from + (to - from) * inside;
+  const total = p.plan.reduce((a, b) => a + b, 0);
+  if (total <= 0) return 0;
+  const done = p.plan.slice(0, p.segment).reduce((a, b) => a + b, 0);
+  const current = p.plan[p.segment] ?? 0;
+  const running = Math.min(Math.max(0, now - p.segmentStartedAt), current * SEGMENT_CAP);
+  return Math.min(1, (done + running) / total);
+}
+
+/** Длительности частей этой загрузки — в историю: по каждой части среднее за загрузку, последние три загрузки. */
+export function recordDurations(history: DurationHistory, measured: Partial<Record<SegmentKind, number[]>>): DurationHistory {
+  const next: DurationHistory = { ...history };
+  for (const [kind, values] of Object.entries(measured) as [SegmentKind, number[]][]) {
+    if (!values.length) continue;
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    next[kind] = [...(history[kind] ?? []), Math.round(mean)].slice(-DURATION_HISTORY);
+  }
+  return next;
+}
+
+/** Карточки — при первом запуске или если предстоит загрузить от SLIDES_MIN_DAYS дней. */
+export const wantsSlides = (firstRun: boolean, dayCount: number) => firstRun || dayCount >= SLIDES_MIN_DAYS;
+
+/** Какая карточка «положена» по проценту: 1 — 0–25 %, 2 — 25–50 %, 3 — 50–75 %, 4 — 75–100 %. */
+export const slideForPercent = (percent: number) => Math.min(SLIDE_COUNT, Math.floor(percent * SLIDE_COUNT) + 1);
+
+export interface ShownSlide {
+  slide: number;
+  /** Когда карточка появилась. */
+  since: number;
+}
+
+/** Следующая карточка: по одной за раз и не раньше, чем через SLIDE_MIN_MS. */
+export function nextSlide(shown: ShownSlide, percent: number, now: number): ShownSlide {
+  if (slideForPercent(percent) <= shown.slide || now - shown.since < SLIDE_MIN_MS) return shown;
+  return { slide: shown.slide + 1, since: now };
+}
+
+/** Подпись под кольцом: номер показанной карточки или «Почти готово» в самом конце долгой загрузки. */
+export function slideCaption(shown: ShownSlide, percent: number, finished: boolean): string {
+  return shown.slide === SLIDE_COUNT && percent >= ALMOST_DONE && !finished
+    ? 'Почти готово'
+    : `Шаг ${shown.slide} из ${SLIDE_COUNT}`;
+}
+
+/** Можно уходить на главный экран. */
+export function canLeave(p: LoadProgress, shown: ShownSlide, now: number): boolean {
+  if (!p.finished || p.finishedAt === null) return false;
+  if (!p.slides) return now >= Math.max(p.finishedAt + QUICK_HOLD_MS, p.startedAt + QUICK_MIN_MS);
+  return shown.slide === SLIDE_COUNT && now - shown.since >= SLIDE_MIN_MS;
 }
 
 /** Настоящий статус: что сейчас делаем и сколько процентов. */
@@ -128,7 +161,12 @@ export function createProgressStore() {
       value = { ...value, ...patch };
       emit();
     },
-    /** Начало новой загрузки: время старта, вид экрана и интервал карточек. */
+    /** Следующая часть загрузки началась. */
+    advance(now = Date.now()) {
+      value = { ...value, segment: Math.min(value.plan.length - 1, value.segment + 1), segmentStartedAt: now };
+      emit();
+    },
+    /** Начало новой загрузки: время старта, вид экрана и план частей. */
     reset(start: Partial<LoadProgress> = {}) {
       value = { ...INITIAL_PROGRESS, ...start };
       emit();

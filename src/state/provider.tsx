@@ -31,7 +31,7 @@ import {
   type VueloState,
 } from '../storage';
 import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
-import { SLIDES_MIN_DAYS, loadProgress, recordDuration, slideInterval } from './loading';
+import { loadPlan, loadProgress, recordDurations, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withStartName } from './profile';
 import { applySyncResult, planDays } from './sync-plan';
 
@@ -178,11 +178,17 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       stopLive.current = true;
       setError(null);
       setLoadingMode(mode);
-      // План дней известен сразу: от него зависит, показывать ли карточки с рисунками.
+      // План дней известен сразу: от него зависят карточки и ожидаемая длительность частей загрузки.
       const plan = planDays(latest.current.syncedAt);
-      const slides = plan.days.length >= SLIDES_MIN_DAYS;
+      const slides = wantsSlides(latest.current.lastSyncAt === null, plan.days.length);
       const startedAt = Date.now();
-      loadProgress.reset({ startedAt, slides, intervalMs: slideInterval(latest.current.syncDurations.long) });
+      const measured: Partial<Record<SegmentKind, number[]>> = {};
+      loadProgress.reset({
+        startedAt,
+        slides,
+        plan: loadPlan(plan.days.length, latest.current.requestDurations),
+        segmentStartedAt: startedAt,
+      });
       setPhase('loading');
 
       void (async () => {
@@ -221,14 +227,19 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           }
 
           // Этап 2: запросы по дням.
+          measured.connect = [Date.now() - startedAt];
           loadProgress.set({ stage: 2 });
+          loadProgress.advance();
           logNote(plan.note);
           let packets = 0;
           const result = await runSync(device, {
             days: plan.days,
             extras: true,
             hardCapMs: HARD_CAP_MS,
-            onProgress: (fraction) => loadProgress.set({ fraction }),
+            onSegment: (kind, ms, real) => {
+              if (real) (measured[kind] ??= []).push(ms);
+              loadProgress.advance();
+            },
             onPacket: () => loadProgress.set({ packets: ++packets }),
             onNote: logNote,
           });
@@ -237,19 +248,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           loadProgress.set({ stage: 3 });
           await yieldFrame();
           const applied = applySyncResult(latest.current, result, known);
-          // Длительность удачной загрузки — для интервала карточек в следующий раз.
+          // Длительности частей удачной загрузки — чтобы в следующий раз процент шёл равномерно.
           const next = result.error
             ? applied
-            : {
-                ...applied,
-                syncDurations: {
-                  ...applied.syncDurations,
-                  [slides ? 'long' : 'short']: recordDuration(
-                    applied.syncDurations[slides ? 'long' : 'short'],
-                    Date.now() - startedAt,
-                  ),
-                },
-              };
+            : { ...applied, requestDurations: recordDurations(applied.requestDurations, measured) };
 
           // Этап 4: запись кэша, потом одно применение состояния.
           loadProgress.set({ stage: 4 });

@@ -14,14 +14,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   NAME_NOTE,
   STAGE_FADE_MS,
-  currentSlide,
-  leaveAt,
+  canLeave,
   loadProgress,
-  realPercent,
+  nextSlide,
+  plannedPercent,
   slideCaption,
   statusText,
   useVuelo,
   type LoadProgress,
+  type ShownSlide,
 } from '../state';
 import { StageArt } from './LoadingArt';
 import { ProgressArc } from './ProgressArc';
@@ -163,24 +164,32 @@ function TipsCard({ slide, percent, pulse, status, caption, reduceMotion }: Card
 function SyncView({ onFinish }: { onFinish: () => void }) {
   const { phase } = useVuelo();
   const reduceMotion = useReduceMotion();
-  const [tick, setTick] = useState<{ p: LoadProgress; now: number }>(() => ({ p: loadProgress.get(), now: Date.now() }));
+  const [tick, setTick] = useState<{ p: LoadProgress; shown: ShownSlide }>(() => ({
+    p: loadProgress.get(),
+    shown: { slide: 1, since: Date.now() },
+  }));
   const [percent, setPercent] = useState(0);
   const [pulse, setPulse] = useState(0);
   const flash = useRef({ packets: 0, at: 0 });
+  const shownRef = useRef<ShownSlide>(tick.shown);
+  const percentRef = useRef(0);
 
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
       const p = loadProgress.get();
-      setTick({ p, now });
-      // Процент только растёт: откат назад выглядел бы как сбой.
-      setPercent((prev) => Math.max(prev, realPercent(p)));
+      // Процент — по ожидаемым длительностям частей загрузки; только растёт.
+      const pct = Math.max(percentRef.current, plannedPercent(p, now));
+      percentRef.current = pct;
+      setPercent(pct);
+      // Карточка — по четвертям процента, по одной и не чаще раза в SLIDE_MIN_MS.
+      shownRef.current = nextSlide(shownRef.current, pct, now);
+      setTick({ p, shown: shownRef.current });
       if (p.packets !== flash.current.packets && now - flash.current.at >= FLASH_MS) {
         flash.current = { packets: p.packets, at: now };
         setPulse(p.packets);
       }
-      const leave = leaveAt(p);
-      if (phase === 'done' && leave !== null && now >= leave) {
+      if (phase === 'done' && canLeave(p, shownRef.current, now)) {
         clearInterval(timer);
         onFinish();
       }
@@ -188,7 +197,7 @@ function SyncView({ onFinish }: { onFinish: () => void }) {
     return () => clearInterval(timer);
   }, [onFinish, phase]);
 
-  const { p, now } = tick;
+  const { p, shown } = tick;
   const status = statusText(p, percent);
 
   if (!p.slides) {
@@ -200,18 +209,17 @@ function SyncView({ onFinish }: { onFinish: () => void }) {
     );
   }
 
-  const slide = currentSlide(p, now);
   return (
     <>
       <View style={styles.art}>
-        <StageArt stage={slide} fadeMs={reduceMotion ? 0 : STAGE_FADE_MS} />
+        <StageArt stage={shown.slide} fadeMs={reduceMotion ? 0 : STAGE_FADE_MS} />
       </View>
       <TipsCard
-        slide={slide}
+        slide={shown.slide}
         percent={percent}
         pulse={pulse}
         status={status}
-        caption={slideCaption(p, now)}
+        caption={slideCaption(shown, percent, p.finished)}
         reduceMotion={reduceMotion}
       />
     </>

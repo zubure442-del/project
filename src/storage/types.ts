@@ -86,8 +86,8 @@ export interface VueloState {
   syncedAt: Record<string, number>;
   /** Норма шагов по дням: считается один раз в день и дальше не меняется. */
   stepNorms: Record<string, StoredNorm>;
-  /** Длительности последних удачных загрузок, мс: длинных (с карточками) и быстрых. */
-  syncDurations: { long: number[]; short: number[] };
+  /** Длительности частей последних удачных загрузок, мс (подключение, запросы по видам): для равномерного процента. */
+  requestDurations: Record<string, number[]>;
   /** Профиль: нужен для 0x02 и расчёта пульсовых зон. */
   profile: Profile;
   /** Частота автозамеров кольца, минуты: уходит в байт 6 команды 0x19. */
@@ -127,7 +127,7 @@ export const isProfileComplete = (p: Profile): boolean =>
   p.sex !== null && p.heightCm !== null && p.weightKg !== null && p.birthYear !== null;
 
 export const EMPTY_STATE: VueloState = {
-  days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, syncDurations: { long: [], short: [] }, battery: null,
+  days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
   caloriesToday: null, caloriesDate: null,
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false,
 };

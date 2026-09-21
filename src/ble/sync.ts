@@ -139,6 +139,11 @@ export interface SyncOptions {
   onPacket?: () => void;
   /** Строка в отладочный лог: чем закончился каждый день. */
   onNote?: (text: string) => void;
+  /**
+   * Закончилась очередная часть выгрузки: запрос дня или пара разовых запросов (extras).
+   * measured = false — запрос пропущен (предел времени), его длительность не показательна.
+   */
+  onSegment?: (kind: 'steps' | 'heart' | 'summary' | 'spo2' | 'extras', ms: number, measured: boolean) => void;
 }
 
 /** Запросов на один день: шаги (с ними приходит сон), пульс, сводка, кислород. */
@@ -321,11 +326,14 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
       // а сам сон кольцо отдаёт в окне запроса шагов.
       const ends: StreamEnd[] = [];
       for (const kind of DAY_REQUESTS) {
+        const started = Date.now();
         if (outOfTime()) {
           result.capped = true;
           ends.push('skipped');
+          options.onSegment?.(kind, 0, false);
         } else {
           ends.push(await request(kind, day));
+          options.onSegment?.(kind, Date.now() - started, true);
         }
         doneRequests++;
         report();
@@ -338,12 +346,14 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     }
     if (extras) {
       // 0x03 — активность за сегодня, 0x0B — заряд. Оба разовые, не по дням (PROTOCOL.md, раздел 3).
+      const started = Date.now();
       if (await sendLight(t, activityCommand())) await waitFor(() => gotActivity);
       doneRequests++;
       report();
       if (await sendLight(t, batteryCommand())) await waitFor(() => gotBattery);
       doneRequests++;
       report();
+      options.onSegment?.('extras', Date.now() - started, true);
     }
   } catch (e) {
     // Обрыв связи: отдаём то, что успело прийти, пусть вызывающий решит, что показать.

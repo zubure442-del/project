@@ -1,3 +1,11 @@
+import {
+  HR_ACTIVE_FLOOR,
+  HR_ACTIVE_SHARE,
+  HR_INTERP_MAX_MIN,
+  MINUTES_PER_DAY,
+  STRIDE_HEIGHT_RATIO,
+  WALK_KCAL_PER_KG_KM,
+} from './calories';
 import { DEEP_SHARE_BEST, DEEP_SHARE_STEPS, STRESS_ZONES } from './charts';
 import {
   NORM_MAX,
@@ -108,7 +116,12 @@ export const FORMULAS = {
   },
   calories: {
     title: 'Калории',
-    lines: ['Расход по данным кольца: шаги и профиль', 'Только за сегодня', NOT_MEDICAL],
+    lines: [
+      `Шаги: ${WALK_KCAL_PER_KG_KM} × вес × ${STRIDE_HEIGHT_RATIO} × рост в м / 1000 ккал на шаг`,
+      `Пульс от max(${HR_ACTIVE_FLOOR}, ${HR_ACTIVE_SHARE} × макс. пульс): Keytel − BMR / ${MINUTES_PER_DAY} (Mifflin–St Jeor)`,
+      `В минуту — большее из двух; пульс между замерами тянем до ${HR_INTERP_MAX_MIN} мин; только активные ккал`,
+      NOT_MEDICAL,
+    ],
   },
   pressure: {
     title: 'Давление',

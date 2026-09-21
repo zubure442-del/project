@@ -36,6 +36,8 @@ export interface DaySnapshot {
     glucose: number | null;
     hrv: number | null;
   }[];
+  /** Активные ккал за день по нашей минутной модели; null — нет биометрии. У старых сводок поля нет. */
+  calories?: number | null;
   /** Норма шагов дня. У старых сводок из кэша её может не быть — тогда 10 000. */
   stepNorm?: StoredNorm;
   /** Шаги по часам суток: ровно 24 числа. */
@@ -67,10 +69,6 @@ export interface VueloState {
   lastSyncAt: number | null;
   /** Заряд кольца на момент последней синхронизации. */
   battery: number | null;
-  /** Расход за сегодня из пакета 0x03. Кольцо отдаёт только текущий день. */
-  caloriesToday: number | null;
-  /** Дата, к которой относится этот расход. */
-  caloriesDate: string | null;
   /** Опознанное кольцо: по идентификатору подключаемся без поиска в эфире. */
   ring: KnownRing | null;
   /** Возраст для расчёта пульсовых зон; null — не спрашивали. */
@@ -128,7 +126,6 @@ export const isProfileComplete = (p: Profile): boolean =>
 
 export const EMPTY_STATE: VueloState = {
   days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
-  caloriesToday: null, caloriesDate: null,
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false,
 };
 /** Сколько дней показываем в недельном графике. */

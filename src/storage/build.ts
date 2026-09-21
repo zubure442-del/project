@@ -2,6 +2,8 @@ import { dateKey, wallClock, type Sample, type SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
 import {
   STEP_HISTORY_DAYS,
+  activeCalories,
+  type Body,
   buildSleepSessions,
   cleanHeart,
   computeDayScore,
@@ -53,6 +55,8 @@ export function buildSnapshots(
   age: number | null,
   /** Сохранённые нормы шагов по дням: посчитанная норма в течение дня не меняется. */
   norms: Readonly<Record<string, StoredNorm>> = {},
+  /** Биометрия для калорий; null — калории не считаем. */
+  body: Body | null = null,
 ): DaySnapshot[] {
   const sessions = buildSleepSessions(sync.sleep);
   const { clean } = cleanHeart(sync.heart);
@@ -116,6 +120,7 @@ export function buildSnapshots(
         hrv: r.hrv,
       })),
       stepNorm,
+      calories: activeCalories(toPoints(stepSamples ?? []), toPoints(heart), body),
       stepsByHour: stepsByHour(stepSamples ?? []),
       stepsByMinute: toPoints(stepSamples ?? []),
       sleepSegments: night

@@ -22,8 +22,6 @@ export async function loadState(): Promise<VueloState> {
       requestDurations: parsed.requestDurations ?? {},
       stepNorms: parsed.stepNorms ?? {},
       battery: parsed.battery ?? null,
-      caloriesToday: parsed.caloriesToday ?? null,
-      caloriesDate: parsed.caloriesDate ?? null,
       batteryAt: parsed.batteryAt ?? null,
       autoMeasureMin: parsed.autoMeasureMin ?? 30,
       ring: parsed.ring ?? null,

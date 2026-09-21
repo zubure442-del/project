@@ -1,6 +1,6 @@
 import type { KnownRing } from '../ble/ring';
 import type { SyncResult } from '../ble/sync';
-import { buildTemplateReport } from '../domain';
+import { bodyOf, buildTemplateReport } from '../domain';
 import {
   CACHE_DAYS,
   addReport,
@@ -86,6 +86,17 @@ export function markSynced(
 }
 
 /**
+ * Сводки дней заново из рядов: оценки, норма шагов (сохранённая не меняется) и калории
+ * по текущему профилю. Вызывается после выгрузки и после правки профиля.
+ */
+export function rebuildDays(state: VueloState, now = new Date()): VueloState {
+  const days = keepLastDays(
+    buildSnapshots(toSyncResult(state.raw), profileAge(state.profile, now) ?? state.age, state.stepNorms, bodyOf(state.profile, now)),
+  );
+  return { ...state, days, stepNorms: collectStepNorms(state.stepNorms, days) };
+}
+
+/**
  * Результат выгрузки поверх состояния. Единственное место, где данные кольца попадают в кэш:
  * ряды дополняются по дню и типу (пустое не затирает), сводки пересчитываются из рядов,
  * завершённые дни отмечаются. При обрыве связи сохраняем, что успело прийти,
@@ -98,19 +109,13 @@ export function applySyncResult(
   now = new Date(),
 ): VueloState {
   const raw = mergeRaw(state.raw, splitByDay(sync));
-  const days = keepLastDays(
-    buildSnapshots(toSyncResult(raw), profileAge(state.profile, now) ?? state.age, state.stepNorms),
-  );
+  const rebuilt = rebuildDays({ ...state, raw }, now);
+  const days = rebuilt.days;
   const base: VueloState = {
-    ...state,
-    raw,
-    days,
+    ...rebuilt,
     ring: known ?? state.ring,
-    stepNorms: collectStepNorms(state.stepNorms, days),
     battery: sync.battery ?? state.battery,
     batteryAt: sync.battery !== null ? now.getTime() : state.batteryAt,
-    caloriesToday: sync.activity ? sync.activity.calories : state.caloriesToday,
-    caloriesDate: sync.activity ? todayKey(now) : state.caloriesDate,
   };
   if (sync.error) return { ...base, syncFailed: true };
   return {

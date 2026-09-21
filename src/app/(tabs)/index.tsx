@@ -1,6 +1,6 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STEPS_DEFAULT_NORM, formulaText, type ComponentId } from '../../domain';
-import { adviceFor, adviceLabel, findDay, todayKey, useTabDay, useVuelo } from '../../state';
+import { adviceFor, adviceLabel, findDay, useTabDay, useVuelo } from '../../state';
 import {
   DayBanner,
   COMPONENT_LABEL,
@@ -29,7 +29,8 @@ export default function TodayTab() {
   // Своя норма дня; у старых сводок из кэша её нет — тогда 10 000.
   const norm = day?.stepNorm?.value ?? STEPS_DEFAULT_NORM;
   // Кольцо отдаёт расход только за текущий день, за прошлые ничего не показываем.
-  const calories = picked === todayKey() ? state.caloriesToday : null;
+  // Калории выбранного дня по нашей модели; нет биометрии — «—».
+  const calories = day?.calories ?? null;
 
   return (
     <Screen
@@ -60,13 +61,11 @@ export default function TodayTab() {
           <>
             <View style={styles.stepsRow}>
               <Text style={styles.steps}>{steps.toLocaleString('ru-RU')}</Text>
-              {calories !== null ? (
-                <View style={styles.calories}>
-                  <Text style={styles.caloriesValue}>{calories}</Text>
-                  <Text style={styles.caloriesLabel}>ккал</Text>
-                  <InfoButton title="Калории" text={formulaText('calories')} />
-                </View>
-              ) : null}
+              <View style={styles.calories}>
+                <Text style={styles.caloriesValue}>{calories === null ? '—' : calories.toLocaleString('ru-RU')}</Text>
+                <Text style={styles.caloriesLabel}>ккал</Text>
+                <InfoButton title="Калории" text={formulaText('calories')} />
+              </View>
             </View>
             <View style={styles.normRow}>
               <View style={styles.track}>

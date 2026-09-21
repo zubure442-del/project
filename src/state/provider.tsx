@@ -33,7 +33,7 @@ import {
 import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
 import { loadPlan, loadProgress, recordDurations, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withStartName } from './profile';
-import { applySyncResult, planDays } from './sync-plan';
+import { applySyncResult, planDays, rebuildDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
 export const FRESH_MS = CACHE_FRESH_MS;
@@ -253,6 +253,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
             ? applied
             : { ...applied, requestDurations: recordDurations(applied.requestDurations, measured) };
 
+          // Сверка калорий за сегодня: наш расчёт и число кольца (0x03) — только в отладочный лог.
+          const todayCalories = findDay(next.days, todayKey())?.calories ?? null;
+          logNote(`калории за сегодня: расчёт ${todayCalories ?? '—'} ккал, кольцо (0x03) ${result.activity?.calories ?? '—'} ккал`);
+
           // Этап 4: запись кэша, потом одно применение состояния.
           loadProgress.set({ stage: 4 });
           await saveState(next);
@@ -358,7 +362,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       // Правка ложится на актуальный профиль: две правки подряд не затирают друг друга.
       profileVersion.current++;
       const profile = mergeProfile(latest.current.profile, patch);
-      const next = { ...latest.current, profile };
+      // Сводки пересобираем сразу: калории и пульсовые зоны зависят от биометрии.
+      const next = rebuildDays({ ...latest.current, profile });
       commit(next);
       // Кольцу профиль нужен сразу, но не на каждую цифру: отправляем, когда правки затихли.
       clearTimeout(profilePush.current);

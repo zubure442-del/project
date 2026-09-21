@@ -1,6 +1,6 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { FORMULAS, busiestHour, formulaText } from '../../domain';
-import { findDay, todayKey, useTabDay, useVuelo } from '../../state';
+import { FORMULAS, busiestHour, formulaText, weekCalories } from '../../domain';
+import { findDay, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
   DayBanner,
@@ -10,6 +10,7 @@ import {
   InfoButton,
   Screen,
   Skeleton,
+  WeekBars,
   WeekChart,
   colors,
   spacing,
@@ -26,7 +27,10 @@ export default function ActivityTab() {
   const hours = day?.stepsByHour ?? [];
   const best = day ? busiestHour(hours, day.heart.map((p) => ({ m: p.m, v: p.v })), age) : null;
   const chartWidth = width - spacing.md * 4;
-  const calories = picked === todayKey() ? state.caloriesToday : null;
+  // Калории считаем сами для любого дня; нет биометрии — «—».
+  const calories = day?.calories ?? null;
+  const weekBars = week.map((w) => ({ date: w.date, value: w.day?.calories ?? null }));
+  const weekTotal = weekCalories(weekBars.map((b) => b.value));
 
   return (
     <Screen
@@ -39,8 +43,7 @@ export default function ActivityTab() {
         <HeroRing value={day?.scores.activity ?? null} calibrating={!!day && day.scores.activity === null} />
         {day?.steps != null ? (
           <Text style={styles.summary}>
-            {day.steps.toLocaleString('ru-RU')} шагов
-            {calories !== null ? ` · ${calories} ккал` : ''}
+            {day.steps.toLocaleString('ru-RU')} шагов · {calories === null ? '—' : calories.toLocaleString('ru-RU')} ккал
           </Text>
         ) : null}
       </View>
@@ -71,6 +74,14 @@ export default function ActivityTab() {
           <Stat label="Самый активный час" value={best !== null ? `${best}:00` : '—'} />
         </View>
       </Card>
+
+      <Card title="Калории · неделя" right={<InfoButton title={FORMULAS.calories.title} text={formulaText('calories')} />}>
+        <Text style={styles.weekTotal}>
+          {weekTotal === null ? '—' : weekTotal.toLocaleString('ru-RU')}
+          <Text style={styles.weekUnit}> ккал</Text>
+        </Text>
+        <WeekBars days={weekBars} width={chartWidth} />
+      </Card>
     </Screen>
   );
 }
@@ -79,4 +90,6 @@ const styles = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: spacing.md, gap: spacing.xs },
   summary: { color: colors.textMuted, fontSize: 16 },
   stats: { marginTop: spacing.md },
+  weekTotal: { color: colors.text, fontSize: 38, fontWeight: '200', marginBottom: spacing.sm },
+  weekUnit: { color: colors.textMuted, fontSize: 15 },
 });

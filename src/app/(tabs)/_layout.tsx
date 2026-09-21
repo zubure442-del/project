@@ -9,8 +9,9 @@ export const LOW_BATTERY = 20;
 export const unstable_settings = { initialRouteName: 'index' };
 
 export default function TabsLayout() {
-  const { state } = useVuelo();
-  const low = state.battery !== null && state.battery <= LOW_BATTERY;
+  const { state, profileReady, goalReady } = useVuelo();
+  // Точка на «Профиле»: низкий заряд или не заполнены биометрия и цель.
+  const low = (state.battery !== null && state.battery <= LOW_BATTERY) || !profileReady || !goalReady;
 
   return (
     <Tabs

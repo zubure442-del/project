@@ -19,7 +19,7 @@ export interface TabDay {
  * станет полным, при следующем открытии экран сам переключится на него.
  */
 export function useTabDay(): TabDay {
-  const { state, syncFailed, profileReady } = useVuelo();
+  const { state, syncFailed, profileReady, goalReady } = useVuelo();
   const view = dayView(state.days);
   const resetKey = state.lastSyncAt ?? 0;
   const [picked, setPicked] = useState<{ date: string; key: number } | null>(null);
@@ -29,7 +29,7 @@ export function useTabDay(): TabDay {
     date,
     select: (next) => setPicked({ date: next, key: resetKey }),
     view,
-    banner: bannerKind({ syncFailed, profileReady, todayLocked: view.todayLocked, shownDate: date, today: view.today }),
+    banner: bannerKind({ syncFailed, profileReady, goalReady, todayLocked: view.todayLocked, shownDate: date, today: view.today }),
     shownPhrase: dayPhrase(date, view),
   };
 }

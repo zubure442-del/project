@@ -90,18 +90,21 @@ export function dayView(days: DaySnapshot[], now = new Date()): DayView {
 /** Старое имя: день по умолчанию. */
 export const defaultDay = (days: DaySnapshot[], now = new Date()): string => dayView(days, now).defaultDate;
 
-/** Плашки над экраном. Видна одна, по приоритету. */
-export type BannerKind = 'sync-failed' | 'biometry' | 'today-locked';
+/** Плашки над экраном. Видна одна, по приоритету: ошибка → биометрия → цель → неполный сегодня. */
+export type BannerKind = 'sync-failed' | 'biometry' | 'goal' | 'today-locked';
 
 export function bannerKind(input: {
   syncFailed: boolean;
   profileReady: boolean;
+  /** Цель выбрана. Необязательный вход — по умолчанию считаем выбранной. */
+  goalReady?: boolean;
   todayLocked: boolean;
   shownDate: string;
   today: string;
 }): BannerKind | null {
   if (input.syncFailed) return 'sync-failed';
   if (!input.profileReady) return 'biometry';
+  if (input.goalReady === false) return 'goal';
   if (input.todayLocked && input.shownDate !== input.today) return 'today-locked';
   return null;
 }

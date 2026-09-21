@@ -15,6 +15,18 @@ export function BiometryBanner() {
   );
 }
 
+/** Красная плашка, пока не выбрана цель (биометрия уже есть). */
+export function GoalBanner() {
+  return (
+    <View style={styles.root}>
+      <Text style={styles.text}>Цель не выбрана</Text>
+      <Pressable onPress={() => router.push('/profile')} hitSlop={8}>
+        <Text style={styles.action}>Выбрать</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 /** Плашка «не всё загрузилось» с кнопкой повтора. */
 export function IncompleteBanner({ onRetry }: { onRetry: () => void }) {
   return (
@@ -42,6 +54,7 @@ export function TodayLockedBanner({ phrase }: { phrase: string }) {
 export function DayBanner({ kind, phrase, onRetry }: { kind: BannerKind | null; phrase: string; onRetry: () => void }) {
   if (kind === 'sync-failed') return <IncompleteBanner onRetry={onRetry} />;
   if (kind === 'biometry') return <BiometryBanner />;
+  if (kind === 'goal') return <GoalBanner />;
   if (kind === 'today-locked') return <TodayLockedBanner phrase={phrase} />;
   return null;
 }

@@ -1,10 +1,10 @@
 import Constants from 'expo-constants';
-import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BATTERY_STALE_MS, useVuelo } from '../../state';
-import { EMPTY_PROFILE, PROFILE_LIMITS, profileAge, type Goal, type Profile, type Sex } from '../../storage';
+import { BATTERY_STALE_MS, NAME_NOTE, missingFields, useVuelo } from '../../state';
+import { PROFILE_LIMITS, profileAge, type Goal, type Profile, type Sex } from '../../storage';
 import { Card, colors, radius, spacing } from '../../ui';
 
 const DISCLAIMER =
@@ -21,12 +21,19 @@ const GOALS: { id: Goal; label: string }[] = [
   { id: 'keep', label: 'Поддержание формы' },
 ];
 
+type TextKey = 'name' | 'heightCm' | 'weightKg' | 'birthYear';
+
 export default function ProfileTab() {
-  const { state, statusText, saveProfile, forgetRing, clearData } = useVuelo();
+  const { state, statusText, saveProfile, reloadProfile, forgetRing, clearData } = useVuelo();
   const insets = useSafeAreaInsets();
   const [about, setAbout] = useState(false);
   const [taps, setTaps] = useState(0);
-  const [draft, setDraft] = useState<Profile>(state.profile);
+  // Профиль — из общего состояния; локально только текст поля, которое сейчас правят.
+  // Раньше здесь была копия профиля с момента открытия вкладки, и она затирала имя из первого запуска.
+  const profile = state.profile;
+  const [edits, setEdits] = useState<Partial<Record<TextKey, string>>>({});
+  const missing = missingFields(profile);
+  useFocusEffect(useCallback(() => reloadProfile(), [reloadProfile]));
   const version = Constants.expoConfig?.version ?? '1.0.0';
   // Время берём из состояния, а не из Date.now() при отрисовке: иначе экран считается «грязным».
   const [now, setNow] = useState(0);
@@ -49,21 +56,22 @@ export default function ProfileTab() {
   }, [now, state.batteryAt]);
 
   const commit = (patch: Partial<Profile>) => {
-    const next = { ...draft, ...patch };
-    setDraft(next);
-    saveProfile(next);
+    setEdits((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(patch)) delete next[key as TextKey];
+      return next;
+    });
+    saveProfile({ ...profile, ...patch });
   };
 
-  const number = (text: string, key: 'heightCm' | 'weightKg' | 'birthYear') => {
-    const value = Number(text.replace(/\D/g, ''));
-    setDraft((prev) => ({ ...prev, [key]: Number.isFinite(value) && value > 0 ? value : null }));
-  };
+  const text = (key: TextKey) => edits[key] ?? (profile[key] === null ? '' : String(profile[key]));
+  const edit = (key: TextKey, value: string) =>
+    setEdits((prev) => ({ ...prev, [key]: key === 'name' ? value : value.replace(/\D/g, '') }));
 
   const blur = (key: 'heightCm' | 'weightKg' | 'birthYear') => {
-    const value = draft[key];
-    const ok = value !== null && valid(key, value);
-    commit({ [key]: ok ? value : null });
-    if (value !== null && !ok) setDraft((prev) => ({ ...prev, [key]: null }));
+    if (edits[key] === undefined) return;
+    const value = Number(edits[key]);
+    commit({ [key]: edits[key] !== '' && valid(key, value) ? value : null });
   };
 
   const forget = () =>
@@ -83,7 +91,7 @@ export default function ProfileTab() {
           style: 'destructive',
           onPress: () => {
             clearData();
-            setDraft(EMPTY_PROFILE);
+            setEdits({});
           },
         },
       ],
@@ -119,6 +127,57 @@ export default function ProfileTab() {
     <ScrollView style={styles.root} contentContainerStyle={{ paddingTop: insets.top + spacing.lg, paddingBottom: spacing.xl }}>
       <Text style={styles.title}>Профиль</Text>
 
+      <Card title="Имя">
+        <TextInput
+          style={styles.nameInput}
+          value={text('name')}
+          onChangeText={(t) => edit('name', t)}
+          onBlur={() => commit({ name: edits.name === undefined ? profile.name : edits.name.trim() || null })}
+          placeholder="Как к вам обращаться"
+          placeholderTextColor={colors.textFaint}
+          maxLength={24}
+        />
+        <Text style={styles.small}>{NAME_NOTE}</Text>
+      </Card>
+
+      {missing.size ? <Text style={styles.required}>Для корректной работы заполните эти поля</Text> : null}
+
+      <Card title="Биометрия">
+        <View style={styles.line}>
+          <Text style={[styles.label, missing.has('sex') && styles.labelMissing]}>Пол</Text>
+          <View style={[styles.chips, missing.has('sex') && styles.missingBox]}>
+            {SEX.map((s) => (
+              <Pressable key={s.id} onPress={() => commit({ sex: s.id })} style={[styles.chip, profile.sex === s.id && styles.chipOn]}>
+                <Text style={[styles.chipText, profile.sex === s.id && styles.chipTextOn]}>{s.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+        {(['heightCm', 'weightKg', 'birthYear'] as const).map((key) => (
+          <Field
+            key={key}
+            label={FIELD_LABEL[key]}
+            value={text(key)}
+            missing={missing.has(key)}
+            onChange={(t) => edit(key, t)}
+            onBlur={() => blur(key)}
+          />
+        ))}
+        {profileAge(profile) !== null ? <Text style={styles.note}>Возраст {profileAge(profile)}</Text> : null}
+      </Card>
+
+      <Card title="Цель">
+        <View style={missing.has('goal') && styles.missingBox}>
+          {GOALS.map((g) => (
+            <Pressable key={g.id} onPress={() => commit({ goal: g.id })} style={styles.goal}>
+              <Text style={[styles.goalText, profile.goal === g.id && styles.goalTextOn]}>{g.label}</Text>
+              {profile.goal === g.id ? <Text style={styles.check}>✓</Text> : null}
+            </Pressable>
+          ))}
+        </View>
+        {missing.has('goal') ? <Text style={styles.missingNote}>Цель не выбрана</Text> : null}
+      </Card>
+
       <Card>
         <View style={styles.line}>
           <Text style={styles.label}>Заряд кольца</Text>
@@ -130,44 +189,6 @@ export default function ProfileTab() {
           <Text style={styles.label}>Синхронизация</Text>
           <Text style={styles.value}>{statusText.replace('Обновлено ', '')}</Text>
         </View>
-      </Card>
-
-      <Card title="Биометрия">
-        <View style={styles.line}>
-          <Text style={styles.label}>Имя</Text>
-          <TextInput
-            style={[styles.input, styles.nameInput]}
-            value={draft.name ?? ''}
-            onChangeText={(text) => setDraft((prev) => ({ ...prev, name: text }))}
-            onBlur={() => commit({ name: draft.name?.trim() || null })}
-            placeholder="—"
-            placeholderTextColor={colors.textFaint}
-            maxLength={24}
-          />
-        </View>
-        <View style={styles.line}>
-          <Text style={styles.label}>Пол</Text>
-          <View style={styles.chips}>
-            {SEX.map((s) => (
-              <Pressable key={s.id} onPress={() => commit({ sex: s.id })} style={[styles.chip, draft.sex === s.id && styles.chipOn]}>
-                <Text style={[styles.chipText, draft.sex === s.id && styles.chipTextOn]}>{s.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-        <Field label="Рост, см" value={draft.heightCm} onChange={(t) => number(t, 'heightCm')} onBlur={() => blur('heightCm')} />
-        <Field label="Вес, кг" value={draft.weightKg} onChange={(t) => number(t, 'weightKg')} onBlur={() => blur('weightKg')} />
-        <Field label="Год рождения" value={draft.birthYear} onChange={(t) => number(t, 'birthYear')} onBlur={() => blur('birthYear')} />
-        {profileAge(draft) !== null ? <Text style={styles.note}>Возраст {profileAge(draft)}</Text> : null}
-      </Card>
-
-      <Card title="Цель">
-        {GOALS.map((g) => (
-          <Pressable key={g.id} onPress={() => commit({ goal: g.id })} style={styles.goal}>
-            <Text style={[styles.goalText, draft.goal === g.id && styles.goalTextOn]}>{g.label}</Text>
-            {draft.goal === g.id ? <Text style={styles.check}>✓</Text> : null}
-          </Pressable>
-        ))}
       </Card>
 
       <Card>
@@ -193,24 +214,29 @@ const valid = (key: 'heightCm' | 'weightKg' | 'birthYear', value: number): boole
   return age >= PROFILE_LIMITS.age.min && age <= PROFILE_LIMITS.age.max;
 };
 
+const FIELD_LABEL = { heightCm: 'Рост, см', weightKg: 'Вес, кг', birthYear: 'Год рождения' } as const;
+
+/** Числовое поле биометрии. Пустое обязательное — красная рамка и красная подпись. */
 function Field({
   label,
   value,
+  missing,
   onChange,
   onBlur,
 }: {
   label: string;
-  value: number | null;
+  value: string;
+  missing: boolean;
   onChange: (text: string) => void;
   onBlur: () => void;
 }) {
   return (
     <View style={styles.line}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, missing && styles.labelMissing]}>{label}</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, missing && styles.missingBox]}
         keyboardType="number-pad"
-        value={value === null ? '' : String(value)}
+        value={value}
         onChangeText={onChange}
         onBlur={onBlur}
         placeholder="—"
@@ -230,8 +256,23 @@ const styles = StyleSheet.create({
   label: { color: colors.textMuted, fontSize: 15, flex: 1 },
   value: { color: colors.text, fontSize: 15 },
   stale: { color: colors.textFaint },
-  input: { color: colors.text, fontSize: 16, minWidth: 64, textAlign: 'right', paddingVertical: 2 },
-  nameInput: { minWidth: 140 },
+  input: {
+    color: colors.text,
+    fontSize: 16,
+    minWidth: 72,
+    textAlign: 'right',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  nameInput: { color: colors.text, fontSize: 18, paddingVertical: spacing.xs },
+  small: { color: colors.textFaint, fontSize: 12, lineHeight: 16, marginTop: spacing.xs },
+  required: { color: colors.danger, fontSize: 14, paddingHorizontal: spacing.md, marginTop: spacing.md },
+  labelMissing: { color: colors.danger },
+  missingBox: { borderWidth: 1, borderColor: colors.danger, borderRadius: 8 },
+  missingNote: { color: colors.danger, fontSize: 13, marginTop: spacing.xs },
   chips: { flexDirection: 'row', gap: spacing.xs },
   chip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.track },
   chipOn: { backgroundColor: colors.accent },
@@ -242,7 +283,7 @@ const styles = StyleSheet.create({
   goalTextOn: { color: colors.text },
   check: { color: colors.accent, fontSize: 16 },
   note: { color: colors.textMuted, fontSize: 13, lineHeight: 20, marginTop: spacing.xs },
-  danger: { color: '#E5705F', fontSize: 15 },
+  danger: { color: colors.danger, fontSize: 15 },
   chevron: { color: colors.textFaint, fontSize: 22 },
   versionRow: { paddingVertical: spacing.lg },
   version: { color: colors.textFaint, fontSize: 13 },

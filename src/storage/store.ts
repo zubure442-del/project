@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { migrateSnapshots } from './raw';
-import { EMPTY_PROFILE, EMPTY_STATE, HISTORY_DAYS, type StoredReport, type VueloState } from './types';
+import { EMPTY_PROFILE, EMPTY_STATE, HISTORY_DAYS, type Profile, type StoredReport, type VueloState } from './types';
 
 const KEY = 'vuelo/state/v1';
 
@@ -33,6 +33,11 @@ export async function loadState(): Promise<VueloState> {
   } catch {
     return EMPTY_STATE; // повреждённое хранилище не должно ломать запуск
   }
+}
+
+/** Профиль прямо из хранилища: «Профиль» читает его при открытии, а не из устаревшей копии. */
+export async function loadProfile(): Promise<Profile> {
+  return (await loadState()).profile;
 }
 
 export async function saveState(state: VueloState): Promise<void> {

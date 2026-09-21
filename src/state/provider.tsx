@@ -19,6 +19,7 @@ import {
   isProfileComplete,
   keepLastDays,
   keepRecentDays,
+  loadProfile,
   loadState,
   mergeRaw,
   profileAge,
@@ -30,6 +31,7 @@ import {
 } from '../storage';
 import { CACHE_FRESH_MS, findDay, isFresh, syncStatusText, todayKey, weekDays } from './day';
 import { SLIDES_MIN_DAYS, loadProgress, recordDuration, slideInterval } from './loading';
+import { isGoalSet, withStartName } from './profile';
 import { applySyncResult, planDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -60,7 +62,10 @@ interface Vuelo {
   loadingMode: SyncMode;
   error: SyncError | null;
   statusText: string;
+  /** Биометрия заполнена (пол, рост, вес, год рождения). */
   profileReady: boolean;
+  /** Цель выбрана. */
+  goalReady: boolean;
   /** Последняя синхронизация закончилась ошибкой связи: плашка «Не все данные загружены». */
   syncFailed: boolean;
   sync: (mode?: SyncMode) => void;
@@ -71,6 +76,7 @@ interface Vuelo {
   /** Экран загрузки дошёл до конца (или «Открыть с сохранёнными данными»): закрываем его. */
   finishLoading: () => void;
   saveProfile: (profile: Profile) => void;
+  reloadProfile: () => void;
   /** Удаляет данные, историю, профиль и логи. Привязка к кольцу остаётся. */
   clearData: () => void;
 }
@@ -301,13 +307,26 @@ export function VueloProvider({ children }: { children: ReactNode }) {
 
   const markStarted = useCallback(
     (name: string | null) => {
-      const trimmed = name?.trim() || null;
-      const current = latest.current;
-      commit({ ...current, started: true, profile: { ...current.profile, name: trimmed ?? current.profile.name } });
-      sync('launch');
+      void (async () => {
+        // Имя сначала записываем на телефон и ждём записи — только потом Bluetooth и загрузка.
+        const next = withStartName(latest.current, name);
+        await saveState(next);
+        latest.current = next;
+        setState(next);
+        sync('launch');
+      })();
     },
-    [commit, sync],
+    [sync],
   );
+
+  /** «Профиль» при открытии перечитывает профиль из хранилища. */
+  const reloadProfile = useCallback(() => {
+    void loadProfile().then((profile) => {
+      if (running.current || JSON.stringify(profile) === JSON.stringify(latest.current.profile)) return;
+      latest.current = { ...latest.current, profile };
+      setState(latest.current);
+    });
+  }, []);
 
   const dismissFresh = useCallback(() => setPhase('idle'), []);
   const finishLoading = useCallback(() => {
@@ -337,6 +356,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       error,
       statusText: syncStatusText(state),
       profileReady: isProfileComplete(state.profile),
+      goalReady: isGoalSet(state.profile),
       syncFailed: state.syncFailed && state.started,
       sync,
       forgetRing,
@@ -344,9 +364,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       dismissFresh,
       finishLoading,
       saveProfile,
+      reloadProfile,
       clearData,
     };
-  }, [clearData, dismissFresh, error, finishLoading, forgetRing, loadingMode, markStarted, phase, ready, saveProfile, state, sync]);
+  }, [clearData, dismissFresh, error, finishLoading, forgetRing, loadingMode, markStarted, phase, ready, reloadProfile, saveProfile, state, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

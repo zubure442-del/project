@@ -12,6 +12,7 @@ import {
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  NAME_NOTE,
   STAGE_FADE_MS,
   currentSlide,
   leaveAt,
@@ -235,6 +236,7 @@ function NameForm({ onDone }: { onDone: (name: string | null) => void }) {
         returnKeyType="done"
         onSubmitEditing={() => onDone(name)}
       />
+      <Text style={styles.nameNote}>{NAME_NOTE}</Text>
       <Pressable style={styles.button} onPress={() => onDone(name)}>
         <Text style={styles.buttonText}>Продолжить</Text>
       </Pressable>
@@ -328,6 +330,7 @@ const styles = StyleSheet.create({
   footer: { gap: 2, paddingTop: spacing.md, alignItems: 'center' },
   note: { color: colors.textFaint, fontSize: 11, textAlign: 'center' },
   nameRoot: { flex: 1, justifyContent: 'center', gap: spacing.md },
+  nameNote: { color: colors.textFaint, fontSize: 12, lineHeight: 16, paddingHorizontal: spacing.xs },
   nameQuestion: { color: colors.textMuted, fontSize: 20, fontWeight: '300', paddingHorizontal: spacing.xs },
   input: {
     backgroundColor: colors.card,

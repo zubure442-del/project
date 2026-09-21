@@ -3,8 +3,8 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BATTERY_STALE_MS, NAME_NOTE, missingFields, useVuelo } from '../../state';
-import { PROFILE_LIMITS, profileAge, type Goal, type Profile, type Sex } from '../../storage';
+import { BATTERY_STALE_MS, NAME_NOTE, parseProfileNumber, profileAlerts, useVuelo } from '../../state';
+import { profileAge, type Goal, type Profile, type Sex } from '../../storage';
 import { Card, colors, radius, spacing } from '../../ui';
 
 const DISCLAIMER =
@@ -32,7 +32,7 @@ export default function ProfileTab() {
   // Раньше здесь была копия профиля с момента открытия вкладки, и она затирала имя из первого запуска.
   const profile = state.profile;
   const [edits, setEdits] = useState<Partial<Record<TextKey, string>>>({});
-  const missing = missingFields(profile);
+  const { missing } = profileAlerts(profile);
   useFocusEffect(useCallback(() => reloadProfile(), [reloadProfile]));
   const version = Constants.expoConfig?.version ?? '1.0.0';
   // Время берём из состояния, а не из Date.now() при отрисовке: иначе экран считается «грязным».
@@ -61,17 +61,26 @@ export default function ProfileTab() {
       for (const key of Object.keys(patch)) delete next[key as TextKey];
       return next;
     });
-    saveProfile({ ...profile, ...patch });
+    saveProfile(patch);
   };
 
   const text = (key: TextKey) => edits[key] ?? (profile[key] === null ? '' : String(profile[key]));
-  const edit = (key: TextKey, value: string) =>
-    setEdits((prev) => ({ ...prev, [key]: key === 'name' ? value : value.replace(/\D/g, '') }));
+  const edit = (key: TextKey, value: string) => {
+    if (key === 'name') {
+      setEdits((prev) => ({ ...prev, name: value }));
+      return;
+    }
+    const digits = value.replace(/\D/g, '');
+    setEdits((prev) => ({ ...prev, [key]: digits }));
+    // Верное значение сохраняем сразу, не дожидаясь ухода из поля: при переходе на другую
+    // вкладку «уход из поля» может не случиться, и год рождения терялся.
+    const parsed = parseProfileNumber(key, digits);
+    if (parsed !== null && parsed !== profile[key]) saveProfile({ [key]: parsed });
+  };
 
   const blur = (key: 'heightCm' | 'weightKg' | 'birthYear') => {
     if (edits[key] === undefined) return;
-    const value = Number(edits[key]);
-    commit({ [key]: edits[key] !== '' && valid(key, value) ? value : null });
+    commit({ [key]: parseProfileNumber(key, edits[key] ?? '') });
   };
 
   const forget = () =>
@@ -206,13 +215,6 @@ export default function ProfileTab() {
     </ScrollView>
   );
 }
-
-const valid = (key: 'heightCm' | 'weightKg' | 'birthYear', value: number): boolean => {
-  if (key === 'heightCm') return value >= PROFILE_LIMITS.heightCm.min && value <= PROFILE_LIMITS.heightCm.max;
-  if (key === 'weightKg') return value >= PROFILE_LIMITS.weightKg.min && value <= PROFILE_LIMITS.weightKg.max;
-  const age = new Date().getFullYear() - value;
-  return age >= PROFILE_LIMITS.age.min && age <= PROFILE_LIMITS.age.max;
-};
 
 const FIELD_LABEL = { heightCm: 'Рост, см', weightKg: 'Вес, кг', birthYear: 'Год рождения' } as const;
 

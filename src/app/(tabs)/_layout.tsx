@@ -1,17 +1,15 @@
 import { Tabs } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
-import { useVuelo } from '../../state';
+import { profileAlerts, useVuelo } from '../../state';
 import { ActivityIcon, BodyIcon, ProfileIcon, SleepIcon, TabBar, colors } from '../../ui';
-
-/** Ниже этого заряда на иконке профиля появляется точка. */
-export const LOW_BATTERY = 20;
 
 export const unstable_settings = { initialRouteName: 'index' };
 
 export default function TabsLayout() {
-  const { state, profileReady, goalReady } = useVuelo();
-  // Точка на «Профиле»: низкий заряд или не заполнены биометрия и цель.
-  const dot = (state.battery !== null && state.battery <= LOW_BATTERY) || !profileReady || !goalReady;
+  const { state } = useVuelo();
+  // Точка на «Профиле» — только пока не заполнено хотя бы одно из пяти обязательных полей.
+  // Раньше она горела и при заряде ≤ 20 %, поэтому не гасла после заполнения профиля.
+  const { dot } = profileAlerts(state.profile);
 
   return (
     <Tabs

@@ -32,7 +32,7 @@ import {
 } from '../storage';
 import { CACHE_FRESH_MS, findDay, isFresh, syncStatusText, todayKey, weekDays } from './day';
 import { SLIDES_MIN_DAYS, loadProgress, recordDuration, slideInterval } from './loading';
-import { isGoalSet, withStartName } from './profile';
+import { isGoalSet, mergeProfile, withStartName } from './profile';
 import { applySyncResult, planDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -41,6 +41,8 @@ export const FRESH_MS = CACHE_FRESH_MS;
 export const HARD_CAP_MS = 120000;
 /** Если последний замер старше этого, запускаем один живой замер. */
 export const GAP_MIN = 90;
+/** Профиль уходит кольцу (0x01 → 0x19 → 0x02) через столько после последней правки. */
+export const PROFILE_PUSH_DELAY_MS = 1500;
 /** Живой замер не чаще одного раза в это время. */
 export const LIVE_MEASURE_COOLDOWN_MS = 30 * 60 * 1000;
 
@@ -76,7 +78,8 @@ interface Vuelo {
   dismissFresh: () => void;
   /** Экран загрузки дошёл до конца (или «Открыть с сохранёнными данными»): закрываем его. */
   finishLoading: () => void;
-  saveProfile: (profile: Profile) => void;
+  /** Правка профиля: только изменённые поля, остальное берётся из актуального состояния. */
+  saveProfile: (patch: Partial<Profile>) => void;
   reloadProfile: () => void;
   /** Удаляет данные, историю, профиль и логи. Привязка к кольцу остаётся. */
   clearData: () => void;
@@ -112,6 +115,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   /** Живой замер идёт после загрузки; новая загрузка его прерывает и дожидается. */
   const liveTask = useRef<Promise<void>>(Promise.resolve());
   const stopLive = useRef(false);
+  /** Счётчик правок профиля: перечитывание из хранилища не должно откатывать свежую правку. */
+  const profileVersion = useRef(0);
+  const profilePush = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const commit = useCallback((next: VueloState) => {
     latest.current = next;
@@ -322,7 +328,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
 
   /** «Профиль» при открытии перечитывает профиль из хранилища. */
   const reloadProfile = useCallback(() => {
+    const version = profileVersion.current;
     void loadProfile().then((profile) => {
+      // Пока читали, профиль успели поправить — прочитанное устарело, не возвращаем его.
+      if (version !== profileVersion.current) return;
       if (running.current || JSON.stringify(profile) === JSON.stringify(latest.current.profile)) return;
       latest.current = { ...latest.current, profile };
       setState(latest.current);
@@ -335,14 +344,20 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const saveProfile = useCallback(
-    (profile: Profile) => {
+    (patch: Partial<Profile>) => {
+      // Правка ложится на актуальный профиль: две правки подряд не затирают друг друга.
+      profileVersion.current++;
+      const profile = mergeProfile(latest.current.profile, patch);
       const next = { ...latest.current, profile };
       commit(next);
-      // Кольцу профиль нужен сразу: пульсовые зоны и расход считает оно само.
-      const forRing = toRingProfile(profile);
-      if (forRing && ring.current?.status === 'ready' && !running.current) {
-        void handshake(ring.current, forRing).catch(() => undefined);
-      }
+      // Кольцу профиль нужен сразу, но не на каждую цифру: отправляем, когда правки затихли.
+      clearTimeout(profilePush.current);
+      profilePush.current = setTimeout(() => {
+        const forRing = toRingProfile(latest.current.profile);
+        if (forRing && ring.current?.status === 'ready' && !running.current) {
+          void handshake(ring.current, forRing).catch(() => undefined);
+        }
+      }, PROFILE_PUSH_DELAY_MS);
     },
     [commit],
   );

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_PROFILE, EMPTY_STATE, loadProfile, saveState } from '../storage';
 import { bannerKind } from './day';
-import { missingFields, withStartName } from './profile';
+import { mergeProfile, missingFields, parseProfileNumber, profileAlerts, withStartName } from './profile';
 
 /** Хранилище телефона в памяти: как AsyncStorage, только без устройства. */
 const disk = vi.hoisted(() => new Map<string, string>());
@@ -49,5 +49,49 @@ describe('СИНТЕТИЧЕСКИЕ: незаполненный профиль'
     expect(bannerKind({ ...base, profileReady: false, goalReady: false })).toBe('biometry');
     expect(bannerKind({ ...base, profileReady: true, goalReady: false })).toBe('goal');
     expect(bannerKind({ ...base, profileReady: true, goalReady: true })).toBeNull();
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: красная точка на «Профиле»', () => {
+  const filled = [
+    { sex: 'male' as const },
+    { heightCm: 187 },
+    { weightKg: 75 },
+    { birthYear: 1990 },
+    { goal: 'keep' as const },
+  ].reduce((p, patch) => mergeProfile(p, patch), EMPTY_PROFILE);
+
+  it('после сохранения всех пяти полей нет ни точки, ни плашки, ни красных рамок', () => {
+    expect(profileAlerts(filled)).toEqual({ missing: new Set(), dot: false, banner: null });
+  });
+
+  it('имя на точку не влияет', () => {
+    expect(profileAlerts({ ...filled, name: null }).dot).toBe(false);
+  });
+
+  it('пустая цель включает точку и плашку «Цель не выбрана»', () => {
+    const alerts = profileAlerts({ ...filled, goal: null });
+    expect(alerts.dot).toBe(true);
+    expect(alerts.banner).toBe('goal');
+  });
+
+  it('очистка данных включает их снова', () => {
+    const alerts = profileAlerts(EMPTY_PROFILE);
+    expect(alerts.dot).toBe(true);
+    expect(alerts.banner).toBe('biometry');
+    expect(alerts.missing.size).toBe(5);
+  });
+
+  it('правки подряд не затирают друг друга', () => {
+    expect(filled).toMatchObject({ sex: 'male', heightCm: 187, weightKg: 75, birthYear: 1990, goal: 'keep' });
+  });
+
+  it('«0», пустая строка и неполный год — не значение', () => {
+    const now = new Date(2026, 8, 21);
+    expect(parseProfileNumber('weightKg', '0', now)).toBeNull();
+    expect(parseProfileNumber('heightCm', '', now)).toBeNull();
+    expect(parseProfileNumber('birthYear', '199', now)).toBeNull();
+    expect(parseProfileNumber('birthYear', '1990', now)).toBe(1990);
+    expect(parseProfileNumber('heightCm', '187', now)).toBe(187);
   });
 });

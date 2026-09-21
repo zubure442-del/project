@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { bannerKind, dayPhrase, dayView, type BannerKind, type DayView } from './day';
+import { profileAlerts } from './profile';
 import { useVuelo } from './provider';
 
 export interface TabDay {
@@ -19,7 +20,9 @@ export interface TabDay {
  * станет полным, при следующем открытии экран сам переключится на него.
  */
 export function useTabDay(): TabDay {
-  const { state, syncFailed, profileReady, goalReady } = useVuelo();
+  const { state, syncFailed } = useVuelo();
+  // Плашка биометрии/цели — из той же проверки, что точка на «Профиле» и красные рамки.
+  const alerts = profileAlerts(state.profile);
   const view = dayView(state.days);
   const resetKey = state.lastSyncAt ?? 0;
   const [picked, setPicked] = useState<{ date: string; key: number } | null>(null);
@@ -29,7 +32,11 @@ export function useTabDay(): TabDay {
     date,
     select: (next) => setPicked({ date: next, key: resetKey }),
     view,
-    banner: bannerKind({ syncFailed, profileReady, goalReady, todayLocked: view.todayLocked, shownDate: date, today: view.today }),
+    banner: bannerKind({
+      syncFailed,
+      profileReady: alerts.banner !== 'biometry',
+      goalReady: !alerts.missing.has('goal'),
+      todayLocked: view.todayLocked, shownDate: date, today: view.today }),
     shownPhrase: dayPhrase(date, view),
   };
 }

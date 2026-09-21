@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Defs, Line, Path, Pattern, Rect, Text as SvgText } from 'react-native-svg';
-import { HR_SMOOTH_MAX_GAP, formatMinute, loadIntervals, smoothHeart, splitSegments, type SleepStage } from '../domain';
+import { DAY_HOUR_TICKS, HR_SMOOTH_MAX_GAP, chartAxis, formatMinute, loadIntervals, smoothHeart, splitSegments, type SleepStage } from '../domain';
 import type { DayPoint, DaySnapshot } from '../storage';
 import { colors, spacing, withAlpha } from './theme';
 
@@ -165,120 +165,146 @@ export function gapFor(points: DayPoint[]): number {
   return Math.max(90 * 60, median * 3);
 }
 
-/** Общий график одного показателя за день: линия с разрывами и значение по нажатию. */
-export function DayLineChart({
-  points,
-  width,
-  yMin,
-  yMax,
-  maxGap,
-  guides = [],
-  format = (v: number) => String(Math.round(v)),
-}: {
+/** Геометрия статичных графиков «Тела». */
+const STATIC_HEIGHT = 150;
+const STATIC_TOP = 18;
+const STATIC_BOTTOM = 20;
+const Y_GUTTER = 32;
+
+const tickText = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+
+interface StaticSeries {
   points: DayPoint[];
+  color: string;
+}
+
+/**
+ * Статичный график дня: подписи Y слева (3–4 круглые отметки, единица у верхней),
+ * часы внизу, тонкая сетка. Без нажатий и подсказок — они срабатывали при прокрутке.
+ */
+function StaticDayChart({
+  series,
+  width,
+  unit,
+  fixed,
+  guides = [],
+}: {
+  series: StaticSeries[];
   width: number;
-  yMin?: number;
-  yMax?: number;
-  maxGap?: number;
+  unit?: string;
+  fixed?: { min?: number; max?: number };
   guides?: number[];
-  format?: (v: number) => string;
 }) {
-  const [touch, setTouch] = useState<{ m: number; v: number } | null>(null);
-  const sorted = [...points].sort((a, b) => a.m - b.m);
-  if (!sorted.length) return empty(width);
-
-  const values = sorted.map((p) => p.v);
-  const lo = yMin ?? Math.min(...values) - 2;
-  const hi = yMax ?? Math.max(...values) + 2;
-  const x = (m: number) => GUTTER + (m / 1440) * (width - GUTTER * 2);
-  const y = (v: number) => 12 + (1 - (v - lo) / Math.max(1, hi - lo)) * (HEIGHT - 44);
-  const segments = splitSegments(sorted.map((p) => ({ ts: p.m * 60, value: p.v })), maxGap ?? gapFor(sorted));
-
-  const pick = (e: GestureResponderEvent) => {
-    const minute = ((e.nativeEvent.locationX - GUTTER) / (width - GUTTER * 2)) * 1440;
-    const nearest = sorted.reduce((a, b) => (Math.abs(b.m - minute) < Math.abs(a.m - minute) ? b : a));
-    setTouch({ m: nearest.m, v: nearest.v });
-  };
+  const all = series.flatMap((s) => s.points.map((p) => p.v));
+  if (!all.length) return empty(width);
+  const axis = chartAxis(Math.min(...all), Math.max(...all), fixed);
+  const plotLeft = Y_GUTTER;
+  const plotRight = width - GUTTER;
+  const x = (m: number) => plotLeft + (m / 1440) * (plotRight - plotLeft);
+  const y = (v: number) =>
+    STATIC_TOP + (1 - (v - axis.lo) / Math.max(1e-6, axis.hi - axis.lo)) * (STATIC_HEIGHT - STATIC_TOP - STATIC_BOTTOM);
+  const top = axis.ticks[axis.ticks.length - 1];
 
   return (
-    <View
-      onStartShouldSetResponder={() => true}
-      onMoveShouldSetResponder={() => true}
-      onResponderGrant={pick}
-      onResponderMove={pick}
-      onResponderRelease={() => setTouch(null)}
-    >
-      <Svg width={width} height={HEIGHT}>
-        {guides.map((g) => (
-          <Line key={g} x1={0} x2={width} y1={y(g)} y2={y(g)} stroke={colors.track} strokeWidth={1} />
+    <Svg width={width} height={STATIC_HEIGHT}>
+      {axis.ticks.map((t) => (
+        <React.Fragment key={t}>
+          <Line x1={plotLeft} x2={plotRight} y1={y(t)} y2={y(t)} stroke={colors.track} strokeWidth={1} />
+          <SvgText x={plotLeft - 6} y={y(t) + 4} fill={colors.textFaint} fontSize={11} textAnchor="end">
+            {tickText(t)}
+          </SvgText>
+        </React.Fragment>
+      ))}
+      {unit ? (
+        <SvgText x={plotLeft} y={y(top) - 6} fill={colors.textFaint} fontSize={11}>
+          {unit}
+        </SvgText>
+      ) : null}
+      {guides
+        .filter((g) => g > axis.lo && g < axis.hi)
+        .map((g) => (
+          <Line
+            key={`g${g}`}
+            x1={plotLeft}
+            x2={plotRight}
+            y1={y(g)}
+            y2={y(g)}
+            stroke={withAlpha(colors.textFaint, 0.35)}
+            strokeWidth={1}
+            strokeDasharray="3 4"
+          />
         ))}
-        {segments.map((seg, i) =>
+      {series.flatMap((s, k) => {
+        const sorted = [...s.points].sort((p, q) => p.m - q.m);
+        return splitSegments(sorted.map((p) => ({ ts: p.m * 60, value: p.v })), gapFor(sorted)).map((seg, i) =>
           seg.length === 1 ? (
-            <Circle key={i} cx={x(seg[0].ts / 60)} cy={y(seg[0].value)} r={4} fill={colors.accent} />
+            <Circle key={`${k}.${i}`} cx={x(seg[0].ts / 60)} cy={y(seg[0].value)} r={3} fill={s.color} />
           ) : (
             <Path
-              key={i}
+              key={`${k}.${i}`}
               d={seg.map((p, j) => `${j ? 'L' : 'M'}${x(p.ts / 60)} ${y(p.value)}`).join(' ')}
-              stroke={colors.accent}
+              stroke={s.color}
               strokeWidth={2}
               strokeLinejoin="round"
+              strokeLinecap="round"
               fill="none"
             />
           ),
-        )}
-        {touch ? <Circle cx={x(touch.m)} cy={y(touch.v)} r={5} fill={colors.arcTo} /> : null}
-        {[0, 720, 1440].map((m) => (
-          <SvgText key={m} x={x(m)} y={HEIGHT - 2} fill={colors.textFaint} fontSize={11} textAnchor={m === 0 ? 'start' : m === 1440 ? 'end' : 'middle'}>
-            {formatMinute(m)}
-          </SvgText>
-        ))}
-      </Svg>
-      {touch ? (
-        <Text style={styles.touch}>
-          {format(touch.v)} · {formatMinute(touch.m)}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-/** Давление: две линии, верхнее и нижнее. */
-export function PressureChart({ points, width }: { points: { m: number; sys: number; dia: number }[]; width: number }) {
-  const sorted = [...points].sort((a, b) => a.m - b.m);
-  if (!sorted.length) return empty(width);
-  const all = sorted.flatMap((p) => [p.sys, p.dia]);
-  const lo = Math.min(...all) - 6;
-  const hi = Math.max(...all) + 6;
-  const x = (m: number) => GUTTER + (m / 1440) * (width - GUTTER * 2);
-  const y = (v: number) => 12 + (1 - (v - lo) / Math.max(1, hi - lo)) * (HEIGHT - 44);
-  const line = (key: 'sys' | 'dia', color: string) =>
-    splitSegments(
-      sorted.map((p) => ({ ts: p.m * 60, value: p[key] })),
-      gapFor(sorted.map((p) => ({ m: p.m, v: p.sys }))),
-    ).map((seg, i) =>
-      seg.length === 1 ? (
-        <Circle key={`${key}${i}`} cx={x(seg[0].ts / 60)} cy={y(seg[0].value)} r={4} fill={color} />
-      ) : (
-        <Path
-          key={`${key}${i}`}
-          d={seg.map((p, j) => `${j ? 'L' : 'M'}${x(p.ts / 60)} ${y(p.value)}`).join(' ')}
-          stroke={color}
-          strokeWidth={2}
-          strokeLinejoin="round"
-          fill="none"
-        />
-      ),
-    );
-  return (
-    <Svg width={width} height={HEIGHT}>
-      {line('sys', colors.accent)}
-      {line('dia', withAlpha(colors.accent, 0.45))}
-      {[0, 720, 1440].map((m) => (
-        <SvgText key={m} x={x(m)} y={HEIGHT - 2} fill={colors.textFaint} fontSize={11} textAnchor={m === 0 ? 'start' : m === 1440 ? 'end' : 'middle'}>
+        );
+      })}
+      {DAY_HOUR_TICKS.map((m) => (
+        <SvgText
+          key={m}
+          x={x(m)}
+          y={STATIC_HEIGHT - 4}
+          fill={colors.textFaint}
+          fontSize={11}
+          textAnchor={m === 0 ? 'start' : m === 1440 ? 'end' : 'middle'}
+        >
           {formatMinute(m)}
         </SvgText>
       ))}
     </Svg>
+  );
+}
+
+/** Один показатель за день: стресс, кислород, вариабельность, глюкоза. */
+export function DayLineChart({
+  points,
+  width,
+  unit,
+  fixed,
+  guides,
+}: {
+  points: DayPoint[];
+  width: number;
+  unit?: string;
+  /** Границы, которые ось охватывает всегда (стресс 0–100, кислород 90–100). */
+  fixed?: { min?: number; max?: number };
+  /** Пунктирные линии, например границы зон стресса. */
+  guides?: number[];
+}) {
+  return <StaticDayChart series={[{ points, color: colors.accent }]} width={width} unit={unit} fixed={fixed} guides={guides} />;
+}
+
+const DIASTOLIC_COLOR = withAlpha(colors.accent, 0.45);
+
+/** Давление: две линии, верхнее и нижнее, и лёгкая легенда под графиком. */
+export function PressureChart({ points, width }: { points: { m: number; sys: number; dia: number }[]; width: number }) {
+  const series = [
+    { points: points.map((p) => ({ m: p.m, v: p.sys })), color: colors.accent },
+    { points: points.map((p) => ({ m: p.m, v: p.dia })), color: DIASTOLIC_COLOR },
+  ];
+  return (
+    <View>
+      <StaticDayChart series={series} width={width} unit="мм рт. ст." />
+      <View style={styles.legend}>
+        <View style={[styles.swatch, { backgroundColor: colors.accent }]} />
+        <Text style={styles.legendText}>верхнее</Text>
+        <View style={[styles.swatch, { backgroundColor: DIASTOLIC_COLOR }]} />
+        <Text style={styles.legendText}>нижнее</Text>
+      </View>
+    </View>
   );
 }
 
@@ -332,6 +358,9 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', justifyContent: 'center' },
   emptyText: { color: colors.textFaint, fontSize: 14 },
   touch: { color: colors.text, fontSize: 14, textAlign: 'center', marginTop: spacing.xs },
+  legend: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: spacing.xs, paddingLeft: Y_GUTTER },
+  swatch: { width: 14, height: 2, borderRadius: 1 },
+  legendText: { color: colors.textFaint, fontSize: 12, marginRight: spacing.sm },
   edges: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xs, paddingLeft: 66 },
   edge: { color: colors.textMuted, fontSize: 13 },
 });

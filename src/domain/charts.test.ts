@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Sample } from '../codec';
-import { deepShareLabel, formatMinute, hypnogramSegments, niceTicks, sleepStage, stepsByHour, stressZone } from './charts';
+import { chartAxis, deepShareLabel, formatMinute, hypnogramSegments, niceTicks, sleepStage, stepsByHour, stressZone } from './charts';
 
 const ring = (s: string) => Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
 const minutes = (from: string, values: number[]): Sample[] =>
@@ -120,5 +120,27 @@ describe('ярлык глубокого сна', () => {
     expect(deepShareLabel(19)).toBe('хорошо');
     expect(deepShareLabel(20)).toBe('отлично');
     expect(deepShareLabel(35)).toBe('отлично');
+  });
+});
+
+describe('ось статичных графиков «Тела»', () => {
+  it('3–4 круглые отметки, крайние охватывают данные', () => {
+    expect(chartAxis(10, 70, { min: 0, max: 100 }).ticks).toEqual([0, 50, 100]); // стресс
+    expect(chartAxis(96, 99, { min: 90, max: 100 }).ticks).toEqual([90, 95, 100]); // кислород
+    expect(chartAxis(45, 85).ticks).toEqual([40, 60, 80, 100]); // вариабельность
+    expect(chartAxis(5.0, 6.4).ticks).toEqual([5, 5.5, 6, 6.5]); // глюкоза
+    expect(chartAxis(70, 125).ticks).toEqual([50, 75, 100, 125]); // давление
+  });
+  it('кислород ниже 90 расширяет ось, а не обрезается', () => {
+    const axis = chartAxis(86, 98, { min: 90, max: 100 });
+    expect(axis.lo).toBeLessThanOrEqual(86);
+    expect(axis.hi).toBeGreaterThanOrEqual(100);
+    expect(axis.ticks.length).toBeGreaterThanOrEqual(3);
+    expect(axis.ticks.length).toBeLessThanOrEqual(4);
+  });
+  it('одно значение не роняет ось', () => {
+    const axis = chartAxis(80, 80);
+    expect(axis.lo).toBeLessThan(80);
+    expect(axis.hi).toBeGreaterThan(80);
   });
 });

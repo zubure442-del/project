@@ -67,6 +67,37 @@ export function niceTicks(min: number, max: number, count = 3): number[] {
   return ticks.length ? ticks : [min, max];
 }
 
+const NICE_STEPS = [1, 2, 2.5, 5];
+
+/**
+ * Вертикальная ось статичного графика: 3–4 круглые отметки, крайние охватывают данные.
+ * `fixed` — границы, которые должны войти всегда (например, 0–100 у стресса).
+ */
+export function chartAxis(min: number, max: number, fixed?: { min?: number; max?: number }): { lo: number; hi: number; ticks: number[] } {
+  let a = Math.min(min, fixed?.min ?? min);
+  let b = Math.max(max, fixed?.max ?? max);
+  if (!(b > a)) {
+    const pad = Math.max(1, Math.abs(a) * 0.1);
+    a -= pad;
+    b += pad;
+  }
+  const magnitude = 10 ** Math.floor(Math.log10((b - a) / 3));
+  const candidates = [magnitude / 10, magnitude, magnitude * 10].flatMap((m) => NICE_STEPS.map((k) => k * m));
+  for (const step of candidates) {
+    const lo = Math.floor(a / step + 1e-9) * step;
+    const hi = Math.ceil(b / step - 1e-9) * step;
+    const n = Math.round((hi - lo) / step) + 1;
+    if (n <= 4) {
+      const ticks = Array.from({ length: n }, (_, i) => Math.round((lo + i * step) * 1000) / 1000);
+      return { lo: ticks[0], hi: ticks[ticks.length - 1], ticks };
+    }
+  }
+  return { lo: a, hi: b, ticks: [a, b] };
+}
+
+/** Часы на оси X статичных графиков дня. */
+export const DAY_HOUR_TICKS = [0, 360, 720, 1080, 1440];
+
 /** «7:05» из минут от полуночи; отрицательные минуты — это предыдущий вечер, 1440 — конец суток. */
 export function formatMinute(minuteOfDay: number): string {
   const rounded = Math.round(minuteOfDay);

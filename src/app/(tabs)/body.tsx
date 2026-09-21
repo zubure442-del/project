@@ -47,13 +47,13 @@ export default function BodyTab() {
       {/* Пустые карточки не показываем вовсе: рамка без данных ничего не говорит. */}
       {stress.length ? (
         <Card title="Стресс" right={<InfoButton title={FORMULAS.stress.title} text={formulaText('stress')} />}>
-          <DayLineChart points={stress} width={chartWidth} yMin={0} yMax={100} guides={STRESS_ZONE_BOUNDS} />
+          <DayLineChart points={stress} width={chartWidth} fixed={{ min: 0, max: 100 }} guides={STRESS_ZONE_BOUNDS} />
         </Card>
       ) : null}
 
       {spo2.length ? (
         <Card title="Кислород" right={<InfoButton title={FORMULAS.state.title} text={formulaText('state')} />}>
-          <DayLineChart points={spo2} width={chartWidth} yMin={90} yMax={100} format={(v) => `${Math.round(v)} %`} />
+          <DayLineChart points={spo2} width={chartWidth} unit="%" fixed={{ min: 90, max: 100 }} />
         </Card>
       ) : lastSpo2 ? (
         <Card>
@@ -65,7 +65,7 @@ export default function BodyTab() {
 
       {hrv.length ? (
         <Card title="Вариабельность" right={<InfoButton title={FORMULAS.hrv.title} text={formulaText('hrv')} />}>
-          <DayLineChart points={hrv} width={chartWidth} />
+          <DayLineChart points={hrv} width={chartWidth} unit="мс" />
         </Card>
       ) : null}
 
@@ -77,7 +77,7 @@ export default function BodyTab() {
 
       {glucose.length ? (
         <Card title="Глюкоза · оценка" right={<InfoButton title={FORMULAS.glucose.title} text={formulaText('glucose')} />}>
-          <DayLineChart points={glucose} width={chartWidth} format={(v) => v.toFixed(1)} />
+          <DayLineChart points={glucose} width={chartWidth} unit="ммоль/л" />
         </Card>
       ) : null}
     </Screen>

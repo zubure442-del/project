@@ -1,11 +1,12 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, busiestHour, formulaText, weekCalories } from '../../domain';
-import { findDay, useTabDay, useVuelo } from '../../state';
+import { findDay, heroHint, missingInputs, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
   DayBanner,
   Card,
   DayActivityChart,
+  HeroHint,
   HeroRing,
   InfoButton,
   Screen,
@@ -21,7 +22,7 @@ import {
 export default function ActivityTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner, shownPhrase, view } = useTabDay();
   const day = findDay(state.days, picked);
   const age = profileAge(state.profile);
   const hours = day?.stepsByHour ?? [];
@@ -40,7 +41,8 @@ export default function ActivityTab() {
       banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
-        <HeroRing value={day?.scores.activity ?? null} calibrating={!!day && day.scores.activity === null} />
+        <HeroRing value={day?.scores.activity ?? null} />
+        {(day?.scores.activity ?? null) === null ? <HeroHint text={heroHint('activity', picked, view.today)} missing={missingInputs('activity', day)} /> : null}
         {day?.steps != null ? (
           <Text style={styles.summary}>
             {day.steps.toLocaleString('ru-RU')} шагов · {calories === null ? '—' : calories.toLocaleString('ru-RU')} ккал

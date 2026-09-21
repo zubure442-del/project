@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Defs, LinearGradient, RadialGradient, Stop } from 'react-native-svg';
+import { InfoButton } from './Sheet';
 import { colors } from './theme';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -18,15 +19,14 @@ export function HeroRing({
   size = 190,
   caption,
   hapticOnChange = true,
-  calibrating = false,
 }: {
+  /** null — оценка не считается: кольцо пунктиром и «Данные собираются» вместо числа. */
   value: number | null;
   size?: number;
   caption?: string;
   hapticOnChange?: boolean;
-  /** Данных не хватило: кольцо пунктиром, вместо числа слово «Калибровка». */
-  calibrating?: boolean;
 }) {
+  const collecting = value === null;
   const thickness = Math.max(8, size * 0.055);
   const r = (size - thickness) / 2;
   const cx = size / 2;
@@ -90,8 +90,8 @@ export function HeroRing({
           stroke={colors.track}
           strokeWidth={thickness}
           fill="none"
-          strokeDasharray={calibrating ? '6 8' : undefined}
-          strokeLinecap={calibrating ? 'round' : undefined}
+          strokeDasharray={collecting ? '6 8' : undefined}
+          strokeLinecap={collecting ? 'round' : undefined}
         />
         <AnimatedCircle
           cx={cx}
@@ -107,10 +107,10 @@ export function HeroRing({
         <AnimatedCircle r={thickness * 2.4} fill="url(#hero-glow)" animatedProps={tipProps} />
       </Svg>
       <View style={styles.center} pointerEvents="none">
-        {calibrating ? (
-          <Text style={[styles.calibrating, { fontSize: size * 0.13 }]}>Калибровка</Text>
+        {collecting ? (
+          <Text style={styles.collecting}>Данные собираются</Text>
         ) : (
-          <Text style={[styles.value, { fontSize: size * 0.34 }]}>{value === null ? '—' : shown}</Text>
+          <Text style={[styles.value, { fontSize: size * 0.34 }]}>{shown}</Text>
         )}
         {caption ? <Text style={styles.caption}>{caption}</Text> : null}
       </View>
@@ -118,9 +118,26 @@ export function HeroRing({
   );
 }
 
+/**
+ * Одна строка под кольцом, когда оценки нет: что делать сегодня или «Нет данных за этот день».
+ * В «i» — чего именно не хватает.
+ */
+export function HeroHint({ text, missing }: { text: string; missing: string[] }) {
+  return (
+    <View style={styles.hint}>
+      <Text style={styles.hintText} numberOfLines={2}>
+        {text}
+      </Text>
+      {missing.length ? <InfoButton title="Чего не хватает" text={`Не хватает: ${missing.join(', ')}`} /> : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   center: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   value: { color: colors.text, fontWeight: '200', letterSpacing: -1 },
-  calibrating: { color: colors.textMuted, fontWeight: '300' },
+  collecting: { color: colors.textMuted, fontSize: 13 },
+  hint: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 24 },
+  hintText: { color: colors.textMuted, fontSize: 14, textAlign: 'center', flexShrink: 1 },
   caption: { color: colors.textMuted, fontSize: 14, marginTop: 2 },
 });

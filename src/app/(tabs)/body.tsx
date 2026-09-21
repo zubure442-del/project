@@ -1,12 +1,12 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STRESS_ZONE_BOUNDS, formulaText } from '../../domain';
-import { findDay, latestSpo2, useTabDay, useVuelo } from '../../state';
-import { DayBanner, Card, DayLineChart, HeroRing, InfoButton, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
+import { findDay, heroHint, latestSpo2, missingInputs, useTabDay, useVuelo } from '../../state';
+import { DayBanner, Card, DayLineChart, HeroHint, HeroRing, InfoButton, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
 
 export default function BodyTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner, shownPhrase, view } = useTabDay();
   const day = findDay(state.days, picked);
   const chartWidth = width - spacing.md * 4;
   const points = day?.summaryPoints ?? [];
@@ -28,7 +28,8 @@ export default function BodyTab() {
       banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
-        <HeroRing value={day?.scores.state ?? null} calibrating={!!day && day.scores.state === null} />
+        <HeroRing value={day?.scores.state ?? null} />
+        {(day?.scores.state ?? null) === null ? <HeroHint text={heroHint('state', picked, view.today)} missing={missingInputs('state', day)} /> : null}
       </View>
 
       <Card title="Неделя" right={<InfoButton title={FORMULAS.state.title} text={formulaText('state')} />}>

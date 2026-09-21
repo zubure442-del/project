@@ -1,10 +1,11 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STEPS_DEFAULT_NORM, formulaText, type ComponentId } from '../../domain';
-import { adviceFor, adviceLabel, findDay, useTabDay, useVuelo } from '../../state';
+import { adviceFor, adviceLabel, findDay, heroHint, missingInputs, useTabDay, useVuelo } from '../../state';
 import {
   DayBanner,
   COMPONENT_LABEL,
   Card,
+  HeroHint,
   HeroRing,
   InfoButton,
   Ring,
@@ -21,7 +22,7 @@ const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 export default function TodayTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner, shownPhrase, view } = useTabDay();
   const day = findDay(state.days, picked);
   const advice = adviceFor(state, picked);
   const chartWidth = width - spacing.md * 4;
@@ -40,7 +41,8 @@ export default function TodayTab() {
       banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
     >
       <View style={styles.total}>
-        <HeroRing value={day?.total ?? null} calibrating={!!day && day.total === null} size={Math.min(214, width - 140)} />
+        <HeroRing value={day?.total ?? null} size={Math.min(214, width - 140)} />
+        {(day?.total ?? null) === null ? <HeroHint text={heroHint('total', picked, view.today)} missing={missingInputs('total', day)} /> : null}
       </View>
 
       <View style={styles.components}>

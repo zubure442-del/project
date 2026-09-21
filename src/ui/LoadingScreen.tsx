@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
-  KeyboardAvoidingView,
   Linking,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  NAME_NOTE,
   STAGE_FADE_MS,
   canLeave,
   loadProgress,
@@ -25,6 +22,7 @@ import {
   type ShownSlide,
 } from '../state';
 import { StageArt } from './LoadingArt';
+import { Onboarding } from './Onboarding';
 import { ProgressArc } from './ProgressArc';
 import { TipGlyph, type TipIcon } from './TipIcons';
 import { colors, radius, spacing } from './theme';
@@ -226,50 +224,17 @@ function SyncView({ onFinish }: { onFinish: () => void }) {
   );
 }
 
-/** Самый первый запуск: как обращаться. Bluetooth спрашиваем только после нажатия. */
-function NameForm({ onDone }: { onDone: (name: string | null) => void }) {
-  const [name, setName] = useState('');
-  return (
-    <KeyboardAvoidingView style={styles.nameRoot} behavior="padding">
-      <Text style={styles.greeting}>Привет!</Text>
-      <Text style={styles.nameQuestion}>Как к вам обращаться?</Text>
-      <TextInput
-        value={name}
-        onChangeText={setName}
-        placeholder="Имя"
-        placeholderTextColor={colors.textFaint}
-        style={styles.input}
-        autoFocus
-        maxLength={24}
-        returnKeyType="done"
-        onSubmitEditing={() => onDone(name)}
-      />
-      <Text style={styles.nameNote}>{NAME_NOTE}</Text>
-      <Pressable style={styles.button} onPress={() => onDone(name)}>
-        <Text style={styles.buttonText}>Продолжить</Text>
-      </Pressable>
-      <Pressable style={styles.secondary} onPress={() => onDone(null)}>
-        <Text style={styles.secondaryText}>Пропустить</Text>
-      </Pressable>
-    </KeyboardAvoidingView>
-  );
-}
-
 /**
  * Экран загрузки поверх вкладок. Единственное место, где видно синхронизацию:
  * вход, возврат из фона, pull-to-refresh и «Повторить» открывают его одинаково.
  */
 export function LoadingScreen() {
-  const { state, phase, error, loadingMode, sync, markStarted, finishLoading } = useVuelo();
+  const { state, phase, error, loadingMode, sync, completeOnboarding, finishLoading } = useVuelo();
   const insets = useSafeAreaInsets();
   const frame = { paddingTop: insets.top + spacing.lg, paddingBottom: insets.bottom + spacing.sm };
 
   if (!state.started) {
-    return (
-      <View style={[styles.root, frame]}>
-        <NameForm onDone={markStarted} />
-      </View>
-    );
+    return <Onboarding onDone={completeOnboarding} />;
   }
 
   if (phase === 'failed') {
@@ -337,18 +302,6 @@ const styles = StyleSheet.create({
   progressStep: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   footer: { gap: 2, paddingTop: spacing.md, alignItems: 'center' },
   note: { color: colors.textFaint, fontSize: 11, textAlign: 'center' },
-  nameRoot: { flex: 1, justifyContent: 'center', gap: spacing.md },
-  nameNote: { color: colors.textFaint, fontSize: 12, lineHeight: 16, paddingHorizontal: spacing.xs },
-  nameQuestion: { color: colors.textMuted, fontSize: 20, fontWeight: '300', paddingHorizontal: spacing.xs },
-  input: {
-    backgroundColor: colors.card,
-    borderRadius: radius.card,
-    color: colors.text,
-    fontSize: 20,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 14,
-    marginTop: spacing.sm,
-  },
   body: { flex: 1, justifyContent: 'center', gap: spacing.md },
   title: { color: colors.text, fontSize: 28, fontWeight: '600' },
   message: { color: colors.textMuted, fontSize: 16, lineHeight: 24 },

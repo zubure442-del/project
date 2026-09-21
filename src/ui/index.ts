@@ -17,3 +17,4 @@ export * from './TipIcons';
 export * from './TabBar';
 export * from './Calendar';
 export * from './WeekBars';
+export * from './Onboarding';

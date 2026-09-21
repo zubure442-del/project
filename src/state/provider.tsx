@@ -32,7 +32,7 @@ import {
 } from '../storage';
 import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
 import { loadPlan, loadProgress, recordDurations, wantsSlides, type SegmentKind } from './loading';
-import { isGoalSet, mergeProfile, withStartName } from './profile';
+import { isGoalSet, mergeProfile, withOnboarding } from './profile';
 import { applySyncResult, planDays, rebuildDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -78,8 +78,8 @@ interface Vuelo {
   syncFailed: boolean;
   sync: (mode?: SyncMode) => void;
   forgetRing: () => void;
-  /** Первый запуск: имя (или null — «Пропустить») и старт. Bluetooth спрашиваем только после этого. */
-  markStarted: (name: string | null) => void;
+  /** Первый запуск: форма со всеми полями отправлена. Bluetooth спрашиваем только после этого. */
+  completeOnboarding: (profile: Profile) => void;
   dismissFresh: () => void;
   /** Экран загрузки дошёл до конца (или «Открыть с сохранёнными данными»): закрываем его. */
   finishLoading: () => void;
@@ -325,11 +325,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     })();
   }, [commit]);
 
-  const markStarted = useCallback(
-    (name: string | null) => {
+  const completeOnboarding = useCallback(
+    (profile: Profile) => {
       void (async () => {
-        // Имя сначала записываем на телефон и ждём записи — только потом Bluetooth и загрузка.
-        const next = withStartName(latest.current, name);
+        // Профиль сначала записываем на телефон и ждём записи — только потом Bluetooth и загрузка.
+        const next = withOnboarding(latest.current, profile);
         await saveState(next);
         latest.current = next;
         setState(next);
@@ -396,14 +396,14 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       syncFailed: state.syncFailed && state.started,
       sync,
       forgetRing,
-      markStarted,
+      completeOnboarding,
       dismissFresh,
       finishLoading,
       saveProfile,
       reloadProfile,
       clearData,
     };
-  }, [clearData, dismissFresh, error, finishLoading, forgetRing, loadingMode, markStarted, phase, picked, ready, reloadProfile, saveProfile, selectDay, state, sync]);
+  }, [clearData, dismissFresh, error, finishLoading, forgetRing, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, state, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

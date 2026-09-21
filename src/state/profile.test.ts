@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_PROFILE, EMPTY_STATE, loadProfile, saveState } from '../storage';
 import { bannerKind } from './day';
-import { mergeProfile, missingFields, parseProfileNumber, profileAlerts, withStartName } from './profile';
+import { EMPTY_DRAFT, mergeProfile, missingFields, onboardingProfile, parseProfileNumber, profileAlerts, withOnboarding } from './profile';
 
 /** Хранилище телефона в памяти: как AsyncStorage, только без устройства. */
 const disk = vi.hoisted(() => new Map<string, string>());
@@ -15,24 +15,26 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 
 beforeEach(() => disk.clear());
 
-describe('СИНТЕТИЧЕСКИЕ: имя из первого запуска', () => {
-  it('имя, введённое при первом запуске, сразу видно в «Профиле»', async () => {
-    await saveState(withStartName(EMPTY_STATE, '  Аня '));
-    expect((await loadProfile()).name).toBe('Аня');
+describe('СИНТЕТИЧЕСКИЕ: форма первого запуска', () => {
+  const NOW = new Date(2026, 8, 22);
+  const full = { name: ' Аня ', sex: 'female' as const, heightCm: '165', weightKg: '60', birthYear: '1996', goal: 'keep' as const };
+
+  it('все шесть полей заполнены — профиль целиком, имя без пробелов', () => {
+    expect(onboardingProfile(full, NOW)).toEqual({ name: 'Аня', sex: 'female', heightCm: 165, weightKg: 60, birthYear: 1996, goal: 'keep' });
   });
 
-  it('«Пропустить» — поле пустое, без ошибок', async () => {
-    await saveState(withStartName(EMPTY_STATE, null));
+  it('любое пустое или неверное поле — форма не отправляется, «Пропустить» нет', () => {
+    for (const patch of [{ name: '  ' }, { sex: null }, { goal: null }, { heightCm: '' }, { weightKg: '0' }, { birthYear: '199' }]) {
+      expect(onboardingProfile({ ...full, ...patch }, NOW)).toBeNull();
+    }
+    expect(onboardingProfile(EMPTY_DRAFT, NOW)).toBeNull();
+  });
+
+  it('после отправки имя и профиль сразу видны в «Профиле», точки нет', async () => {
+    await saveState(withOnboarding(EMPTY_STATE, onboardingProfile(full, NOW) as NonNullable<ReturnType<typeof onboardingProfile>>));
     const profile = await loadProfile();
-    expect(profile.name).toBeNull();
-    expect(withStartName(EMPTY_STATE, '   ').profile.name).toBeNull();
-  });
-
-  it('первый запуск отмечен, остальной профиль не тронут', () => {
-    const state = { ...EMPTY_STATE, profile: { ...EMPTY_PROFILE, heightCm: 180 } };
-    const next = withStartName(state, 'Аня');
-    expect(next.started).toBe(true);
-    expect(next.profile.heightCm).toBe(180);
+    expect(profile.name).toBe('Аня');
+    expect(profileAlerts(profile).dot).toBe(false);
   });
 });
 

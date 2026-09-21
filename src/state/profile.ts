@@ -47,11 +47,32 @@ export function parseProfileNumber(key: NumberField, text: string, now = new Dat
 /** Правка поверх актуального профиля, а не поверх копии с прошлой отрисовки экрана. */
 export const mergeProfile = (current: Profile, patch: Partial<Profile>): Profile => ({ ...current, ...patch });
 
-/**
- * Первый запуск: «Продолжить» с именем или «Пропустить» (null). Имя обрезаем;
- * пустое — то же, что пропуск: поле в «Профиле» остаётся пустым.
- */
-export function withStartName(state: VueloState, name: string | null): VueloState {
-  const trimmed = name?.trim() || null;
-  return { ...state, started: true, profile: { ...state.profile, name: trimmed } };
+/** Черновик формы первого запуска: числа — как введённый текст. */
+export interface OnboardingDraft {
+  name: string;
+  sex: Profile['sex'];
+  heightCm: string;
+  weightKg: string;
+  birthYear: string;
+  goal: Profile['goal'];
 }
+
+export const EMPTY_DRAFT: OnboardingDraft = { name: '', sex: null, heightCm: '', weightKg: '', birthYear: '', goal: null };
+
+/**
+ * Профиль из формы первого запуска. Обязательны все шесть полей (имя, пол, рост, вес,
+ * год рождения, цель); если хоть одно пустое или вне границ — null, форму не отправляем.
+ */
+export function onboardingProfile(draft: OnboardingDraft, now = new Date()): Profile | null {
+  const name = draft.name.trim();
+  const heightCm = parseProfileNumber('heightCm', draft.heightCm, now);
+  const weightKg = parseProfileNumber('weightKg', draft.weightKg, now);
+  const birthYear = parseProfileNumber('birthYear', draft.birthYear, now);
+  if (!name || draft.sex === null || draft.goal === null || heightCm === null || weightKg === null || birthYear === null) {
+    return null;
+  }
+  return { name, sex: draft.sex, heightCm, weightKg, birthYear, goal: draft.goal };
+}
+
+/** Форма первого запуска отправлена: профиль целиком и отметка о старте. */
+export const withOnboarding = (state: VueloState, profile: Profile): VueloState => ({ ...state, started: true, profile });

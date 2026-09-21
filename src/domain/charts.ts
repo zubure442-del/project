@@ -250,6 +250,67 @@ export function loadIntervals(
     });
 }
 
+/** Квадратики нагрузки на графике «День». */
+export const LOAD_BOX_MIN_WIDTH = 6;
+/** Высота самого маленького эпизода и доля области графика для самого большого. */
+export const LOAD_BOX_H_MIN = 14;
+export const LOAD_BOX_H_MAX_SHARE = 0.8;
+/** Ниже этой высоты квадратик не сжимаем даже ради границ. */
+export const LOAD_BOX_H_FLOOR = 10;
+
+/** Пульс линии в минуту m: между соседними точками — линейно; снаружи — по двум ближайшим, без выхода за их значения. */
+export function pulseAt(line: readonly { m: number; v: number }[], m: number): number | null {
+  if (!line.length) return null;
+  if (line.length === 1) return line[0].v;
+  const after = line.findIndex((p) => p.m >= m);
+  if (after > 0) {
+    const a = line[after - 1];
+    const b = line[after];
+    return b.m === a.m ? b.v : a.v + ((b.v - a.v) * (m - a.m)) / (b.m - a.m);
+  }
+  if (after === 0) return line[0].v;
+  return line[line.length - 1].v;
+}
+
+export interface LoadBox {
+  x: number;
+  width: number;
+  /** Центр по вертикали — на линии пульса в середине эпизода. */
+  cy: number;
+  height: number;
+}
+
+/**
+ * Квадратики эпизодов: по ширине — от начала до конца эпизода, центр — на линии пульса
+ * в середине эпизода, высота растёт с числом шагов. Общий коэффициент сжатия сохраняет
+ * пропорции и не даёт квадратикам выйти за область графика.
+ */
+export function loadBoxes(
+  zones: readonly { from: number; to: number; steps: number }[],
+  line: readonly { m: number; v: number }[],
+  x: (m: number) => number,
+  y: (v: number) => number,
+  plot: { top: number; bottom: number },
+): LoadBox[] {
+  const hMax = LOAD_BOX_H_MAX_SHARE * (plot.bottom - plot.top);
+  const stepsMax = Math.max(0, ...zones.map((z) => z.steps));
+  const raw = zones.flatMap((z) => {
+    const pulse = pulseAt(line, (z.from + z.to) / 2);
+    if (pulse === null) return [];
+    const left = x(z.from);
+    const share = stepsMax > 0 ? z.steps / stepsMax : 0;
+    return [{
+      x: left,
+      width: Math.max(LOAD_BOX_MIN_WIDTH, x(z.to) - left),
+      cy: y(pulse),
+      height: LOAD_BOX_H_MIN + share * (hMax - LOAD_BOX_H_MIN),
+    }];
+  });
+  const room = (b: { cy: number; height: number }) => (2 * Math.min(b.cy - plot.top, plot.bottom - b.cy)) / b.height;
+  const scale = Math.min(1, ...raw.map(room));
+  return raw.map((b) => ({ ...b, height: Math.max(LOAD_BOX_H_FLOOR, b.height * scale) }));
+}
+
 /** Уровни волны сна: глубокий внизу, лёгкий вверху. */
 export const SLEEP_LEVEL: Record<'light' | 'deep', number> = { light: 0.35, deep: 1 };
 /** Окно сглаживания волны сна, минуты. */

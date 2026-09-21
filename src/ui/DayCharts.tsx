@@ -1,7 +1,18 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, Line, Path, Pattern, Rect, Text as SvgText } from 'react-native-svg';
-import { DAY_HOUR_TICKS, HR_SMOOTH_MAX_GAP, chartAxis, formatMinute, loadIntervals, smoothHeart, splitSegments, type SleepStage } from '../domain';
+import {
+  DAY_HOUR_TICKS,
+  HR_SMOOTH_MAX_GAP,
+  LOAD_BOX_H_FLOOR,
+  chartAxis,
+  formatMinute,
+  loadBoxes,
+  loadIntervals,
+  smoothHeart,
+  splitSegments,
+  type SleepStage,
+} from '../domain';
 import type { DayPoint, DaySnapshot } from '../storage';
 import { colors, spacing, withAlpha } from './theme';
 
@@ -15,10 +26,6 @@ const empty = (width: number, text = 'Нет данных') => (
   </View>
 );
 
-/** Минимальная ширина прямоугольника нагрузки, чтобы короткий эпизод был заметен. */
-const MIN_ZONE_WIDTH = 6;
-/** Запас по вертикали вокруг пульса эпизода. */
-const ZONE_PADDING = 0.15;
 /** Шаг подписей шкалы пульса. */
 const PULSE_STEP = 20;
 
@@ -53,7 +60,10 @@ export function DayActivityChart({
   const gutter = 34;
   const plot = width - gutter;
   const x = (m: number) => gutter + (m / 1440) * plot;
-  const y = (v: number) => 10 + (1 - (v - yMin) / (yMax - yMin)) * (HEIGHT - 32);
+  // Область графика и запас внутри неё в полквадратика: центр квадратика на линии всегда помещается.
+  const area = { top: 10, bottom: HEIGHT - 22 };
+  const pad = LOAD_BOX_H_FLOOR / 2;
+  const y = (v: number) => area.top + pad + (1 - (v - yMin) / (yMax - yMin)) * (area.bottom - area.top - 2 * pad);
   const ticks: number[] = [];
   for (let t = yMin; t <= yMax; t += PULSE_STEP) ticks.push(t);
   const segments = splitSegments(smooth, HR_SMOOTH_MAX_GAP);
@@ -77,33 +87,21 @@ export function DayActivityChart({
           </React.Fragment>
         ))}
 
-        {zones.map((z, i) => {
-          // Если внутри эпизода замеров пульса нет, рисуем среднюю полосу графика.
-          const hasPulse = z.peak !== null && z.low !== null;
-          const span = hasPulse ? Math.max(1, (z.peak as number) - (z.low as number)) : 0;
-          const top = hasPulse
-            ? y(Math.min(yMax, (z.peak as number) + span * ZONE_PADDING))
-            : 10 + (HEIGHT - 32) * 0.35;
-          const bottom = hasPulse
-            ? y(Math.max(yMin, (z.low as number) - span * ZONE_PADDING))
-            : 10 + (HEIGHT - 32) * 0.65;
-          const left = x(z.from);
-          const zoneWidth = Math.max(MIN_ZONE_WIDTH, x(z.to) - left);
-          return (
-            <Rect
-              key={i}
-              x={left}
-              y={top}
-              width={zoneWidth}
-              height={Math.max(8, bottom - top)}
-              fill="url(#load-hatch)"
-              stroke={colors.accent}
-              strokeWidth={1}
-              strokeOpacity={0.6}
-              rx={2}
-            />
-          );
-        })}
+        {/* Квадратики: центр на линии пульса, высота по числу шагов в эпизоде (loadBoxes). */}
+        {loadBoxes(zones, smooth.map((p) => ({ m: p.ts / 60, v: p.value })), x, y, area).map((box, i) => (
+          <Rect
+            key={i}
+            x={box.x}
+            y={box.cy - box.height / 2}
+            width={box.width}
+            height={box.height}
+            fill="url(#load-hatch)"
+            stroke={colors.accent}
+            strokeWidth={1}
+            strokeOpacity={0.6}
+            rx={2}
+          />
+        ))}
 
         {segments.map((seg, i) =>
           seg.length === 1 ? (

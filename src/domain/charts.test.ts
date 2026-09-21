@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Sample } from '../codec';
-import { LABEL_CHAR_W, LABEL_GAP, LABEL_LINE_H, chartAxis, deepShareLabel, placeLabels, formatMinute, hypnogramSegments, niceTicks, sleepStage, stepsByHour, stressZone } from './charts';
+import { LABEL_CHAR_W, LABEL_GAP, LABEL_LINE_H, LOAD_BOX_H_FLOOR, LOAD_BOX_MIN_WIDTH, chartAxis, loadBoxes, pulseAt, deepShareLabel, placeLabels, formatMinute, hypnogramSegments, niceTicks, sleepStage, stepsByHour, stressZone } from './charts';
 
 const ring = (s: string) => Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
 const minutes = (from: string, values: number[]): Sample[] =>
@@ -175,5 +175,44 @@ describe('числа над точками недели не накладыва�
     for (let i = 0; i < boxes.length; i++) {
       for (let j = i + 1; j < boxes.length; j++) expect(overlap(boxes[i], boxes[j])).toBe(false);
     }
+  });
+});
+
+describe('квадратики нагрузки на графике «День»', () => {
+  const plot = { top: 10, bottom: 118 };
+  const x = (m: number) => 34 + (m / 1440) * 300;
+  // Как на графике: значения укладываются внутрь области с запасом в полквадратика.
+  const y = (v: number) => plot.top + 5 + (1 - (v - 60) / 100) * (plot.bottom - plot.top - 10);
+  const line = [
+    { m: 480, v: 70 },
+    { m: 540, v: 80 },
+    { m: 600, v: 130 },
+    { m: 660, v: 150 },
+    { m: 720, v: 75 },
+  ];
+  const zones = [
+    { from: 500, to: 520, steps: 800 },
+    { from: 610, to: 650, steps: 3200 },
+    { from: 700, to: 701, steps: 100 },
+  ];
+  const boxes = loadBoxes(zones, line, x, y, plot);
+
+  it('эпизод с бо́льшим числом шагов выше', () => {
+    expect(boxes[1].height).toBeGreaterThan(boxes[0].height);
+    expect(boxes[0].height).toBeGreaterThan(boxes[2].height);
+  });
+
+  it('центр каждого квадратика — на линии пульса в середине эпизода', () => {
+    zones.forEach((z, i) => expect(boxes[i].cy).toBeCloseTo(y(pulseAt(line, (z.from + z.to) / 2) as number)));
+    expect(pulseAt(line, 510)).toBeCloseTo(75);
+  });
+
+  it('ни один не выходит за область графика, короткий — не уже 6 pt', () => {
+    for (const b of boxes) {
+      expect(b.cy - b.height / 2).toBeGreaterThanOrEqual(plot.top - 1e-9);
+      expect(b.cy + b.height / 2).toBeLessThanOrEqual(plot.bottom + 1e-9);
+      expect(b.height).toBeGreaterThanOrEqual(LOAD_BOX_H_FLOOR);
+    }
+    expect(boxes[2].width).toBe(LOAD_BOX_MIN_WIDTH);
   });
 });

@@ -79,14 +79,28 @@ describe('РЕАЛЬНЫЙ ЛОГ c: сон в кэше и на экранах',
     ]);
   });
 
-  it('пустой 15.09 и 16.09 отмечены завершёнными: следующий запуск просит только сегодня и вчера', async () => {
+  it('пустые 15.09 и 16.09 выгружены целиком: через 10 минут запрашивается только сегодня', async () => {
     const { result } = await replayWeek();
     const state = applySyncResult({ ...EMPTY_STATE, started: true }, result, null, SYNC_END);
-    expect(state.completeDays).toEqual(['2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', '2026-09-20']);
+    expect(Object.keys(state.syncedAt)).toEqual([
+      '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', '2026-09-20', '2026-09-21',
+    ]);
     // 13:18 — тот самый повторный запуск: раньше он снова тянул все 7 дней.
-    expect(planDays(state.completeDays, new Date(2026, 8, 21, 13, 18)).days).toEqual([0, 1]);
+    expect(planDays(state.syncedAt, new Date(2026, 8, 21, 13, 18)).days).toEqual([0]);
     expect(state.syncFailed).toBe(false);
     expect(state.lastSyncAt).toBe(SYNC_END.getTime());
+  });
+
+  it('перезаход после полудня: только сегодня, около 10 с', async () => {
+    const { transport } = logRing(LOG);
+    const started = Date.now();
+    const run = runSync(transport, { days: [0] });
+    await vi.runAllTimersAsync();
+    const result = await run;
+    const seconds = (Date.now() - started) / 1000;
+    expect(result.completeDays).toEqual([0]);
+    // Сегодня к 13:00 — самый тяжёлый день (пульс за полдня); плюс ~2–4 с на рукопожатие.
+    expect(seconds).toBeLessThan(12);
   });
 
   it('итог — только при трёх составляющих: у 16.09 есть лишь организм, итога нет', async () => {

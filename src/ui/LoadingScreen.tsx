@@ -12,14 +12,15 @@ import {
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  STAGE_COUNT,
   STAGE_FADE_MS,
-  canLeave,
+  currentSlide,
+  leaveAt,
   loadProgress,
-  nextShownStage,
-  shownPercent,
+  realPercent,
+  slideCaption,
+  statusText,
   useVuelo,
-  type ShownStage,
+  type LoadProgress,
 } from '../state';
 import { StageArt } from './LoadingArt';
 import { ProgressArc } from './ProgressArc';
@@ -106,22 +107,31 @@ function useReduceMotion() {
   return reduce;
 }
 
-/** Карточка с подсказками: смена — затуханием, без свайпа. */
-function TipsCard({ stage, percent, pulse, reduceMotion }: { stage: number; percent: number; pulse: number; reduceMotion: boolean }) {
-  const [content, setContent] = useState(stage);
+interface CardProps {
+  slide: number;
+  percent: number;
+  pulse: number;
+  status: string;
+  caption: string;
+  reduceMotion: boolean;
+}
+
+/** Карточка с подсказками: листается по таймеру, смена — затуханием, без свайпа. */
+function TipsCard({ slide, percent, pulse, status, caption, reduceMotion }: CardProps) {
+  const [content, setContent] = useState(slide);
   const opacity = useSharedValue(1);
   useEffect(() => {
-    if (stage === content || reduceMotion) return;
+    if (slide === content || reduceMotion) return;
     opacity.value = withTiming(0, { duration: STAGE_FADE_MS });
     const timer = setTimeout(() => {
-      setContent(stage);
+      setContent(slide);
       opacity.value = withTiming(1, { duration: STAGE_FADE_MS });
     }, STAGE_FADE_MS);
     return () => clearTimeout(timer);
-  }, [content, opacity, reduceMotion, stage]);
+  }, [content, opacity, reduceMotion, slide]);
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   // При «Уменьшении движения» карточка меняется сразу, без затухания.
-  const tip = LOADING_TIPS[(reduceMotion ? stage : content) - 1];
+  const tip = LOADING_TIPS[(reduceMotion ? slide : content) - 1];
 
   return (
     <View style={styles.card}>
@@ -136,41 +146,40 @@ function TipsCard({ stage, percent, pulse, reduceMotion }: { stage: number; perc
       </Animated.View>
       <View style={styles.progress}>
         <ProgressArc size={72} progress={percent} pulse={pulse} breathing reduceMotion={reduceMotion} showLogo />
-        <Text style={styles.progressText} numberOfLines={1}>
-          Синхронизация…
+        <Text style={styles.progressText} numberOfLines={2}>
+          {status}
         </Text>
-        <Text style={styles.progressStep}>
-          Шаг {stage} из {STAGE_COUNT}
-        </Text>
+        <Text style={styles.progressStep}>{caption}</Text>
       </View>
     </View>
   );
 }
 
-/** Ход загрузки: этапы идут за реальными событиями, но каждый висит не меньше положенного. */
-function SyncStages({ onFinish }: { onFinish: () => void }) {
+/**
+ * Ход загрузки. Кольцо и статус — настоящие; карточки с рисунками листаются равными
+ * интервалами и есть только у длинной загрузки. Быстрая — логотип с дугой и статус.
+ */
+function SyncView({ onFinish }: { onFinish: () => void }) {
   const { phase } = useVuelo();
   const reduceMotion = useReduceMotion();
-  const [shown, setShown] = useState<ShownStage>(() => ({ stage: 1, since: Date.now() }));
+  const [tick, setTick] = useState<{ p: LoadProgress; now: number }>(() => ({ p: loadProgress.get(), now: Date.now() }));
   const [percent, setPercent] = useState(0);
   const [pulse, setPulse] = useState(0);
-  const shownRef = useRef(shown);
-  const percentRef = useRef(0);
   const flash = useRef({ packets: 0, at: 0 });
 
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
-      const real = loadProgress.get();
-      const next = nextShownStage(shownRef.current, real, now);
-      if (next !== shownRef.current) setShown((shownRef.current = next));
-      const p = shownPercent(percentRef.current, next, real);
-      if (p !== percentRef.current) setPercent((percentRef.current = p));
-      if (real.packets !== flash.current.packets && now - flash.current.at >= FLASH_MS) {
-        flash.current = { packets: real.packets, at: now };
-        setPulse(real.packets);
+      const p = loadProgress.get();
+      setTick({ p, now });
+      // Процент только растёт: откат назад выглядел бы как сбой.
+      setPercent((prev) => Math.max(prev, realPercent(p)));
+      if (p.packets !== flash.current.packets && now - flash.current.at >= FLASH_MS) {
+        flash.current = { packets: p.packets, at: now };
+        setPulse(p.packets);
       }
-      if (phase === 'done' && canLeave(next, real, now)) {
+      const leave = leaveAt(p);
+      if (phase === 'done' && leave !== null && now >= leave) {
         clearInterval(timer);
         onFinish();
       }
@@ -178,13 +187,32 @@ function SyncStages({ onFinish }: { onFinish: () => void }) {
     return () => clearInterval(timer);
   }, [onFinish, phase]);
 
-  const fade = reduceMotion ? 0 : STAGE_FADE_MS;
+  const { p, now } = tick;
+  const status = statusText(p, percent);
+
+  if (!p.slides) {
+    return (
+      <View style={styles.quick}>
+        <ProgressArc size={168} progress={percent} pulse={pulse} breathing reduceMotion={reduceMotion} showLogo />
+        <Text style={styles.quickStatus}>{status}</Text>
+      </View>
+    );
+  }
+
+  const slide = currentSlide(p, now);
   return (
     <>
       <View style={styles.art}>
-        <StageArt stage={shown.stage} fadeMs={fade} />
+        <StageArt stage={slide} fadeMs={reduceMotion ? 0 : STAGE_FADE_MS} />
       </View>
-      <TipsCard stage={shown.stage} percent={percent} pulse={pulse} reduceMotion={reduceMotion} />
+      <TipsCard
+        slide={slide}
+        percent={percent}
+        pulse={pulse}
+        status={status}
+        caption={slideCaption(p, now)}
+        reduceMotion={reduceMotion}
+      />
     </>
   );
 }
@@ -262,7 +290,7 @@ export function LoadingScreen() {
       <Text style={styles.greeting} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
         {loadingMode === 'refresh' ? 'Обновляем данные' : greeting(new Date(), state.profile.name)}
       </Text>
-      <SyncStages onFinish={finishLoading} />
+      <SyncView onFinish={finishLoading} />
       <View style={styles.footer}>
         <Text style={styles.note} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
           Данные хранятся только на телефоне
@@ -292,8 +320,10 @@ const styles = StyleSheet.create({
   tipTitle: { color: colors.accent, fontSize: 15, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase' },
   tipRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   tipText: { color: colors.text, fontSize: 15, lineHeight: 20, flex: 1 },
-  progress: { alignItems: 'center', width: 104, gap: 4 },
-  progressText: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
+  progress: { alignItems: 'center', width: 112, gap: 4 },
+  progressText: { color: colors.textMuted, fontSize: 12, marginTop: 4, textAlign: 'center', fontVariant: ['tabular-nums'] },
+  quick: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.lg },
+  quickStatus: { color: colors.textMuted, fontSize: 16, fontVariant: ['tabular-nums'] },
   progressStep: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   footer: { gap: 2, paddingTop: spacing.md, alignItems: 'center' },
   note: { color: colors.textFaint, fontSize: 11, textAlign: 'center' },

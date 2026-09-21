@@ -3,44 +3,55 @@ import { hexToBytes } from '../codec';
 import { emptySyncResult, resetLightThrottle, runSync } from '../ble/sync';
 import type { Transport } from '../ble/transport';
 import { EMPTY_STATE } from '../storage';
-import { applySyncResult, markComplete, planDays } from './sync-plan';
+import { FINAL_AFTER_HOURS, applySyncResult, finalFrom, isFinalDay, markSynced, planDays } from './sync-plan';
 
 /** 21.09.2026 13:18 по местному времени — дневная сессия. */
 const DAY = new Date(2026, 8, 21, 13, 18);
-const ALL_PAST = ['2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19'];
+const at = (d: number, h: number, m = 0) => new Date(2026, 8, d, h, m);
+const WEEK = [0, 1, 2, 3, 4, 5, 6];
 
 describe('СИНТЕТИЧЕСКИЕ: какие дни запросить', () => {
   it('пустой кэш — вся неделя, с причиной для лога', () => {
-    const plan = planDays([], DAY);
-    expect(plan.days).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    const plan = planDays({}, DAY);
+    expect(plan.days).toEqual(WEEK);
     expect(plan.note).toContain('0 сегодня');
-    expect(plan.note).toContain('1 вчера');
     expect(plan.note).toContain('6 15.09 нет в кэше');
   });
 
-  it('дни 2–6 завершены — только сегодня и вчера', () => {
-    const plan = planDays(ALL_PAST, DAY);
-    expect(plan.days).toEqual([0, 1]);
-    expect(plan.note).toContain('из кэша: 2, 3, 4, 5, 6');
+  it('в 13:00 после удачной синхронизации в 12:30 запрашивается только сегодня', () => {
+    const synced = markSynced({}, WEEK, at(21, 12, 30));
+    const plan = planDays(synced, at(21, 13));
+    expect(plan.days).toEqual([0]);
+    expect(plan.note).toContain('из кэша: 1, 2, 3, 4, 5, 6');
   });
 
-  it('сегодня и вчера запрашиваем всегда, даже если отмечены', () => {
-    expect(planDays([...ALL_PAST, '2026-09-20', '2026-09-21'], DAY).days).toEqual([0, 1]);
+  it('в 09:00 вчера запрашивается заново: до полудня он ещё не финальный', () => {
+    const synced = markSynced({}, WEEK, at(21, 8, 30));
+    const plan = planDays(synced, at(21, 9));
+    expect(plan.days).toEqual([0, 1]);
+    expect(plan.note).toContain('1 20.09 не финальный');
+  });
+
+  it('на следующее утро вчерашний день снова не финальный, а позавчерашний уже да', () => {
+    const synced = markSynced({}, WEEK, at(21, 12, 30));
+    expect(planDays(synced, at(22, 9)).days).toEqual([0, 1]);
+    expect(isFinalDay('2026-09-20', synced)).toBe(true);
+    expect(isFinalDay('2026-09-21', synced)).toBe(false);
   });
 
   it('дыра в середине не тянет за собой всю неделю', () => {
-    const withoutDay4 = ALL_PAST.filter((d) => d !== '2026-09-17');
-    expect(planDays(withoutDay4, DAY).days).toEqual([0, 1, 4]);
+    const synced = markSynced({}, [0, 1, 2, 4, 5, 6], at(21, 12, 30));
+    expect(planDays(synced, at(21, 13)).days).toEqual([0, 3]);
   });
 });
 
-describe('СИНТЕТИЧЕСКИЕ: отметка завершённых дней', () => {
-  it('сегодняшний день не отмечаем: он ещё идёт', () => {
-    expect(markComplete([], [0, 1, 2], DAY)).toEqual(['2026-09-19', '2026-09-20']);
+describe('СИНТЕТИЧЕСКИЕ: время выгрузки дней', () => {
+  it('финальный — не раньше полудня следующего дня по местному времени', () => {
+    expect(finalFrom('2026-09-20')).toBe(at(21, FINAL_AFTER_HOURS).getTime());
   });
 
-  it('ночная сессия ничего не отмечает: ночью кольцо не отдаёт сон', () => {
-    expect(markComplete(['2026-09-10'], [1, 2, 3], new Date(2026, 8, 21, 1, 37))).toEqual(['2026-09-10']);
+  it('ночная сессия ничего не записывает: ночью кольцо не отдаёт сон', () => {
+    expect(markSynced({ '2026-09-10': 1 }, [1, 2, 3], at(21, 1, 37))).toEqual({ '2026-09-10': 1 });
   });
 });
 

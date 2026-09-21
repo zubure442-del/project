@@ -29,7 +29,7 @@ import {
   type VueloState,
 } from '../storage';
 import { CACHE_FRESH_MS, findDay, isFresh, syncStatusText, todayKey, weekDays } from './day';
-import { loadProgress } from './loading';
+import { SLIDES_MIN_DAYS, loadProgress, recordDuration, slideInterval } from './loading';
 import { applySyncResult, planDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -158,7 +158,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       stopLive.current = true;
       setError(null);
       setLoadingMode(mode);
-      loadProgress.reset();
+      // План дней известен сразу: от него зависит, показывать ли карточки с рисунками.
+      const plan = planDays(latest.current.syncedAt);
+      const slides = plan.days.length >= SLIDES_MIN_DAYS;
+      const startedAt = Date.now();
+      loadProgress.reset({ startedAt, slides, intervalMs: slideInterval(latest.current.syncDurations.long) });
       setPhase('loading');
 
       void (async () => {
@@ -190,7 +194,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
             const next = { ...latest.current, syncFailed: true };
             commit(next);
             setError(kind);
-            loadProgress.set({ finished: true });
+            loadProgress.set({ finished: true, finishedAt: Date.now() });
             // Экран ошибки — только если связи не было вовсе или показывать нечего.
             setPhase(connected && next.days.length ? 'done' : 'failed');
             return;
@@ -198,7 +202,6 @@ export function VueloProvider({ children }: { children: ReactNode }) {
 
           // Этап 2: запросы по дням.
           loadProgress.set({ stage: 2 });
-          const plan = planDays(base.completeDays);
           logNote(plan.note);
           let packets = 0;
           const result = await runSync(device, {
@@ -213,14 +216,27 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           // Этап 3: разбор и расчёты.
           loadProgress.set({ stage: 3 });
           await yieldFrame();
-          const next = applySyncResult(latest.current, result, known);
+          const applied = applySyncResult(latest.current, result, known);
+          // Длительность удачной загрузки — для интервала карточек в следующий раз.
+          const next = result.error
+            ? applied
+            : {
+                ...applied,
+                syncDurations: {
+                  ...applied.syncDurations,
+                  [slides ? 'long' : 'short']: recordDuration(
+                    applied.syncDurations[slides ? 'long' : 'short'],
+                    Date.now() - startedAt,
+                  ),
+                },
+              };
 
           // Этап 4: запись кэша, потом одно применение состояния.
           loadProgress.set({ stage: 4 });
           await saveState(next);
           latest.current = next;
           setState(next);
-          loadProgress.set({ finished: true });
+          loadProgress.set({ finished: true, finishedAt: Date.now() });
           if (result.error) {
             setError('lost');
             setPhase(next.days.length ? 'done' : 'failed');

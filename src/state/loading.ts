@@ -1,15 +1,26 @@
 /**
- * Этапы экрана загрузки. Каждый привязан к реальному событию:
- * 1 — поиск, соединение, рукопожатие; 2 — запросы по дням;
- * 3 — разбор и расчёты; 4 — запись кэша и переход.
+ * Реальные этапы загрузки: 1 — поиск, соединение, рукопожатие; 2 — запросы по дням;
+ * 3 — разбор и расчёты; 4 — запись кэша. От них зависят кольцо-прогресс и строка статуса.
+ * Карточки с рисунками от этапов НЕ зависят: они листаются равными интервалами.
  */
 export type LoadStage = 1 | 2 | 3 | 4;
-export const STAGE_COUNT = 4;
 
-/** Каждый этап на экране висит хотя бы столько, пока загрузка идёт. */
-export const STAGE_MIN_MS = 2500;
-/** Когда загрузка уже кончилась, оставшиеся этапы пролетают с этой паузой: экран не держим дольше нужного. */
-export const STAGE_TAIL_MS = 700;
+/** Сколько карточек с рисунками. */
+export const SLIDE_COUNT = 4;
+/** Карточки показываем, только если предстоит загрузить столько дней или больше (первый запуск, после очистки). */
+export const SLIDES_MIN_DAYS = 3;
+/** Ожидаемая длительность загрузки, пока своей истории нет. */
+export const DEFAULT_EXPECTED_MS = 40000;
+/** Интервал карточки — четверть ожидаемой длительности, но в этих пределах. */
+export const SLIDE_MIN_MS = 4000;
+export const SLIDE_MAX_MS = 12000;
+/** По скольким последним удачным загрузкам берём медиану. */
+export const DURATION_HISTORY = 3;
+/** Загрузка кончилась раньше карточек: текущая держится ещё не дольше этого и идёт переход. */
+export const FINISH_HOLD_MS = 2500;
+/** Быстрый экран без карточек: после конца загрузки ещё столько, и всего не меньше QUICK_MIN_MS. */
+export const QUICK_HOLD_MS = 400;
+export const QUICK_MIN_MS = 1200;
 /** Смена карточки и рисунка — затухание. */
 export const STAGE_FADE_MS = 200;
 
@@ -21,7 +32,7 @@ export const STAGE_BANDS: Record<LoadStage, [number, number]> = {
   4: [0.95, 1],
 };
 
-/** Реальный ход загрузки. Живёт вне React-состояния, чтобы вкладки не перерисовывались по пакетам. */
+/** Ход загрузки. Живёт вне React-состояния, чтобы вкладки не перерисовывались по пакетам. */
 export interface LoadProgress {
   stage: LoadStage;
   /** Доля выполненных запросов внутри этапа 2, 0..1. */
@@ -29,9 +40,68 @@ export interface LoadProgress {
   packets: number;
   /** Загрузка закончилась (успешно или нет). */
   finished: boolean;
+  startedAt: number;
+  finishedAt: number | null;
+  /** Длинная загрузка: показываем карточки с рисунками. Иначе — быстрый экран. */
+  slides: boolean;
+  /** Интервал листания карточек. */
+  intervalMs: number;
 }
 
-export const INITIAL_PROGRESS: LoadProgress = { stage: 1, fraction: 0, packets: 0, finished: false };
+export const INITIAL_PROGRESS: LoadProgress = {
+  stage: 1,
+  fraction: 0,
+  packets: 0,
+  finished: false,
+  startedAt: 0,
+  finishedAt: null,
+  slides: false,
+  intervalMs: DEFAULT_EXPECTED_MS / SLIDE_COUNT,
+};
+
+const median = (values: number[]) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+/** Ожидаемая длительность: медиана последних удачных загрузок того же типа. */
+export function expectedDuration(history: readonly number[]): number {
+  const recent = history.slice(-DURATION_HISTORY);
+  return recent.length ? median(recent) : DEFAULT_EXPECTED_MS;
+}
+
+/** Интервал карточки: I = clamp(T / 4, 4 с, 12 с). */
+export const slideInterval = (history: readonly number[]) =>
+  Math.min(SLIDE_MAX_MS, Math.max(SLIDE_MIN_MS, expectedDuration(history) / SLIDE_COUNT));
+
+/** Новая длительность в историю: храним только последние DURATION_HISTORY. */
+export const recordDuration = (history: readonly number[], ms: number) => [...history, ms].slice(-DURATION_HISTORY);
+
+/** Какая карточка сейчас (1..4). После четвёртой остаётся она. */
+export const slideAt = (elapsed: number, interval: number) =>
+  Math.min(SLIDE_COUNT, Math.floor(Math.max(0, elapsed) / interval) + 1);
+
+/** Номер карточки на экране: после конца загрузки листание останавливается. */
+export function currentSlide(p: LoadProgress, now: number): number {
+  const at = p.finished && p.finishedAt !== null ? Math.min(now, p.finishedAt) : now;
+  return slideAt(at - p.startedAt, p.intervalMs);
+}
+
+/** Подпись под кольцом: «Шаг N из 4» или «Почти готово», если загрузка дольше всех карточек. */
+export function slideCaption(p: LoadProgress, now: number): string {
+  const late = !p.finished && now - p.startedAt >= SLIDE_COUNT * p.intervalMs;
+  return late ? 'Почти готово' : `Шаг ${currentSlide(p, now)} из ${SLIDE_COUNT}`;
+}
+
+/** Когда уходить на главный экран; null — загрузка ещё идёт. */
+export function leaveAt(p: LoadProgress): number | null {
+  if (!p.finished || p.finishedAt === null) return null;
+  if (!p.slides) return Math.max(p.finishedAt + QUICK_HOLD_MS, p.startedAt + QUICK_MIN_MS);
+  const slide = slideAt(p.finishedAt - p.startedAt, p.intervalMs);
+  const cardEnd = slide < SLIDE_COUNT ? p.startedAt + slide * p.intervalMs : Infinity;
+  return p.finishedAt + Math.min(FINISH_HOLD_MS, Math.max(0, cardEnd - p.finishedAt));
+}
 
 /** Общий процент по реальному ходу загрузки. */
 export function realPercent(p: LoadProgress): number {
@@ -41,45 +111,27 @@ export function realPercent(p: LoadProgress): number {
   return from + (to - from) * inside;
 }
 
-export interface ShownStage {
-  stage: LoadStage;
-  /** Когда этап появился на экране. */
-  since: number;
+/** Настоящий статус: что сейчас делаем и сколько процентов. */
+export function statusText(p: LoadProgress, percent: number): string {
+  if (p.stage === 1 && !p.finished) return 'Подключаемся…';
+  return `Загружаем данные · ${Math.round(percent * 100)} %`;
 }
-
-/**
- * Какой этап показать сейчас. Показанный этап не обгоняет реальный и держится
- * не меньше STAGE_MIN_MS; после конца загрузки — не меньше STAGE_TAIL_MS.
- */
-export function nextShownStage(shown: ShownStage, real: LoadProgress, now: number): ShownStage {
-  const target = real.finished ? STAGE_COUNT : real.stage;
-  if (shown.stage >= target) return shown;
-  const hold = real.finished ? STAGE_TAIL_MS : STAGE_MIN_MS;
-  if (now - shown.since < hold) return shown;
-  return { stage: (shown.stage + 1) as LoadStage, since: now };
-}
-
-/** Экран можно закрывать: загрузка кончилась и последний этап показан положенное время. */
-export const canLeave = (shown: ShownStage, real: LoadProgress, now: number) =>
-  real.finished && shown.stage === STAGE_COUNT && now - shown.since >= STAGE_TAIL_MS;
-
-/** Процент на кольце: не больше верхней границы показанного этапа и только растёт. */
-export const shownPercent = (previous: number, shown: ShownStage, real: LoadProgress) =>
-  Math.max(previous, Math.min(realPercent(real), STAGE_BANDS[shown.stage][1]));
 
 /** Простой наблюдаемый контейнер: экран загрузки подписывается, остальные экраны — нет. */
 export function createProgressStore() {
   let value = INITIAL_PROGRESS;
   const listeners = new Set<() => void>();
+  const emit = () => listeners.forEach((l) => l());
   return {
     get: () => value,
     set(patch: Partial<LoadProgress>) {
       value = { ...value, ...patch };
-      listeners.forEach((l) => l());
+      emit();
     },
-    reset() {
-      value = INITIAL_PROGRESS;
-      listeners.forEach((l) => l());
+    /** Начало новой загрузки: время старта, вид экрана и интервал карточек. */
+    reset(start: Partial<LoadProgress> = {}) {
+      value = { ...INITIAL_PROGRESS, ...start };
+      emit();
     },
     subscribe(listener: () => void) {
       listeners.add(listener);

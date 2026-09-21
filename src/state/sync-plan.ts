@@ -15,13 +15,17 @@ import {
 } from '../storage';
 import { DAY_START_HOUR, adviceMode, dayView, findDay, scoreOf, todayKey } from './day';
 
-/** Сегодня и вчера запрашиваем всегда: ночь через полночь кольцо отдаёт двумя днями, а сон приходит днём. */
-export const ALWAYS_DAYS = 2;
 /** Глубина выгрузки: кольцо хранит неделю. */
 export const TOTAL_DAYS = 7;
 /**
+ * День D финальный, если его последняя удачная выгрузка была не раньше полудня следующего дня:
+ * startOfDay(D+1) + FINAL_AFTER_HOURS. К этому времени ночь кончилась и кольцо отдало весь сон.
+ * Финальные дни больше не запрашиваем; сегодня — всегда.
+ */
+export const FINAL_AFTER_HOURS = 12;
+/**
  * До этого часа сессия «ночная»: в логах 00:49 и 01:37 кольцо не отдало сон ни за один день.
- * Дни, выгруженные ночью, завершёнными не отмечаем — иначе их сон потом не забрать.
+ * Время выгрузки ночью не записываем — иначе старые дни стали бы финальными без сна.
  */
 export const NIGHT_SESSION_UNTIL_HOUR = DAY_START_HOUR;
 
@@ -31,28 +35,32 @@ export const dateForOffset = (offset: number, today: string): string =>
 
 const short = (date: string) => `${date.slice(8, 10)}.${date.slice(5, 7)}`;
 
+/** Момент, начиная с которого выгрузка дня делает его финальным: полдень следующего дня по местному времени. */
+export function finalFrom(date: string): number {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(y, m - 1, d + 1, FINAL_AFTER_HOURS).getTime();
+}
+
+export const isFinalDay = (date: string, syncedAt: Readonly<Record<string, number>>) =>
+  syncedAt[date] !== undefined && syncedAt[date] >= finalFrom(date);
+
 /**
- * Какие дни запросить у кольца. Сегодня и вчера — всегда; дни 2–6 — только если они
- * ещё не выгружены целиком (все потоки закрыты маркером). Пустой, но закрытый маркером
- * день — завершённый: кольцо подтвердило, что данных нет.
+ * Какие дни запросить у кольца. Сегодня — всегда; остальные — если их нет в кэше
+ * или они ещё не финальные (например, вчера до полудня: сон мог прийти не весь).
  * `note` — строка для отладочного лога: что запросили и почему.
  */
-export function planDays(completeDates: readonly string[], now = new Date()): { days: number[]; note: string } {
+export function planDays(syncedAt: Readonly<Record<string, number>>, now = new Date()): { days: number[]; note: string } {
   const today = todayKey(now);
-  const done = new Set(completeDates);
-  const days: number[] = [];
-  const asked: string[] = [];
+  const days: number[] = [0];
+  const asked: string[] = ['0 сегодня'];
   const cached: string[] = [];
-  for (let day = 0; day < TOTAL_DAYS; day++) {
+  for (let day = 1; day < TOTAL_DAYS; day++) {
     const date = dateForOffset(day, today);
-    if (day < ALWAYS_DAYS) {
-      days.push(day);
-      asked.push(`${day} ${day === 0 ? 'сегодня' : 'вчера'}`);
-    } else if (!done.has(date)) {
-      days.push(day);
-      asked.push(`${day} ${short(date)} нет в кэше`);
-    } else {
+    if (isFinalDay(date, syncedAt)) {
       cached.push(`${day}`);
+    } else {
+      days.push(day);
+      asked.push(`${day} ${short(date)} ${syncedAt[date] === undefined ? 'нет в кэше' : 'не финальный'}`);
     }
   }
   const note = `запрос дней: ${asked.join(', ')}${cached.length ? `; из кэша: ${cached.join(', ')}` : ''}`;
@@ -60,14 +68,20 @@ export function planDays(completeDates: readonly string[], now = new Date()): { 
 }
 
 /**
- * Отмечает завершённые дни. Сегодняшний не отмечаем никогда — он ещё идёт;
- * в ночной сессии не отмечаем ничего — кольцо тогда не отдаёт сон.
+ * Записывает время выгрузки дней, пришедших целиком. В ночной сессии не пишем ничего:
+ * кольцо тогда не отдаёт сон. Храним не больше CACHE_DAYS дат.
  */
-export function markComplete(previous: readonly string[], completeDays: readonly number[], now = new Date()): string[] {
-  if (now.getHours() < NIGHT_SESSION_UNTIL_HOUR) return [...previous];
+export function markSynced(
+  previous: Readonly<Record<string, number>>,
+  completeDays: readonly number[],
+  now = new Date(),
+): Record<string, number> {
+  if (now.getHours() < NIGHT_SESSION_UNTIL_HOUR) return { ...previous };
   const today = todayKey(now);
-  const fresh = completeDays.filter((d) => d >= 1).map((d) => dateForOffset(d, today));
-  return [...new Set([...previous, ...fresh])].sort().slice(-CACHE_DAYS);
+  const next: Record<string, number> = { ...previous };
+  for (const day of completeDays) next[dateForOffset(day, today)] = now.getTime();
+  const kept = Object.keys(next).sort().slice(-CACHE_DAYS);
+  return Object.fromEntries(kept.map((d) => [d, next[d]]));
 }
 
 /**
@@ -89,14 +103,19 @@ export function applySyncResult(
     raw,
     days,
     ring: known ?? state.ring,
-    completeDays: markComplete(state.completeDays, sync.completeDays, now),
     battery: sync.battery ?? state.battery,
     batteryAt: sync.battery !== null ? now.getTime() : state.batteryAt,
     caloriesToday: sync.activity ? sync.activity.calories : state.caloriesToday,
     caloriesDate: sync.activity ? todayKey(now) : state.caloriesDate,
   };
   if (sync.error) return { ...base, syncFailed: true };
-  return { ...base, lastSyncAt: now.getTime(), syncFailed: false, reports: withAdvice(state.reports, days, now) };
+  return {
+    ...base,
+    lastSyncAt: now.getTime(),
+    syncFailed: false,
+    syncedAt: markSynced(state.syncedAt, sync.completeDays, now),
+    reports: withAdvice(state.reports, days, now),
+  };
 }
 
 /**

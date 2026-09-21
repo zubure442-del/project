@@ -14,3 +14,4 @@ export * from './FreshBadge';
 export * from './LoadingArt';
 export * from './LoadingScreen';
 export * from './TipIcons';
+export * from './TabBar';

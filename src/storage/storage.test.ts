@@ -48,22 +48,21 @@ describe('сводки по дням', () => {
     expect(buildSnapshots(empty, 30)).toEqual([]);
   });
 
-  it('оценка организма требует и вариабельность, и пульс во сне', () => {
-    const summary: SummaryRecord[] = [
-      { ts: ring('2026-09-19 03:00:00'), systolic: 118, diastolic: 76, stress: 35, glucose: 5.1, hrv: 65 },
-    ];
-    const heart = heartAt('2026-09-18 23:30:00', [52, 50, 54, 51, 53, 58, 60, 62]);
-
-    const withBoth = buildSnapshots(day({ sleep: night, heart, summary }), 30).find((d) => d.date === '2026-09-19');
-    expect(withBoth?.stateInputs).toMatchObject({ hrv: true, restingHr: true });
-    expect(withBoth?.scores.state).not.toBeNull();
-
-    // та же ночь, но без вариабельности — оценки нет
-    const withoutHrv = buildSnapshots(day({ sleep: night, heart }), 30).find((d) => d.date === '2026-09-19');
-    expect(withoutHrv?.scores.state).toBeNull();
+  it('«Организм» v2: замеры 0x55 покрывают не меньше 4 часов — оценка есть, меньше — нет', () => {
+    // Замеры раз в 30 минут с 08:00; у каждого есть вариабельность и давление — два показателя.
+    const records = (count: number): SummaryRecord[] =>
+      Array.from({ length: count }, (_, i) => ({
+        ts: ring('2026-09-19 08:00:00') + i * 1800, systolic: 118, diastolic: 76, stress: 35, glucose: 5.1, hrv: 50,
+      }));
+    const past = new Date(2026, 8, 25, 12);
+    const enough = buildSnapshots(day({ summary: records(8) }), 30, {}, null, past).find((d) => d.date === '2026-09-19');
+    expect(enough?.stateInputs).toMatchObject({ hrv: true });
+    expect(enough?.scores.state).not.toBeNull();
+    const short = buildSnapshots(day({ summary: records(7) }), 30, {}, null, past).find((d) => d.date === '2026-09-19');
+    expect(short?.scores.state).toBeNull();
   });
 
-  it('давление и глюкоза остаются оценкой и в баллы не идут', () => {
+  it('давление и глюкоза видны как оценка в сводке', () => {
     const summary: SummaryRecord[] = [
       { ts: ring('2026-09-19 12:00:00'), systolic: 120, diastolic: 80, stress: 40, glucose: 5.4, hrv: null },
     ];

@@ -1,8 +1,12 @@
-import { dateKey, wallClock, type Sample, type SummaryRecord } from '../codec';
+import { dateKey, nowRingTs, wallClock, type Sample, type SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
 import {
+  PERSONAL_BASELINE_DAYS,
   STEP_HISTORY_DAYS,
   activeCalories,
+  dayOrganism,
+  organismSamples,
+  personalBaseline,
   type Body,
   buildSleepSessions,
   cleanHeart,
@@ -57,6 +61,8 @@ export function buildSnapshots(
   norms: Readonly<Record<string, StoredNorm>> = {},
   /** Биометрия для калорий; null — калории не считаем. */
   body: Body | null = null,
+  /** Текущий момент: последний замер сегодняшнего дня покрывает время только до него. */
+  now = new Date(),
 ): DaySnapshot[] {
   const sessions = buildSleepSessions(sync.sleep);
   const { clean } = cleanHeart(sync.heart);
@@ -76,6 +82,24 @@ export function buildSnapshots(
     Array.from({ length: STEP_HISTORY_DAYS }, (_, i) => totals.get(shiftDate(date, -(STEP_HISTORY_DAYS - i))))
       .filter((v): v is number => v !== undefined);
 
+  // Личный ориентир «Организма»: по прошлым дням — средняя вариабельность и минимальный пульс за день.
+  const dailyHrv = new Map(
+    [...summaryByDate].map(([date, list]) => {
+      const values = list.map((r) => r.hrv).filter((v): v is number => v !== null);
+      return [date, values.length ? values.reduce((a, b) => a + b, 0) / values.length : null] as const;
+    }),
+  );
+  const dailyPulse = new Map([...heartByDate].map(([date, list]) => [date, Math.min(...list.map((s) => s.value))] as const));
+  const baselineFor = (date: string) =>
+    personalBaseline(
+      Array.from({ length: PERSONAL_BASELINE_DAYS }, (_, i) => shiftDate(date, -(PERSONAL_BASELINE_DAYS - i)))
+        .map((d) => ({ hrv: dailyHrv.get(d) ?? null, pulse: dailyPulse.get(d) ?? null }))
+        .filter((d) => d.hrv !== null || d.pulse !== null),
+    );
+  const nowTs = nowRingTs(now.getTime(), -now.getTimezoneOffset() * 60);
+  const today = dateKey(nowTs);
+  const nowMinute = minuteOfDay(nowTs);
+
   const snapshots: DaySnapshot[] = [];
   for (const date of dates) {
     const heart = heartByDate.get(date) ?? [];
@@ -87,16 +111,14 @@ export function buildSnapshots(
     const pick = (key: keyof SummaryRecord) =>
       average(summary.map((r) => r[key]).filter((v): v is number => v !== null));
 
+    const samples = organismSamples(
+      summary.map((r) => ({ m: minuteOfDay(r.ts), systolic: r.systolic, diastolic: r.diastolic, glucose: r.glucose, hrv: r.hrv })),
+      toPoints(heart),
+      toPoints(spo2),
+    );
+    const organism = dayOrganism(samples, baselineFor(date), date === today ? nowMinute : 1440);
     const stepNorm = resolveStepNorm(norms[date], historyBefore(date), sleepScore(night));
-    const score = computeDayScore({
-      night,
-      steps,
-      heart,
-      age,
-      spo2: spo2.map((s) => s.value),
-      hrv: summary.map((r) => r.hrv).filter((v): v is number => v !== null),
-      stepGoal: stepNorm.value,
-    });
+    const score = computeDayScore({ night, steps, heart, age, organism: organism.score, stepGoal: stepNorm.value });
 
     snapshots.push({
       date,
@@ -106,7 +128,11 @@ export function buildSnapshots(
       sleep: night ? { totalMin: sleepMinutes(night), deepMin: night.deepMin, lightMin: night.lightMin } : null,
       restingHr: score.restingHr?.value ?? null,
       restingHrSource: score.restingHr?.source ?? null,
-      stateInputs: score.stateInputs,
+      stateInputs: {
+        hrv: samples.some((x) => x.hrv !== null),
+        restingHr: samples.some((x) => x.pulse !== null),
+        spo2: samples.some((x) => x.oxygen !== null),
+      },
       heart: toPoints(heart),
       spo2: toPoints(spo2),
       stress: toPoints(

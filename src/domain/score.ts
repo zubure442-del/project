@@ -58,8 +58,8 @@ export interface ScoreInput {
   heart: Sample[];
   /** Возраст для максимального пульса; null — неизвестен (кардио-бонус не начисляется). */
   age: number | null;
-  hrv: number[];
-  spo2: number[];
+  /** «Организм» v2, посчитанный по замерам дня (organism.ts); null — покрытия не хватило. */
+  organism: number | null;
   /** Норма шагов этого дня (см. steps-norm.ts). Нет — 10 000. */
   stepGoal?: number;
 }
@@ -84,7 +84,6 @@ export interface DayScore {
   state: ComponentScore;
   restingHr: RestingHr | null;
   /** Какие входы «организма» удалось посчитать — для объяснения в интерфейсе. */
-  stateInputs: { hrv: boolean; restingHr: boolean; spo2: boolean };
 }
 
 const clamp = (x: number, lo = 0, hi = 100) => Math.min(hi, Math.max(lo, x));
@@ -153,36 +152,16 @@ export function restingHeartRate(heart: Sample[], night: SleepSession | null): R
   return { value: medianOfLowest(smoothHeart(heart).map((s) => s.value), 0.1), source: 'day' };
 }
 
-/** Сколько входов из трёх нужно, чтобы выставить оценку «организма». */
-export const STATE_MIN_INPUTS = 2;
-/** Кислород: 100 при этом значении и выше. */
+/** Кислород: 100 при этом значении и выше (порог из ALGORITHMS.md). */
 export const SPO2_TARGET = 95;
 export const SPO2_PENALTY = 20;
-
-/**
- * «Организм» — среднее доступных оценок: вариабельность, пульс во сне и кислород.
- * Нужны хотя бы два входа: по одному оценка получалась бы на пустом месте.
- */
-export function stateScore(hrv: number[], restingHr: RestingHr | null, spo2: number[] = []): number | null {
-  const parts: number[] = [];
-  if (hrv.length) parts.push(Math.min(100, (avg(hrv) / HRV_TARGET) * 100));
-  // Нет ночи — берём минимум за день: он хуже, но лучше, чем совсем без входа.
-  if (restingHr) {
-    parts.push(clamp(100 - Math.max(0, restingHr.value - RESTING_HR_TARGET) * RESTING_HR_PENALTY));
-  }
-  if (spo2.length) {
-    const a = avg(spo2);
-    parts.push(a >= SPO2_TARGET ? 100 : clamp(100 - (SPO2_TARGET - a) * SPO2_PENALTY));
-  }
-  return parts.length >= STATE_MIN_INPUTS ? avg(parts) : null;
-}
 
 export function computeDayScore(input: ScoreInput): DayScore {
   const restingHr = restingHeartRate(input.heart, input.night);
   const scores: Record<ComponentId, number | null> = {
     sleep: sleepScore(input.night),
     activity: activityScore(input.steps, input.heart, input.age, input.stepGoal),
-    state: stateScore(input.hrv, restingHr, input.spo2),
+    state: input.organism,
   };
   // Итог — только когда посчитаны все три составляющие. По одной или двум он не строится:
   // «70 % активности» без сна и организма выглядел бы как оценка всего дня.
@@ -201,6 +180,5 @@ export function computeDayScore(input: ScoreInput): DayScore {
     activity: comp('activity'),
     state: comp('state'),
     restingHr,
-    stateInputs: { hrv: input.hrv.length > 0, restingHr: restingHr !== null, spo2: input.spo2.length > 0 },
   };
 }

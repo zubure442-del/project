@@ -91,7 +91,7 @@ export function markSynced(
  */
 export function rebuildDays(state: VueloState, now = new Date()): VueloState {
   const days = keepLastDays(
-    buildSnapshots(toSyncResult(state.raw), profileAge(state.profile, now) ?? state.age, state.stepNorms, bodyOf(state.profile, now)),
+    buildSnapshots(toSyncResult(state.raw), profileAge(state.profile, now) ?? state.age, state.stepNorms, bodyOf(state.profile, now), now),
   );
   return { ...state, days, stepNorms: collectStepNorms(state.stepNorms, days) };
 }

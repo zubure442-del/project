@@ -94,7 +94,7 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
   const night = (light: number, deep: number) => ({
     start: T0 - 8 * 3600, end: T0 - 3600, deepMin: deep, lightMin: light, awakeMin: 0, date: '2026-09-18',
   });
-  const base: ScoreInput = { night: null, steps: null, heart: [], age: 30, hrv: [], spo2: [] };
+  const base: ScoreInput = { night: null, steps: null, heart: [], age: 30, organism: null };
 
   it('нет никаких данных — итог null, а не 0', () => {
     const r = computeDayScore(base);
@@ -113,7 +113,7 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
     expect(two.total).toBeNull();
   });
   it('веса 15/70/15 при полных данных', () => {
-    const r = computeDayScore({ ...base, night: night(336, 84), steps: 10000, hrv: [65], heart: nightHeart(night(336, 84)) });
+    const r = computeDayScore({ ...base, night: night(336, 84), steps: 10000, organism: 100, heart: nightHeart(night(336, 84)) });
     expect(r.sleep.weight).toBeCloseTo(0.15);
     expect(r.activity.weight).toBeCloseTo(0.7);
     expect(r.state.weight).toBeCloseTo(0.15);
@@ -122,7 +122,7 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
     expect(r.total).toBe(79);
   });
   it('итог растёт по мере шагов в течение дня', () => {
-    const full = { ...base, night: night(336, 84), hrv: [65], heart: nightHeart(night(336, 84)) };
+    const full = { ...base, night: night(336, 84), organism: 100, heart: nightHeart(night(336, 84)) };
     const at = (steps: number) => computeDayScore({ ...full, steps }).total as number;
     expect(at(0)).toBeLessThan(at(3000));
     expect(at(3000)).toBeLessThan(at(9000));
@@ -140,15 +140,10 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
   it('без возраста бонус не начисляется, но и ничего не ломается', () => {
     expect(computeDayScore({ ...base, steps: 5000, age: null, heart: series([160, 160]) }).activity.score).toBe(35);
   });
-  it('организм: среднее вариабельности и пульса во сне', () => {
+  it('организм приходит готовым из замеров дня (organism.ts); нет оценки — нет итога', () => {
     const n = night(336, 84);
-    // нужны оба входа: только вариабельность или только пульс не считаются
-    expect(computeDayScore({ ...base, hrv: [65] }).state.score).toBeNull();
-    expect(computeDayScore({ ...base, night: n, heart: nightHeart(n) }).state.score).toBeNull();
-    // вариабельность 65 -> 100, пульс во сне 50 -> 100
-    expect(computeDayScore({ ...base, night: n, heart: nightHeart(n), hrv: [65] }).state.score).toBe(100);
-    // вариабельность 32.5 -> 50, пульс тот же 100 -> среднее 75
-    expect(computeDayScore({ ...base, night: n, heart: nightHeart(n), hrv: [32.5] }).state.score).toBe(75);
+    expect(computeDayScore({ ...base, night: n, steps: 10000, organism: 72.4 }).state.score).toBe(72);
+    expect(computeDayScore({ ...base, night: n, steps: 10000, organism: null }).total).toBeNull();
   });
   it('пульс покоя берётся из окна сна', () => {
     const n = night(336, 84);
@@ -160,8 +155,7 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
 describe('шаблонный отчёт', () => {
   const sc = (sleep: number | null, activity: number | null, state: number | null) => {
     const c = (v: number | null) => ({ score: v, weight: v === null ? 0 : 1 });
-    return { total: 50, sleep: c(sleep), activity: c(activity), state: c(state), restingHr: null,
-      stateInputs: { spo2: false, hrv: false, restingHr: false } };
+    return { total: 50, sleep: c(sleep), activity: c(activity), state: c(state), restingHr: null };
   };
   it('фраз хватает на все три времени суток и без повторов', () => {
     const n = Object.keys(allTemplates()).length;

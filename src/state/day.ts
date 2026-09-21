@@ -194,7 +194,6 @@ export const EMPTY_SCORE = {
   activity: c(null),
   state: c(null),
   restingHr: null,
-  stateInputs: { hrv: false, restingHr: false, spo2: false },
 };
 
 export const scoreOf = (day: DaySnapshot) => ({
@@ -203,7 +202,6 @@ export const scoreOf = (day: DaySnapshot) => ({
   activity: c(day.scores.activity),
   state: c(day.scores.state),
   restingHr: day.restingHr === null ? null : { value: day.restingHr, source: day.restingHrSource ?? ('day' as const) },
-  stateInputs: day.stateInputs,
 });
 
 /** Режим совета для дня: сегодня — по времени суток, прошедший день — «как прошёл день». */

@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { bannerKind, dayPhrase, dayView, type BannerKind, type DayView } from './day';
+import { bannerKind, dayPhrase, type BannerKind, type DayView } from './day';
 import { profileAlerts } from './profile';
 import { useVuelo } from './provider';
 
@@ -15,28 +14,26 @@ export interface TabDay {
 }
 
 /**
- * Выбранный день вкладки. По умолчанию — последний полный день; пока сегодня неполный,
- * выбрать его нельзя. Выбор сбрасывается после каждой синхронизации: как только сегодня
- * станет полным, при следующем открытии экран сам переключится на него.
+ * Выбранный день — общий для всех вкладок, выбирается в календаре в шапке.
+ * По умолчанию — последний полный день; пока сегодня неполный, выбрать его нельзя.
+ * Выбор сбрасывается после каждой синхронизации: полный сегодня откроется сам.
  */
 export function useTabDay(): TabDay {
-  const { state, syncFailed } = useVuelo();
+  const { state, syncFailed, dayView: view, selectedDate: date, selectDay } = useVuelo();
   // Плашка биометрии/цели — из той же проверки, что точка на «Профиле» и красные рамки.
   const alerts = profileAlerts(state.profile);
-  const view = dayView(state.days);
-  const resetKey = state.lastSyncAt ?? 0;
-  const [picked, setPicked] = useState<{ date: string; key: number } | null>(null);
-  const valid = picked !== null && picked.key === resetKey && !(view.todayLocked && picked.date === view.today);
-  const date = valid ? picked.date : view.defaultDate;
   return {
     date,
-    select: (next) => setPicked({ date: next, key: resetKey }),
+    select: selectDay,
     view,
     banner: bannerKind({
       syncFailed,
       profileReady: alerts.banner !== 'biometry',
       goalReady: !alerts.missing.has('goal'),
-      todayLocked: view.todayLocked, shownDate: date, today: view.today }),
+      todayLocked: view.todayLocked,
+      shownDate: date,
+      today: view.today,
+    }),
     shownPhrase: dayPhrase(date, view),
   };
 }

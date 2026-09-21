@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptySyncResult } from '../ble/sync';
 import { visibleDays } from '../domain/week';
 import { EMPTY_STATE, type DaySnapshot, type VueloState } from '../storage';
-import { adviceFor, adviceLabel, bannerKind, dayPhrase, dayView } from './day';
+import { adviceFor, adviceLabel, bannerKind, dayPhrase, dayView, selectedDay, shortDate, todayTabLabel } from './day';
 import { applySyncResult } from './sync-plan';
 
 const NOON = new Date(2026, 8, 21, 13, 0);
@@ -107,5 +107,26 @@ describe('СИНТЕТИЧЕСКИЕ: совет только для полно�
       reports: [{ date: YESTERDAY, mode: 'evening' as const, templateId: 'x', text: 'Сохранённый текст' }],
     };
     expect(adviceFor(s, YESTERDAY, NOON)?.text).toBe('Сохранённый текст');
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: календарь — один выбранный день на все вкладки', () => {
+  const view = dayView([day(YESTERDAY, true), day(TODAY, false)], NOON);
+  const week = ['2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', YESTERDAY, TODAY];
+
+  it('без выбора — последний полный день', () => {
+    expect(selectedDay(null, view, week, 1)).toBe(YESTERDAY);
+  });
+  it('выбранный в календаре день действует до следующей синхронизации', () => {
+    expect(selectedDay({ date: '2026-09-18', key: 1 }, view, week, 1)).toBe('2026-09-18');
+    expect(selectedDay({ date: '2026-09-18', key: 1 }, view, week, 2)).toBe(YESTERDAY);
+  });
+  it('неполный сегодня выбрать нельзя', () => {
+    expect(selectedDay({ date: TODAY, key: 1 }, view, week, 1)).toBe(YESTERDAY);
+  });
+  it('подпись центральной вкладки: «Сегодня» или дата', () => {
+    expect(shortDate('2026-09-21')).toBe('21 сен');
+    expect(todayTabLabel(TODAY, TODAY)).toBe('Сегодня');
+    expect(todayTabLabel(YESTERDAY, TODAY)).toBe('20 сен');
   });
 });

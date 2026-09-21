@@ -30,7 +30,7 @@ import {
   type Profile,
   type VueloState,
 } from '../storage';
-import { CACHE_FRESH_MS, findDay, isFresh, syncStatusText, todayKey, weekDays } from './day';
+import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
 import { SLIDES_MIN_DAYS, loadProgress, recordDuration, slideInterval } from './loading';
 import { isGoalSet, mergeProfile, withStartName } from './profile';
 import { applySyncResult, planDays } from './sync-plan';
@@ -60,6 +60,11 @@ interface Vuelo {
   state: VueloState;
   ready: boolean;
   week: { date: string; day: VueloState['days'][number] | null }[];
+  /** Какой день сегодня, заблокирован ли он, последний полный день. */
+  dayView: DayView;
+  /** Выбранный в календаре день — один на все вкладки. */
+  selectedDate: string;
+  selectDay: (date: string) => void;
   phase: Phase;
   /** Откуда запущена загрузка: от этого заголовок («Обновляем данные» на pull-to-refresh) и появление. */
   loadingMode: SyncMode;
@@ -108,6 +113,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [loadingMode, setLoadingMode] = useState<SyncMode>('launch');
   const [error, setError] = useState<SyncError | null>(null);
+  /** Выбор в календаре. Сбрасывается после каждой синхронизации (ключ — время синхронизации). */
+  const [picked, setPicked] = useState<{ date: string; key: number } | null>(null);
   const lastLiveAt = useRef(0);
   const ring = useRef<RingBle | null>(null);
   const running = useRef(false);
@@ -339,6 +346,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const dismissFresh = useCallback(() => setPhase('idle'), []);
+  const selectDay = useCallback((date: string) => setPicked({ date, key: latest.current.lastSyncAt ?? 0 }), []);
   const finishLoading = useCallback(() => {
     if (!running.current) setPhase('idle');
   }, []);
@@ -363,10 +371,15 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<Vuelo>(() => {
+    const view = dayView(state.days);
+    const week = weekDays(state.days);
     return {
       state,
       ready,
-      week: weekDays(state.days),
+      week,
+      dayView: view,
+      selectedDate: selectedDay(picked, view, week.map((w) => w.date), state.lastSyncAt ?? 0),
+      selectDay,
       phase,
       loadingMode,
       error,
@@ -383,7 +396,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       reloadProfile,
       clearData,
     };
-  }, [clearData, dismissFresh, error, finishLoading, forgetRing, loadingMode, markStarted, phase, ready, reloadProfile, saveProfile, state, sync]);
+  }, [clearData, dismissFresh, error, finishLoading, forgetRing, loadingMode, markStarted, phase, picked, ready, reloadProfile, saveProfile, selectDay, state, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

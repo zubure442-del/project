@@ -6,7 +6,7 @@ import { DayBanner, Card, DayLineChart, HeroRing, InfoButton, PressureChart, Scr
 export default function BodyTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, select: setPicked, view, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const chartWidth = width - spacing.md * 4;
   const points = day?.summaryPoints ?? [];
@@ -23,7 +23,6 @@ export default function BodyTab() {
   return (
     <Screen
       title="Тело"
-      date={picked}
       statusText={statusText}
       onSync={() => sync('refresh')}
       banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
@@ -37,10 +36,7 @@ export default function BodyTab() {
           days={week}
           value={(d) => d.scores.state}
           selected={picked}
-          onSelect={setPicked}
           width={chartWidth}
-          lockedDate={view.todayLocked ? view.today : null}
-          fallbackDate={view.lastComplete}
         />
       </Card>
 

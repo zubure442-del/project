@@ -21,7 +21,7 @@ const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 export default function TodayTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, select: setPicked, view, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const advice = adviceFor(state, picked);
   const chartWidth = width - spacing.md * 4;
@@ -34,7 +34,6 @@ export default function TodayTab() {
   return (
     <Screen
       title="Итог"
-      date={picked}
       statusText={statusText}
       onSync={() => sync('refresh')}
       banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
@@ -103,10 +102,7 @@ export default function TodayTab() {
           days={week}
           value={(d) => d.total}
           selected={picked}
-          onSelect={setPicked}
           width={chartWidth}
-          lockedDate={view.todayLocked ? view.today : null}
-          fallbackDate={view.lastComplete}
         />
       </Card>
     </Screen>

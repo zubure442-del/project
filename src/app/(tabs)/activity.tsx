@@ -20,7 +20,7 @@ import {
 export default function ActivityTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, select: setPicked, view, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const age = profileAge(state.profile);
   const hours = day?.stepsByHour ?? [];
@@ -31,7 +31,6 @@ export default function ActivityTab() {
   return (
     <Screen
       title="Активность"
-      date={picked}
       statusText={statusText}
       onSync={() => sync('refresh')}
       banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
@@ -51,10 +50,7 @@ export default function ActivityTab() {
           days={week}
           value={(d) => d.scores.activity}
           selected={picked}
-          onSelect={setPicked}
           width={chartWidth}
-          lockedDate={view.todayLocked ? view.today : null}
-          fallbackDate={view.lastComplete}
         />
       </Card>
 

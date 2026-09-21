@@ -87,6 +87,24 @@ export function dayView(days: DaySnapshot[], now = new Date()): DayView {
   return { today, yesterday, todayLocked, lastComplete, defaultDate };
 }
 
+/**
+ * Какой день показан на всех вкладках. Выбор из календаря действует до следующей синхронизации;
+ * заблокированный сегодня и дни вне недели выбрать нельзя — тогда день по умолчанию.
+ */
+export function selectedDay(
+  picked: { date: string; key: number } | null,
+  view: DayView,
+  weekDates: readonly string[],
+  syncKey: number,
+): string {
+  const valid =
+    picked !== null &&
+    picked.key === syncKey &&
+    !(view.todayLocked && picked.date === view.today) &&
+    weekDates.includes(picked.date);
+  return valid ? picked.date : view.defaultDate;
+}
+
 /** Старое имя: день по умолчанию. */
 export const defaultDay = (days: DaySnapshot[], now = new Date()): string => dayView(days, now).defaultDate;
 
@@ -115,6 +133,17 @@ export function dayPhrase(date: string, view: Pick<DayView, 'yesterday'>): strin
   const [, month, day] = date.split('-');
   return `${Number(day)} ${MONTHS[Number(month) - 1]}`;
 }
+
+const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
+/** «21 сен» — на кнопке календаря и на центральной вкладке, когда выбран не сегодня. */
+export function shortDate(date: string): string {
+  const [, month, day] = date.split('-');
+  return `${Number(day)} ${MONTHS_SHORT[Number(month) - 1]}`;
+}
+
+/** Подпись центральной вкладки: «Сегодня», если выбран сегодняшний день, иначе дата. */
+export const todayTabLabel = (selected: string, today: string) => (selected === today ? 'Сегодня' : shortDate(selected));
 
 /** Семь календарных дней подряд, последний — сегодня. День без данных остаётся пустым. */
 export function weekDays(days: DaySnapshot[], now = new Date()): { date: string; day: DaySnapshot | null }[] {

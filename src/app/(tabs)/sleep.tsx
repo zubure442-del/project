@@ -8,7 +8,7 @@ const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minut
 export default function SleepTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, select: setPicked, view, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const sleep = day?.sleep;
   const chartWidth = width - spacing.md * 4;
@@ -18,7 +18,6 @@ export default function SleepTab() {
   return (
     <Screen
       title="Сон"
-      date={picked}
       statusText={statusText}
       onSync={() => sync('refresh')}
       banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
@@ -33,10 +32,7 @@ export default function SleepTab() {
           days={week}
           value={(d) => d.scores.sleep}
           selected={picked}
-          onSelect={setPicked}
           width={chartWidth}
-          lockedDate={view.todayLocked ? view.today : null}
-          fallbackDate={view.lastComplete}
         />
       </Card>
 

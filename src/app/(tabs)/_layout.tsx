@@ -1,12 +1,12 @@
 import { Tabs } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
-import { profileAlerts, useVuelo } from '../../state';
+import { profileAlerts, todayTabLabel, useVuelo } from '../../state';
 import { ActivityIcon, BodyIcon, ProfileIcon, SleepIcon, TabBar, colors } from '../../ui';
 
 export const unstable_settings = { initialRouteName: 'index' };
 
 export default function TabsLayout() {
-  const { state } = useVuelo();
+  const { state, selectedDate, dayView } = useVuelo();
   // Точка на «Профиле» — только пока не заполнено хотя бы одно из пяти обязательных полей.
   // Раньше она горела и при заряде ≤ 20 %, поэтому не гасла после заполнения профиля.
   const { dot } = profileAlerts(state.profile);
@@ -32,7 +32,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         // Иконку центральной кнопки (знак V в круге) рисует сама панель: см. TabBar.tsx.
-        options={{ title: 'Сегодня' }}
+        // «Сегодня», когда выбран сегодняшний день, иначе дата («20 сен»).
+        options={{ title: todayTabLabel(selectedDate, dayView.today) }}
       />
       <Tabs.Screen name="activity" options={{ title: 'Активность', tabBarIcon: ({ color }) => <ActivityIcon color={color} /> }} />
       <Tabs.Screen name="body" options={{ title: 'Тело', tabBarIcon: ({ color }) => <BodyIcon color={color} /> }} />

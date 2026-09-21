@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CalendarButton } from './Calendar';
 import { colors, radius, spacing } from './theme';
 
 const WEEKDAY = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -17,8 +18,6 @@ export const weekdayName = (date: string) => WEEKDAY[new Date(`${date}T12:00:00Z
 
 export interface ScreenProps {
   title: string;
-  /** Дата выбранного дня. */
-  date: string;
   statusText: string;
   /** Обновление: открывает экран загрузки (или «Данные актуальны», если кэш свежий). */
   onSync: () => void;
@@ -27,16 +26,20 @@ export interface ScreenProps {
   children: ReactNode;
 }
 
-export function Screen({ title, date, statusText, onSync, banner, children }: ScreenProps) {
+export function Screen({ title, statusText, onSync, banner, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <Text style={styles.title}>{title}</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>{title}</Text>
+          {/* Календарь: выбранный день один на все вкладки. */}
+          <CalendarButton />
+        </View>
         <Pressable style={styles.statusRow} onPress={onSync}>
           <Text style={styles.status}>
-            {formatDayTitle(date)} · {statusText}
+            {statusText}
           </Text>
         </Pressable>
       </View>
@@ -87,7 +90,8 @@ export const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   header: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  title: { color: colors.text, fontSize: 28, fontWeight: '600' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  title: { color: colors.text, fontSize: 28, fontWeight: '600', flexShrink: 1 },
   spacer: { flex: 1 },
   statusRow: { marginTop: 4, height: 20, justifyContent: 'center' },
   status: { color: colors.textFaint, fontSize: 13, fontVariant: ['tabular-nums'] },

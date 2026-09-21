@@ -1,7 +1,19 @@
 import { dateKey, wallClock, type Sample, type SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
-import { buildSleepSessions, cleanHeart, computeDayScore, hypnogramSegments, nightForDate, sleepMinutes, stepsByHour } from '../domain';
-import { HISTORY_DAYS, type DayPoint, type DaySnapshot } from './types';
+import {
+  STEP_HISTORY_DAYS,
+  buildSleepSessions,
+  cleanHeart,
+  computeDayScore,
+  hypnogramSegments,
+  nightForDate,
+  resolveStepNorm,
+  sleepMinutes,
+  sleepScore,
+  stepsByHour,
+  type StoredNorm,
+} from '../domain';
+import { CACHE_DAYS, HISTORY_DAYS, type DayPoint, type DaySnapshot } from './types';
 
 const minuteOfDay = (ts: number) => {
   const w = wallClock(ts);
@@ -29,11 +41,19 @@ function average(values: number[]): number | null {
   return values.length ? Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10 : null;
 }
 
+const shiftDate = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+
 /**
  * Превращает выгрузку в сводки по дням. Чистая функция: расчёты те же, что на экране.
  * Дни без единого показателя пропускаются — пустая карточка пользователю не нужна.
  */
-export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapshot[] {
+export function buildSnapshots(
+  sync: SyncResult,
+  age: number | null,
+  /** Сохранённые нормы шагов по дням: посчитанная норма в течение дня не меняется. */
+  norms: Readonly<Record<string, StoredNorm>> = {},
+): DaySnapshot[] {
   const sessions = buildSleepSessions(sync.sleep);
   const { clean } = cleanHeart(sync.heart);
   const heartByDate = groupByDate(clean);
@@ -46,6 +66,12 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
     ...sessions.map((s) => s.date),
   ]);
 
+  // Шаги за день — для истории нормы: семь дней до этого дня, сам день не входит.
+  const totals = new Map([...stepsByDate].map(([date, list]) => [date, list.reduce((sum, s) => sum + s.value, 0)]));
+  const historyBefore = (date: string) =>
+    Array.from({ length: STEP_HISTORY_DAYS }, (_, i) => totals.get(shiftDate(date, -(STEP_HISTORY_DAYS - i))))
+      .filter((v): v is number => v !== undefined);
+
   const snapshots: DaySnapshot[] = [];
   for (const date of dates) {
     const heart = heartByDate.get(date) ?? [];
@@ -57,6 +83,7 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
     const pick = (key: keyof SummaryRecord) =>
       average(summary.map((r) => r[key]).filter((v): v is number => v !== null));
 
+    const stepNorm = resolveStepNorm(norms[date], historyBefore(date), sleepScore(night));
     const score = computeDayScore({
       night,
       steps,
@@ -64,6 +91,7 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
       age,
       spo2: spo2.map((s) => s.value),
       hrv: summary.map((r) => r.hrv).filter((v): v is number => v !== null),
+      stepGoal: stepNorm.value,
     });
 
     snapshots.push({
@@ -87,6 +115,7 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
         glucose: r.glucose,
         hrv: r.hrv,
       })),
+      stepNorm,
       stepsByHour: stepsByHour(stepSamples ?? []),
       stepsByMinute: toPoints(stepSamples ?? []),
       sleepSegments: night
@@ -111,4 +140,15 @@ export function buildSnapshots(sync: SyncResult, age: number | null): DaySnapsho
 /** Кэш хранит одну последнюю синхронизацию: оставляем её последние дни. */
 export function keepLastDays(days: DaySnapshot[]): DaySnapshot[] {
   return [...days].sort((a, b) => a.date.localeCompare(b.date)).slice(-HISTORY_DAYS);
+}
+
+/** Нормы шагов из новых сводок поверх сохранённых. Храним не больше CACHE_DAYS дней. */
+export function collectStepNorms(
+  previous: Readonly<Record<string, StoredNorm>>,
+  days: readonly DaySnapshot[],
+): Record<string, StoredNorm> {
+  const next: Record<string, StoredNorm> = { ...previous };
+  for (const day of days) if (day.stepNorm) next[day.date] = day.stepNorm;
+  const kept = Object.keys(next).sort().slice(-CACHE_DAYS);
+  return Object.fromEntries(kept.map((d) => [d, next[d]]));
 }

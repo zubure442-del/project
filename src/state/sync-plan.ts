@@ -5,6 +5,7 @@ import {
   CACHE_DAYS,
   addReport,
   buildSnapshots,
+  collectStepNorms,
   keepLastDays,
   mergeRaw,
   profileAge,
@@ -97,12 +98,15 @@ export function applySyncResult(
   now = new Date(),
 ): VueloState {
   const raw = mergeRaw(state.raw, splitByDay(sync));
-  const days = keepLastDays(buildSnapshots(toSyncResult(raw), profileAge(state.profile, now) ?? state.age));
+  const days = keepLastDays(
+    buildSnapshots(toSyncResult(raw), profileAge(state.profile, now) ?? state.age, state.stepNorms),
+  );
   const base: VueloState = {
     ...state,
     raw,
     days,
     ring: known ?? state.ring,
+    stepNorms: collectStepNorms(state.stepNorms, days),
     battery: sync.battery ?? state.battery,
     batteryAt: sync.battery !== null ? now.getTime() : state.batteryAt,
     caloriesToday: sync.activity ? sync.activity.calories : state.caloriesToday,

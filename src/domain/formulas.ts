@@ -1,5 +1,16 @@
 import { DEEP_SHARE_BEST, DEEP_SHARE_STEPS, STRESS_ZONES } from './charts';
 import {
+  NORM_MAX,
+  NORM_MIN,
+  NORM_ROUND,
+  SLEEP_FACTOR_BASE,
+  SLEEP_FACTOR_RANGE,
+  STEPS_DEFAULT_NORM,
+  STEP_GROWTH,
+  STEP_HISTORY_DAYS,
+  STEP_WORN_MIN,
+} from './steps-norm';
+import {
   CARDIO_REFERENCE_MIN,
   CARDIO_ZONES,
   HOUR_LOAD_HR_WEIGHT,
@@ -9,7 +20,6 @@ import {
   RESTING_HR_PENALTY,
   SLEEP_TARGET_MIN,
   SLEEP_VOLUME_WEIGHT,
-  STEPS_GOAL,
   STEPS_WEIGHT,
   CARDIO_WEIGHT,
   DEEP_RATIO_BEST,
@@ -51,9 +61,18 @@ export const FORMULAS = {
   activity: {
     title: 'Активность',
     lines: [
-      `Шаги = шаги / ${STEPS_GOAL} × 100`,
+      'Шаги = шаги / норма дня × 100',
       `Кардио = очки × минуты / ${CARDIO_REFERENCE_MIN}; зоны ${CARDIO_ZONES.map((z) => Math.round(z.from * 100)).join(' / ')} % от 208 − 0,7 × возраст`,
       `Оценка = шаги × ${STEPS_WEIGHT} + кардио × ${CARDIO_WEIGHT}, не больше 100`,
+      NOT_MEDICAL,
+    ],
+  },
+  stepNorm: {
+    title: 'Норма шагов',
+    lines: [
+      `База = n/${STEP_HISTORY_DAYS} × среднее × ${STEP_GROWTH} + (1 − n/${STEP_HISTORY_DAYS}) × ${STEPS_DEFAULT_NORM}; n — дни из последних ${STEP_HISTORY_DAYS} с шагами от ${STEP_WORN_MIN}`,
+      `Сон = ${SLEEP_FACTOR_BASE} + ${SLEEP_FACTOR_RANGE} × оценка сна / 100; без оценки — 1`,
+      `Норма = база × сон до ${NORM_ROUND}, от ${NORM_MIN} до ${NORM_MAX}; раз в день`,
       NOT_MEDICAL,
     ],
   },

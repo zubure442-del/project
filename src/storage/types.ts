@@ -1,7 +1,7 @@
 import type { AutoMeasurePeriod } from '../codec';
 import type { KnownRing } from '../ble';
 import type { RawByDay } from './raw';
-import type { ComponentId, ReportMode, SleepStage } from '../domain';
+import type { ComponentId, ReportMode, SleepStage, StoredNorm } from '../domain';
 
 /** Одна точка графика: секунды от начала дня + значение. Так день хранится компактно. */
 export interface DayPoint {
@@ -36,6 +36,8 @@ export interface DaySnapshot {
     glucose: number | null;
     hrv: number | null;
   }[];
+  /** Норма шагов дня. У старых сводок из кэша её может не быть — тогда 10 000. */
+  stepNorm?: StoredNorm;
   /** Шаги по часам суток: ровно 24 числа. */
   stepsByHour: number[];
   /** Шаги по минутам: нужны, чтобы находить эпизоды нагрузки. */
@@ -82,6 +84,8 @@ export interface VueloState {
    * По этому времени решаем, финальный ли день и нужно ли его запрашивать снова.
    */
   syncedAt: Record<string, number>;
+  /** Норма шагов по дням: считается один раз в день и дальше не меняется. */
+  stepNorms: Record<string, StoredNorm>;
   /** Длительности последних удачных загрузок, мс: длинных (с карточками) и быстрых. */
   syncDurations: { long: number[]; short: number[] };
   /** Профиль: нужен для 0x02 и расчёта пульсовых зон. */
@@ -123,7 +127,7 @@ export const isProfileComplete = (p: Profile): boolean =>
   p.sex !== null && p.heightCm !== null && p.weightKg !== null && p.birthYear !== null;
 
 export const EMPTY_STATE: VueloState = {
-  days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, syncDurations: { long: [], short: [] }, battery: null,
+  days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, syncDurations: { long: [], short: [] }, battery: null,
   caloriesToday: null, caloriesDate: null,
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false,
 };

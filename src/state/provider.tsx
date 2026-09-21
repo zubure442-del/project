@@ -16,6 +16,7 @@ import {
   EMPTY_STATE,
   buildSnapshots,
   clearState,
+  collectStepNorms,
   isProfileComplete,
   keepLastDays,
   keepRecentDays,
@@ -139,8 +140,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           ...emptySyncResult(),
           heart: [{ ts, value: measured.pulse, raw: [measured.pulse] }],
         }));
-        const days = buildSnapshots(toSyncResult(raw), profileAge(source.profile) ?? source.age);
-        if (days.length) commit({ ...source, raw, days: keepLastDays(days) });
+        const days = keepLastDays(buildSnapshots(toSyncResult(raw), profileAge(source.profile) ?? source.age, source.stepNorms));
+        if (days.length) commit({ ...source, raw, days, stepNorms: collectStepNorms(source.stepNorms, days) });
       } catch {
         // Замер не удался — молчим: кольцо могло быть снято.
       }

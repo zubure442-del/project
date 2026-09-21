@@ -1,3 +1,4 @@
+import { STEPS_DEFAULT_NORM } from './steps-norm';
 import type { Sample } from '../codec/types';
 import { smoothHeart } from './heart';
 import type { SleepSession } from './sleep';
@@ -9,7 +10,6 @@ export type ComponentId = keyof typeof WEIGHTS;
 
 /** Один замер в зоне даёт баллы за 30 минут (период автозамера); короче интервал — пропорционально меньше. */
 export const CARDIO_REFERENCE_MIN = 30;
-export const STEPS_GOAL = 10000;
 export const STEPS_WEIGHT = 0.7;
 export const CARDIO_WEIGHT = 4;
 export const SLEEP_TARGET_MIN = 420;
@@ -60,6 +60,8 @@ export interface ScoreInput {
   age: number | null;
   hrv: number[];
   spo2: number[];
+  /** Норма шагов этого дня (см. steps-norm.ts). Нет — 10 000. */
+  stepGoal?: number;
 }
 
 export interface ComponentScore {
@@ -114,9 +116,15 @@ export function cardioPoints(heart: Sample[], age: number | null): number | null
 }
 
 /** Активность: шаги ведут итог (растёт в течение дня); интенсивный пульс — бонус. Нет шагов — нет оценки. */
-export function activityScore(steps: number | null, heart: Sample[], age: number | null): number | null {
+export function activityScore(
+  steps: number | null,
+  heart: Sample[],
+  age: number | null,
+  /** Норма шагов дня; по умолчанию 10 000. */
+  stepGoal: number = STEPS_DEFAULT_NORM,
+): number | null {
   if (steps === null) return null;
-  const stepScore = Math.min(100, (steps / STEPS_GOAL) * 100);
+  const stepScore = Math.min(100, (steps / stepGoal) * 100);
   const bonus = cardioPoints(heart, age) ?? 0;
   return Math.min(100, stepScore * STEPS_WEIGHT + bonus * CARDIO_WEIGHT);
 }
@@ -173,7 +181,7 @@ export function computeDayScore(input: ScoreInput): DayScore {
   const restingHr = restingHeartRate(input.heart, input.night);
   const scores: Record<ComponentId, number | null> = {
     sleep: sleepScore(input.night),
-    activity: activityScore(input.steps, input.heart, input.age),
+    activity: activityScore(input.steps, input.heart, input.age, input.stepGoal),
     state: stateScore(input.hrv, restingHr, input.spo2),
   };
   // Итог — только когда посчитаны все три составляющие. По одной или двум он не строится:

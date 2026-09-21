@@ -20,6 +20,7 @@ export async function loadState(): Promise<VueloState> {
       // Старый кэш не знал времени выгрузки дней: один раз выгрузим неделю целиком.
       syncedAt: parsed.syncedAt ?? {},
       syncDurations: parsed.syncDurations ?? { long: [], short: [] },
+      stepNorms: parsed.stepNorms ?? {},
       battery: parsed.battery ?? null,
       caloriesToday: parsed.caloriesToday ?? null,
       caloriesDate: parsed.caloriesDate ?? null,

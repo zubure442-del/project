@@ -1,4 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import {
+  NORM_MAX,
+  NORM_MIN,
+  NORM_ROUND,
+  SLEEP_FACTOR_BASE,
+  SLEEP_FACTOR_RANGE,
+  STEPS_DEFAULT_NORM,
+  STEP_GROWTH,
+  STEP_HISTORY_DAYS,
+  STEP_WORN_MIN,
+} from './steps-norm';
 import { DEEP_SHARE_BEST, DEEP_SHARE_STEPS, STRESS_ZONES } from './charts';
 import { FORMULAS, formulaText, type FormulaKey } from './formulas';
 import {
@@ -10,7 +21,6 @@ import {
   RESTING_HR_TARGET,
   SLEEP_TARGET_MIN,
   SLEEP_VOLUME_WEIGHT,
-  STEPS_GOAL,
   STEPS_WEIGHT,
   WEIGHTS,
 } from './score';
@@ -33,9 +43,16 @@ describe('подсказки собираются из констант расч
     expect(text).toContain(String(Math.round(DEEP_RATIO_BEST.to * 100)));
   });
 
-  it('активность: цель по шагам и веса', () => {
+  it('норма шагов: все числа из констант расчёта', () => {
+    const text = formulaText('stepNorm');
+    for (const n of [STEP_HISTORY_DAYS, STEP_WORN_MIN, STEP_GROWTH, STEPS_DEFAULT_NORM, SLEEP_FACTOR_BASE, SLEEP_FACTOR_RANGE, NORM_ROUND, NORM_MIN, NORM_MAX]) {
+      expect(text).toContain(String(n));
+    }
+  });
+
+  it('активность: шаги к норме дня и веса', () => {
     const text = formulaText('activity');
-    expect(text).toContain(String(STEPS_GOAL));
+    expect(text).toContain('норма дня');
     expect(text).toContain(String(STEPS_WEIGHT));
     expect(text).toContain(String(CARDIO_WEIGHT));
     expect(text).toContain(String(CARDIO_REFERENCE_MIN));

@@ -1,5 +1,5 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { FORMULAS, STEPS_GOAL, formulaText, type ComponentId } from '../../domain';
+import { FORMULAS, STEPS_DEFAULT_NORM, formulaText, type ComponentId } from '../../domain';
 import { adviceFor, adviceLabel, findDay, todayKey, useTabDay, useVuelo } from '../../state';
 import {
   DayBanner,
@@ -26,6 +26,8 @@ export default function TodayTab() {
   const advice = adviceFor(state, picked);
   const chartWidth = width - spacing.md * 4;
   const steps = day?.steps ?? null;
+  // Своя норма дня; у старых сводок из кэша её нет — тогда 10 000.
+  const norm = day?.stepNorm?.value ?? STEPS_DEFAULT_NORM;
   // Кольцо отдаёт расход только за текущий день, за прошлые ничего не показываем.
   const calories = picked === todayKey() ? state.caloriesToday : null;
 
@@ -52,7 +54,7 @@ export default function TodayTab() {
         ))}
       </View>
 
-      <Card title="Шаги и калории">
+      <Card title="Шаги и калории" right={<InfoButton title={FORMULAS.stepNorm.title} text={formulaText('stepNorm')} />}>
         {steps === null ? (
           <Skeleton height={44} />
         ) : (
@@ -67,8 +69,11 @@ export default function TodayTab() {
                 </View>
               ) : null}
             </View>
-            <View style={styles.track}>
-              <View style={[styles.fill, { width: `${Math.min(100, (steps / STEPS_GOAL) * 100)}%` }]} />
+            <View style={styles.normRow}>
+              <View style={styles.track}>
+                <View style={[styles.fill, { width: `${Math.min(100, (steps / norm) * 100)}%` }]} />
+              </View>
+              <Text style={styles.norm}>из {norm.toLocaleString('ru-RU')}</Text>
             </View>
           </>
         )}
@@ -133,7 +138,9 @@ const styles = StyleSheet.create({
   adviceLabel: { color: colors.textMuted, fontSize: 13, marginBottom: spacing.xs },
   adviceEmpty: { color: colors.textFaint, fontSize: 15 },
   poweredBy: { color: colors.textFaint, fontSize: 11, marginTop: spacing.sm, textAlign: 'right' },
-  track: { height: 4, borderRadius: 2, backgroundColor: colors.track, marginTop: spacing.sm },
+  normRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  track: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.track },
+  norm: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   fill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },
   report: { color: colors.text, fontSize: 16, lineHeight: 24 },
 });

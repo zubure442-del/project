@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import React from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, Line, Path, Pattern, Rect, Text as SvgText } from 'react-native-svg';
 import { DAY_HOUR_TICKS, HR_SMOOTH_MAX_GAP, chartAxis, formatMinute, loadIntervals, smoothHeart, splitSegments, type SleepStage } from '../domain';
 import type { DayPoint, DaySnapshot } from '../storage';
@@ -41,7 +41,6 @@ export function DayActivityChart({
   steps?: { m: number; v: number }[];
   restingHr?: number | null;
 }) {
-  const [picked, setPicked] = useState<LoadZone | null>(null);
   const smooth = smoothHeart(heart.map((p) => ({ ts: p.m * 60, value: p.v })));
   const zones = loadIntervals(heart.map((p) => ({ m: p.m, v: p.v })), age, steps, restingHr);
 
@@ -59,19 +58,9 @@ export function DayActivityChart({
   for (let t = yMin; t <= yMax; t += PULSE_STEP) ticks.push(t);
   const segments = splitSegments(smooth, HR_SMOOTH_MAX_GAP);
 
-  const pick = (e: GestureResponderEvent) => {
-    const minute = ((e.nativeEvent.locationX - gutter) / plot) * 1440;
-    setPicked(zones.find((z) => minute >= z.from - 10 && minute <= z.to + 10) ?? null);
-  };
-
+  // График не нажимается и не перехватывает касания: иначе срабатывал при прокрутке.
   return (
-    <View
-      onStartShouldSetResponder={() => true}
-      onMoveShouldSetResponder={() => true}
-      onResponderGrant={pick}
-      onResponderMove={pick}
-      onResponderRelease={() => setPicked(null)}
-    >
+    <View pointerEvents="none">
       <Svg width={width} height={HEIGHT}>
         <Defs>
           <Pattern id="load-hatch" patternUnits="userSpaceOnUse" width={6} height={6}>
@@ -145,13 +134,19 @@ export function DayActivityChart({
           </SvgText>
         ))}
       </Svg>
-      {picked ? (
-        <Text style={styles.touch}>
-          {formatMinute(picked.from)}–{formatMinute(picked.to)} · {Math.round(picked.to - picked.from)} мин
-          {picked.steps > 0 ? ` · ${picked.steps.toLocaleString('ru-RU')} шагов` : ''}
-          {picked.peak !== null ? ` · до ${Math.round(picked.peak)} уд/мин` : ''}
-        </Text>
-      ) : null}
+      <View style={styles.legend}>
+        <View style={[styles.swatch, { backgroundColor: colors.accent }]} />
+        <Text style={styles.legendText}>Пульс</Text>
+        <Svg width={14} height={10}>
+          <Defs>
+            <Pattern id="legend-hatch" patternUnits="userSpaceOnUse" width={4} height={4}>
+              <Path d="M0 4 L4 0" stroke={colors.accent} strokeWidth={1} strokeOpacity={0.75} />
+            </Pattern>
+          </Defs>
+          <Rect x={0.5} y={0.5} width={13} height={9} rx={2} fill="url(#legend-hatch)" stroke={colors.accent} strokeOpacity={0.6} />
+        </Svg>
+        <Text style={styles.legendText}>Шаги</Text>
+      </View>
     </View>
   );
 }
@@ -206,6 +201,7 @@ function StaticDayChart({
   const top = axis.ticks[axis.ticks.length - 1];
 
   return (
+    <View pointerEvents="none">
     <Svg width={width} height={STATIC_HEIGHT}>
       {axis.ticks.map((t) => (
         <React.Fragment key={t}>
@@ -265,6 +261,7 @@ function StaticDayChart({
         </SvgText>
       ))}
     </Svg>
+    </View>
   );
 }
 
@@ -296,7 +293,7 @@ export function PressureChart({ points, width }: { points: { m: number; sys: num
     { points: points.map((p) => ({ m: p.m, v: p.dia })), color: DIASTOLIC_COLOR },
   ];
   return (
-    <View>
+    <View pointerEvents="none">
       <StaticDayChart series={series} width={width} unit="мм рт. ст." />
       <View style={styles.legend}>
         <View style={[styles.swatch, { backgroundColor: colors.accent }]} />
@@ -324,7 +321,7 @@ export function Hypnogram({ segments, width }: { segments: DaySnapshot['sleepSeg
   const y = (row: number) => 10 + row * rowHeight;
 
   return (
-    <View>
+    <View pointerEvents="none">
       <Svg width={width} height={height}>
         {(['deep', 'light'] as const).map((stage) => (
           <SvgText key={stage} x={gutter - 8} y={y(STAGE_ROW[stage]) + rowHeight / 2 + 4} fill={colors.textMuted} fontSize={12} textAnchor="end">

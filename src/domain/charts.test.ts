@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Sample } from '../codec';
-import { chartAxis, deepShareLabel, formatMinute, hypnogramSegments, niceTicks, sleepStage, stepsByHour, stressZone } from './charts';
+import { LABEL_CHAR_W, LABEL_GAP, LABEL_LINE_H, chartAxis, deepShareLabel, placeLabels, formatMinute, hypnogramSegments, niceTicks, sleepStage, stepsByHour, stressZone } from './charts';
 
 const ring = (s: string) => Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
 const minutes = (from: string, values: number[]): Sample[] =>
@@ -142,5 +142,38 @@ describe('ось статичных графиков «Тела»', () => {
     const axis = chartAxis(80, 80);
     expect(axis.lo).toBeLessThan(80);
     expect(axis.hi).toBeGreaterThan(80);
+  });
+});
+
+describe('числа над точками недели не накладываются', () => {
+  const box = (x: number, base: number, text: string) => ({
+    l: x - (text.length * LABEL_CHAR_W + 4) / 2,
+    r: x + (text.length * LABEL_CHAR_W + 4) / 2,
+    t: base - LABEL_LINE_H + 2,
+    b: base + 2,
+  });
+  const overlap = (a: ReturnType<typeof box>, b: ReturnType<typeof box>) =>
+    !(a.r <= b.l || a.l >= b.r || a.b <= b.t || a.t >= b.b);
+
+  it('далеко стоящие точки — подпись прямо над каждой', () => {
+    const labels = [
+      { x: 20, y: 60, text: '72', selected: false },
+      { x: 80, y: 50, text: '65', selected: true },
+    ];
+    expect(placeLabels(labels, { top: 0, bottom: 100 })).toEqual([60 - LABEL_GAP, 50 - LABEL_GAP]);
+  });
+
+  it('тесно стоящие точки: выбранная остаётся на месте, соседние сдвигаются без наложений', () => {
+    const labels = [
+      { x: 30, y: 60, text: '100', selected: false },
+      { x: 40, y: 60, text: '99', selected: true },
+      { x: 50, y: 61, text: '101', selected: false },
+    ];
+    const bases = placeLabels(labels, { top: 0, bottom: 120 });
+    expect(bases[1]).toBe(60 - LABEL_GAP);
+    const boxes = labels.map((l, i) => box(l.x, bases[i], l.text));
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) expect(overlap(boxes[i], boxes[j])).toBe(false);
+    }
   });
 });

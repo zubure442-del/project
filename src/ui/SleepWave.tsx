@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { SLEEP_LEVEL, formatMinute, sleepWave } from '../domain';
 import type { DaySnapshot } from '../storage';
@@ -11,7 +10,6 @@ const BOTTOM = HEIGHT - 26;
 
 /** Плавная лента ночи: глубокий сон внизу волны, лёгкий вверху. */
 export function SleepWave({ segments, width }: { segments: DaySnapshot['sleepSegments']; width: number }) {
-  const [touch, setTouch] = useState<{ m: number; stage: string } | null>(null);
   const wave = sleepWave(segments);
   if (wave.length < 2) return null;
 
@@ -24,20 +22,9 @@ export function SleepWave({ segments, width }: { segments: DaySnapshot['sleepSeg
   const area = `${line} L${width} ${BOTTOM + 20} L0 ${BOTTOM + 20} Z`;
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((k) => Math.round((from + (to - from) * k) / 15) * 15);
 
-  const pick = (e: GestureResponderEvent) => {
-    const m = from + (e.nativeEvent.locationX / width) * (to - from);
-    const seg = segments.find((s) => m >= s.from && m < s.to && s.stage !== 'awake');
-    setTouch({ m, stage: seg?.stage === 'deep' ? 'Глубокий' : 'Лёгкий' });
-  };
-
+  // График не нажимается и не перехватывает касания: иначе срабатывал при прокрутке.
   return (
-    <View
-      onStartShouldSetResponder={() => true}
-      onMoveShouldSetResponder={() => true}
-      onResponderGrant={pick}
-      onResponderMove={pick}
-      onResponderRelease={() => setTouch(null)}
-    >
+    <View pointerEvents="none">
       <Svg width={width} height={HEIGHT}>
         <Defs>
           <LinearGradient id="sleep-area" x1="0.5" y1="0" x2="0.5" y2="1">
@@ -60,8 +47,6 @@ export function SleepWave({ segments, width }: { segments: DaySnapshot['sleepSeg
         <SvgText x={2} y={BOTTOM + 14} fill={colors.textFaint} fontSize={11} opacity={0.5}>
           Глубокий
         </SvgText>
-
-        {touch ? <Circle cx={x(touch.m)} cy={y(wave.find((p) => p.m >= touch.m)?.v ?? SLEEP_LEVEL.light)} r={5} fill={SLEEP_PALETTE.glow} /> : null}
 
         {ticks.map((m, i) => (
           <SvgText
@@ -88,11 +73,6 @@ export function SleepWave({ segments, width }: { segments: DaySnapshot['sleepSeg
         </View>
       </View>
 
-      {touch ? (
-        <Text style={styles.tip}>
-          {touch.stage} · {formatMinute(touch.m)}
-        </Text>
-      ) : null}
     </View>
   );
 }

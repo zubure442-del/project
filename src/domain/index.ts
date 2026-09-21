@@ -8,3 +8,4 @@ export * from './sleep';
 export * from './steps-norm';
 export * from './calories';
 export * from './organism';
+export * from './step-noise';

@@ -4,6 +4,7 @@ import {
   PERSONAL_BASELINE_DAYS,
   STEP_HISTORY_DAYS,
   activeCalories,
+  applyStepNoise,
   dayOrganism,
   organismSamples,
   personalBaseline,
@@ -76,8 +77,10 @@ export function buildSnapshots(
     ...sessions.map((s) => s.date),
   ]);
 
-  // Шаги за день — для истории нормы: семь дней до этого дня, сам день не входит.
-  const totals = new Map([...stepsByDate].map(([date, list]) => [date, list.reduce((sum, s) => sum + s.value, 0)]));
+  // Шаги за день после шумоподавления — для истории нормы: семь дней до этого дня, сам день не входит.
+  const totals = new Map(
+    [...stepsByDate].map(([date, list]) => [date, applyStepNoise(list.reduce((sum, s) => sum + s.value, 0))]),
+  );
   const historyBefore = (date: string) =>
     Array.from({ length: STEP_HISTORY_DAYS }, (_, i) => totals.get(shiftDate(date, -(STEP_HISTORY_DAYS - i))))
       .filter((v): v is number => v !== undefined);
@@ -105,7 +108,8 @@ export function buildSnapshots(
     const heart = heartByDate.get(date) ?? [];
     const spo2 = spo2ByDate.get(date) ?? [];
     const stepSamples = stepsByDate.get(date);
-    const steps = stepSamples ? stepSamples.reduce((sum, s) => sum + s.value, 0) : null;
+    // Дневная сумма — после шумоподавления; почасовые и поминутные ряды остаются сырыми.
+    const steps = stepSamples ? applyStepNoise(stepSamples.reduce((sum, s) => sum + s.value, 0)) : null;
     const { night } = nightForDate(sessions, date);
     const summary: SummaryRecord[] = summaryByDate.get(date) ?? [];
     const pick = (key: keyof SummaryRecord) =>

@@ -1,5 +1,5 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { TAB_INFO, tabInfoText, busiestHour, weekCalories } from '../../domain';
+import { STEPS_DEFAULT_NORM, TAB_INFO, busiestHour, tabInfoText, weekCalories } from '../../domain';
 import { findDay, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
@@ -28,6 +28,8 @@ export default function ActivityTab() {
   const chartWidth = width - spacing.md * 4;
   // Калории считаем сами для любого дня; нет биометрии — «—».
   const calories = day?.calories ?? null;
+  // Шаги за день — после шумоподавления, норма — своя на день.
+  const norm = day?.stepNorm?.value ?? STEPS_DEFAULT_NORM;
   const weekBars = week.map((w) => ({ date: w.date, value: w.day?.calories ?? null }));
   const weekTotal = weekCalories(weekBars.map((b) => b.value));
 
@@ -45,6 +47,16 @@ export default function ActivityTab() {
           <Text style={styles.summary}>
             {day.steps.toLocaleString('ru-RU')} шагов · {calories === null ? '—' : calories.toLocaleString('ru-RU')} ккал
           </Text>
+        ) : null}
+        {day?.steps != null ? (
+          <View style={styles.norm}>
+            <View style={styles.track}>
+              <View style={[styles.fill, { width: `${Math.min(100, (day.steps / norm) * 100)}%` }]} />
+            </View>
+            <Text style={styles.normText}>
+              {Math.round((day.steps / norm) * 100)} % нормы · {norm.toLocaleString('ru-RU')}
+            </Text>
+          </View>
         ) : null}
       </View>
 
@@ -89,6 +101,10 @@ export default function ActivityTab() {
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: spacing.md, gap: spacing.xs },
   summary: { color: colors.textMuted, fontSize: 16 },
+  norm: { width: '70%', gap: 6, alignItems: 'center' },
+  track: { alignSelf: 'stretch', height: 4, borderRadius: 2, backgroundColor: colors.track },
+  fill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },
+  normText: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   stats: { marginTop: spacing.md },
   weekTotal: { color: colors.text, fontSize: 38, fontWeight: '200', marginBottom: spacing.sm },
   weekUnit: { color: colors.textMuted, fontSize: 15 },

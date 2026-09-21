@@ -34,11 +34,12 @@ describe('сводки по дням', () => {
   it('шаги раскладываются по часам и совпадают с суммой', () => {
     const steps = [...minutes('2026-09-19 08:00:00', 10, 12), ...minutes('2026-09-19 19:00:00', 5, 30)];
     const [snapshot] = buildSnapshots(day({ steps }), 30);
-    expect(snapshot.steps).toBe(270);
+    // Дневная сумма — после шумоподавления (270 × 0.6), почасовые — сырые.
+    expect(snapshot.steps).toBe(162);
     expect(snapshot.stepsByHour).toHaveLength(24);
     expect(snapshot.stepsByHour[8]).toBe(120);
     expect(snapshot.stepsByHour[19]).toBe(150);
-    expect(snapshot.stepsByHour.reduce((a, b) => a + b, 0)).toBe(snapshot.steps);
+    expect(snapshot.stepsByHour.reduce((a, b) => a + b, 0)).toBe(270);
   });
 
   it('без данных за день сводка не создаётся', () => {

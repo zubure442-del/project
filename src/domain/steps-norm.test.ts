@@ -54,9 +54,10 @@ describe('СИНТЕТИЧЕСКИЕ: норма в сводках дня', () =
     packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 }, completeDays: [], error: null, capped: false,
   });
 
-  it('история — семь дней до дня, сам день не входит', () => {
+  it('история — семь дней до дня (шаги после шумоподавления), сам день не входит', () => {
+    // 6 000 → 4 300 и 7 000 → 5 000 после шумоподавления; 2/7 × 4 650 × 1.1 + 5/7 × 10 000 = 8 604 → 8 600
     const snaps = buildSnapshots(stepsOn({ '2026-09-19': 6000, '2026-09-20': 7000, '2026-09-21': 30000 }), 30);
-    expect(snaps.find((d) => d.date === '2026-09-21')?.stepNorm).toEqual({ value: 9200, withSleep: false });
+    expect(snaps.find((d) => d.date === '2026-09-21')?.stepNorm).toEqual({ value: 8600, withSleep: false });
   });
 
   it('сохранённая норма дня берётся как есть, даже если шаги за прошлые дни изменились', () => {

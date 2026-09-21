@@ -36,7 +36,7 @@ export default function TabsLayout() {
         options={{ title: todayTabLabel(selectedDate, dayView.today) }}
       />
       <Tabs.Screen name="activity" options={{ title: 'Активность', tabBarIcon: ({ color }) => <ActivityIcon color={color} /> }} />
-      <Tabs.Screen name="body" options={{ title: 'Тело', tabBarIcon: ({ color }) => <BodyIcon color={color} /> }} />
+      <Tabs.Screen name="body" options={{ title: 'Организм', tabBarIcon: ({ color }) => <BodyIcon color={color} /> }} />
     </Tabs>
   );
 }

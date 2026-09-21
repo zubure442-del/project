@@ -158,7 +158,7 @@ export function gapFor(points: DayPoint[]): number {
   return Math.max(90 * 60, median * 3);
 }
 
-/** Геометрия статичных графиков «Тела». */
+/** Геометрия статичных графиков «Организма». */
 const STATIC_HEIGHT = 150;
 const STATIC_TOP = 18;
 const STATIC_BOTTOM = 20;

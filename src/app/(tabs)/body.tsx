@@ -22,7 +22,7 @@ export default function BodyTab() {
 
   return (
     <Screen
-      title="Тело"
+      title="Организм"
       statusText={statusText}
       onSync={() => sync('refresh')}
       banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}

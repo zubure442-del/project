@@ -17,7 +17,7 @@ export const CENTER_LABEL_GAP = 8;
 /** Средняя ширина буквы подписи в долях кегля — для проверки, что подпись влезает. */
 const GLYPH_EM = 0.58;
 
-export const TAB_LABELS = ['Профиль', 'Сон', 'Сегодня', 'Активность', 'Тело'] as const;
+export const TAB_LABELS = ['Профиль', 'Сон', 'Сегодня', 'Активность', 'Организм'] as const;
 
 export interface TabBarLayout {
   /** Полная высота панели вместе с полосой «домой». */

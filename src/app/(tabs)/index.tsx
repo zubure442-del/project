@@ -1,19 +1,18 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { distanceMeters, formatDistance, type ComponentId } from '../../domain';
-import { adviceFor, adviceLabel, findDay, useTabDay, useVuelo } from '../../state';
+import { coffeeWindow, distanceMeters, formatDistance, type ComponentId } from '../../domain';
+import { adviceFor, adviceLabel, coffeeInput, findDay, useTabDay, useVuelo } from '../../state';
 import {
   DayBanner,
   COMPONENT_LABEL,
+  AssistantCarousel,
   Calibration,
   Card,
   HeroRing,
   Ring,
   Screen,
   Skeleton,
-  SparkIcon,
   WeekChart,
   colors,
-  radius,
   spacing,
 } from '../../ui';
 
@@ -24,6 +23,8 @@ export default function TodayTab() {
   const { date: picked, banner, complete } = useTabDay();
   const day = findDay(state.days, picked);
   const advice = adviceFor(state, picked);
+  // «Кофейное окно» — всегда про сегодня: подъём по последней ночи и обычный отход ко сну.
+  const coffee = coffeeInput(state.days);
   const chartWidth = width - spacing.md * 4;
   const steps = day?.steps ?? null;
   // Калории выбранного дня по нашей модели; нет биометрии — «—».
@@ -72,24 +73,13 @@ export default function TodayTab() {
         )}
       </Card>
 
-      <Card>
-        <View style={styles.aiHead}>
-          <SparkIcon color={colors.accent} />
-          <Text style={styles.aiTitle}>AI Ассистент</Text>
-        </View>
-        {advice ? (
-          <>
-            <Text style={styles.adviceLabel}>{adviceLabel(picked)}</Text>
-            <View style={styles.advice}>
-              <Text style={styles.adviceText}>{advice.text}</Text>
-            </View>
-          </>
-        ) : (
-          // Совет — только для полного дня: по неполному он вышел бы случайным.
-          <Text style={styles.adviceEmpty}>Совет появится, когда день будет полным</Text>
-        )}
-        <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
-      </Card>
+      <AssistantCarousel
+        advice={advice?.text ?? null}
+        adviceLabel={adviceLabel(picked)}
+        coffee={coffeeWindow(coffee)}
+        night={coffee.night}
+        nowMinute={coffee.nowMinute}
+      />
 
       <Card title="Неделя">
         <WeekChart
@@ -117,18 +107,4 @@ const styles = StyleSheet.create({
   calories: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
   caloriesValue: { color: colors.text, fontSize: 22, fontWeight: '300' },
   caloriesLabel: { color: colors.textMuted, fontSize: 13, marginRight: 4 },
-  aiHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
-  aiTitle: { color: colors.text, fontSize: 17, fontWeight: '500' },
-  advice: {
-    backgroundColor: 'rgba(242, 169, 59, 0.10)',
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: 'rgba(242, 169, 59, 0.28)',
-    padding: spacing.md,
-  },
-  adviceText: { color: colors.text, fontSize: 18, lineHeight: 27 },
-  adviceLabel: { color: colors.textMuted, fontSize: 13, marginBottom: spacing.xs },
-  adviceEmpty: { color: colors.textFaint, fontSize: 15 },
-  poweredBy: { color: colors.textFaint, fontSize: 11, marginTop: spacing.sm, textAlign: 'right' },
-  report: { color: colors.text, fontSize: 16, lineHeight: 24 },
 });

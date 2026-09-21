@@ -9,7 +9,22 @@ const TOP = 26;
 const BOTTOM = HEIGHT - 26;
 
 /** Плавная лента ночи: глубокий сон внизу волны, лёгкий вверху. */
-export function SleepWave({ segments, width }: { segments: DaySnapshot['sleepSegments']; width: number }) {
+export interface WaveOverlay {
+  /** Точки в минутах того же дня, что и отрезки сна. */
+  points: { m: number; v: number }[];
+  color: string;
+}
+
+export function SleepWave({
+  segments,
+  width,
+  overlays = [],
+}: {
+  segments: DaySnapshot['sleepSegments'];
+  width: number;
+  /** Линии поверх волны (пульс, вариабельность во сне): каждая в своём масштабе. */
+  overlays?: WaveOverlay[];
+}) {
   const wave = sleepWave(segments);
   if (wave.length < 2) return null;
 
@@ -40,6 +55,16 @@ export function SleepWave({ segments, width }: { segments: DaySnapshot['sleepSeg
         {/* Свечение линии: широкий полупрозрачный след под основной линией. */}
         <Path d={line} stroke={SLEEP_PALETTE.glow} strokeWidth={7} strokeOpacity={0.18} fill="none" strokeLinecap="round" />
         <Path d={line} stroke="url(#sleep-line)" strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+
+        {overlays.map((o, k) => {
+          const inside = o.points.filter((p) => p.m >= from && p.m <= to).sort((a, b) => a.m - b.m);
+          if (inside.length < 2) return null;
+          const lo = Math.min(...inside.map((p) => p.v));
+          const hi = Math.max(...inside.map((p) => p.v));
+          const oy = (v: number) => BOTTOM - ((v - lo) / Math.max(1, hi - lo)) * (BOTTOM - TOP);
+          const d = inside.map((p, i) => `${i ? 'L' : 'M'}${x(p.m).toFixed(1)} ${oy(p.v).toFixed(1)}`).join(' ');
+          return <Path key={k} d={d} stroke={o.color} strokeWidth={1.6} fill="none" strokeLinejoin="round" />;
+        })}
 
         <SvgText x={2} y={TOP - 8} fill={colors.textFaint} fontSize={11} opacity={0.5}>
           Лёгкий

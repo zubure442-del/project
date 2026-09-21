@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
+import type { BannerKind } from '../state';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing } from './theme';
 
-/** Плашка на «Сегодня» и «Активности», пока не заполнена биометрия. */
+/** Красная плашка на всех вкладках, пока не заполнена биометрия. */
 export function BiometryBanner() {
   return (
     <View style={styles.root}>
@@ -24,6 +25,25 @@ export function IncompleteBanner({ onRetry }: { onRetry: () => void }) {
       </Pressable>
     </View>
   );
+}
+
+/** Серая плашка: сегодня ещё неполный, показан последний полный день. */
+export function TodayLockedBanner({ phrase }: { phrase: string }) {
+  return (
+    <View style={[styles.root, styles.neutral]}>
+      <Text style={styles.neutralText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+        Ещё нет данных за сегодня · показан {phrase}
+      </Text>
+    </View>
+  );
+}
+
+/** Одна плашка над экраном по приоритету: ошибка синхронизации, биометрия, неполный сегодня. */
+export function DayBanner({ kind, phrase, onRetry }: { kind: BannerKind | null; phrase: string; onRetry: () => void }) {
+  if (kind === 'sync-failed') return <IncompleteBanner onRetry={onRetry} />;
+  if (kind === 'biometry') return <BiometryBanner />;
+  if (kind === 'today-locked') return <TodayLockedBanner phrase={phrase} />;
+  return null;
 }
 
 const styles = StyleSheet.create({

@@ -1,9 +1,8 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STEPS_GOAL, formulaText, type ComponentId } from '../../domain';
-import { findDay, todayKey, useSelectedDay, useVuelo } from '../../state';
+import { adviceFor, adviceLabel, findDay, todayKey, useTabDay, useVuelo } from '../../state';
 import {
-  BiometryBanner,
-  IncompleteBanner,
+  DayBanner,
   COMPONENT_LABEL,
   Card,
   HeroRing,
@@ -20,10 +19,11 @@ import {
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 export default function TodayTab() {
-  const { week, report, state, statusText, sync, profileReady, syncFailed } = useVuelo();
+  const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const [picked, setPicked] = useSelectedDay(state.days);
+  const { date: picked, select: setPicked, view, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
+  const advice = adviceFor(state, picked);
   const chartWidth = width - spacing.md * 4;
   const steps = day?.steps ?? null;
   // Кольцо отдаёт расход только за текущий день, за прошлые ничего не показываем.
@@ -35,15 +35,10 @@ export default function TodayTab() {
       date={picked}
       statusText={statusText}
       onSync={() => sync('refresh')}
-      banner={
-        <>
-          {profileReady ? null : <BiometryBanner />}
-          {syncFailed ? <IncompleteBanner onRetry={() => sync('retry')} /> : null}
-        </>
-      }
+      banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
     >
       <View style={styles.total}>
-        <HeroRing value={day?.total ?? null} size={Math.min(214, width - 140)} />
+        <HeroRing value={day?.total ?? null} calibrating={!!day && day.total === null} size={Math.min(214, width - 140)} />
       </View>
 
       <View style={styles.components}>
@@ -84,18 +79,30 @@ export default function TodayTab() {
           <SparkIcon color={colors.accent} />
           <Text style={styles.aiTitle}>AI Ассистент</Text>
         </View>
-        {report ? (
-          <View style={styles.advice}>
-            <Text style={styles.adviceText}>{report.text}</Text>
-          </View>
+        {advice ? (
+          <>
+            <Text style={styles.adviceLabel}>{adviceLabel(picked)}</Text>
+            <View style={styles.advice}>
+              <Text style={styles.adviceText}>{advice.text}</Text>
+            </View>
+          </>
         ) : (
-          <Skeleton height={64} />
+          // Совет — только для полного дня: по неполному он вышел бы случайным.
+          <Text style={styles.adviceEmpty}>Совет появится, когда день будет полным</Text>
         )}
         <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
       </Card>
 
       <Card title="Неделя" right={<InfoButton title={FORMULAS.total.title} text={formulaText('total')} />}>
-        <WeekChart days={week} value={(d) => d.total} selected={picked} onSelect={setPicked} width={chartWidth} />
+        <WeekChart
+          days={week}
+          value={(d) => d.total}
+          selected={picked}
+          onSelect={setPicked}
+          width={chartWidth}
+          lockedDate={view.todayLocked ? view.today : null}
+          fallbackDate={view.lastComplete}
+        />
       </Card>
     </Screen>
   );
@@ -123,6 +130,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   adviceText: { color: colors.text, fontSize: 18, lineHeight: 27 },
+  adviceLabel: { color: colors.textMuted, fontSize: 13, marginBottom: spacing.xs },
+  adviceEmpty: { color: colors.textFaint, fontSize: 15 },
   poweredBy: { color: colors.textFaint, fontSize: 11, marginTop: spacing.sm, textAlign: 'right' },
   track: { height: 4, borderRadius: 2, backgroundColor: colors.track, marginTop: spacing.sm },
   fill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },

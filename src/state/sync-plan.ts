@@ -13,7 +13,7 @@ import {
   toSyncResult,
   type VueloState,
 } from '../storage';
-import { DAY_START_HOUR, EMPTY_SCORE, findDay, reportMode, scoreOf, todayKey } from './day';
+import { DAY_START_HOUR, adviceMode, dayView, findDay, scoreOf, todayKey } from './day';
 
 /** Сегодня и вчера запрашиваем всегда: ночь через полночь кольцо отдаёт двумя днями, а сон приходит днём. */
 export const ALWAYS_DAYS = 2;
@@ -96,21 +96,20 @@ export function applySyncResult(
     caloriesDate: sync.activity ? todayKey(now) : state.caloriesDate,
   };
   if (sync.error) return { ...base, syncFailed: true };
-  const today = findDay(days, todayKey(now));
-  const report = buildTemplateReport({
-    mode: reportMode(now),
-    score: today ? scoreOf(today) : EMPTY_SCORE,
-    recentTemplateIds: recentTemplateIds(state.reports),
-  });
-  return {
-    ...base,
-    lastSyncAt: now.getTime(),
-    syncFailed: false,
-    reports: addReport(state.reports, {
-      date: todayKey(now),
-      mode: reportMode(now),
-      templateId: report.templateId,
-      text: report.text,
-    }),
-  };
+  return { ...base, lastSyncAt: now.getTime(), syncFailed: false, reports: withAdvice(state.reports, days, now) };
+}
+
+/**
+ * Совет пишем в историю только для полного дня: сегодня, если он полный, иначе последний полный.
+ * Шаблон подбираем без учёта прежнего совета на тот же день и режим: пока слабая сторона
+ * та же, текст не прыгает от синхронизации к синхронизации.
+ */
+function withAdvice(reports: VueloState['reports'], days: VueloState['days'], now: Date): VueloState['reports'] {
+  const date = dayView(days, now).lastComplete;
+  const day = date ? findDay(days, date) : null;
+  if (!date || !day) return reports;
+  const mode = adviceMode(date, now);
+  const others = reports.filter((r) => !(r.date === date && r.mode === mode));
+  const report = buildTemplateReport({ mode, score: scoreOf(day), recentTemplateIds: recentTemplateIds(others) });
+  return addReport(reports, { date, mode, templateId: report.templateId, text: report.text });
 }

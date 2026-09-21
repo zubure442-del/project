@@ -103,12 +103,14 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
     expect(r.activity.score).toBeNull();
     expect(r.state.score).toBeNull();
   });
-  it('отсутствующие компоненты не тянут итог вниз: веса пересчитываются', () => {
+  it('по одной или двум составляющим итог не строится никогда', () => {
     const r = computeDayScore({ ...base, night: night(336, 84) }); // 420 мин, 20% глубокого = 100
     expect(r.sleep.score).toBe(100);
-    expect(r.total).toBe(100);
-    expect(r.sleep.weight).toBe(1);
+    expect(r.total).toBeNull();
     expect(r.activity.weight).toBe(0);
+    const two = computeDayScore({ ...base, night: night(336, 84), steps: 10000 });
+    expect(two.activity.score).toBe(70);
+    expect(two.total).toBeNull();
   });
   it('веса 15/70/15 при полных данных', () => {
     const r = computeDayScore({ ...base, night: night(336, 84), steps: 10000, hrv: [65], heart: nightHeart(night(336, 84)) });
@@ -120,7 +122,8 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
     expect(r.total).toBe(79);
   });
   it('итог растёт по мере шагов в течение дня', () => {
-    const at = (steps: number) => computeDayScore({ ...base, night: night(336, 84), steps }).total as number;
+    const full = { ...base, night: night(336, 84), hrv: [65], heart: nightHeart(night(336, 84)) };
+    const at = (steps: number) => computeDayScore({ ...full, steps }).total as number;
     expect(at(0)).toBeLessThan(at(3000));
     expect(at(3000)).toBeLessThan(at(9000));
   });

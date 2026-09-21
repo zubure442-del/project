@@ -1,23 +1,35 @@
-import { useEffect, useRef, useState } from 'react';
-import type { DaySnapshot } from '../storage';
-import { dayHasAnything, defaultDay, findDay, todayKey } from './day';
+import { useState } from 'react';
+import { bannerKind, dayPhrase, dayView, type BannerKind, type DayView } from './day';
+import { useVuelo } from './provider';
+
+export interface TabDay {
+  /** Выбранный день экрана. */
+  date: string;
+  select: (date: string) => void;
+  view: DayView;
+  /** Какая плашка видна (одна, по приоритету). */
+  banner: BannerKind | null;
+  /** «вчерашний день» или «18 сентября» — для плашки «показан …». */
+  shownPhrase: string;
+}
 
 /**
- * Выбранный день экрана. Пока за сегодня пусто, открывается последний день с данными;
- * как только данные за сегодня приходят, экран сам переключается на сегодня.
+ * Выбранный день вкладки. По умолчанию — последний полный день; пока сегодня неполный,
+ * выбрать его нельзя. Выбор сбрасывается после каждой синхронизации: как только сегодня
+ * станет полным, при следующем открытии экран сам переключится на него.
  */
-export function useSelectedDay(days: DaySnapshot[]): [string, (date: string) => void] {
-  const [picked, setPicked] = useState<string | null>(null);
-  const jumped = useRef(false);
-  const today = todayKey();
-  const todayReady = dayHasAnything(findDay(days, today));
-
-  useEffect(() => {
-    if (todayReady && !jumped.current) {
-      jumped.current = true;
-      setPicked(today);
-    }
-  }, [today, todayReady]);
-
-  return [picked ?? defaultDay(days), setPicked];
+export function useTabDay(): TabDay {
+  const { state, syncFailed, profileReady } = useVuelo();
+  const view = dayView(state.days);
+  const resetKey = state.lastSyncAt ?? 0;
+  const [picked, setPicked] = useState<{ date: string; key: number } | null>(null);
+  const valid = picked !== null && picked.key === resetKey && !(view.todayLocked && picked.date === view.today);
+  const date = valid ? picked.date : view.defaultDate;
+  return {
+    date,
+    select: (next) => setPicked({ date: next, key: resetKey }),
+    view,
+    banner: bannerKind({ syncFailed, profileReady, todayLocked: view.todayLocked, shownDate: date, today: view.today }),
+    shownPhrase: dayPhrase(date, view),
+  };
 }

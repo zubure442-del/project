@@ -12,7 +12,6 @@ import {
   type KnownRing,
   type RingProfile,
 } from '../ble';
-import type { Report } from '../domain';
 import {
   EMPTY_STATE,
   buildSnapshots,
@@ -29,7 +28,7 @@ import {
   type Profile,
   type VueloState,
 } from '../storage';
-import { CACHE_FRESH_MS, findDay, isFresh, reportToShow, syncStatusText, todayKey, weekDays } from './day';
+import { CACHE_FRESH_MS, findDay, isFresh, syncStatusText, todayKey, weekDays } from './day';
 import { loadProgress } from './loading';
 import { applySyncResult, planDays } from './sync-plan';
 
@@ -56,7 +55,6 @@ interface Vuelo {
   state: VueloState;
   ready: boolean;
   week: { date: string; day: VueloState['days'][number] | null }[];
-  report: Report | null;
   phase: Phase;
   /** Откуда запущена загрузка: от этого заголовок («Обновляем данные» на pull-to-refresh) и появление. */
   loadingMode: SyncMode;
@@ -314,12 +312,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<Vuelo>(() => {
-    const today = findDay(state.days, todayKey());
     return {
       state,
       ready,
       week: weekDays(state.days),
-      report: reportToShow(state, today),
       phase,
       loadingMode,
       error,

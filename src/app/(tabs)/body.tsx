@@ -1,13 +1,12 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, STRESS_ZONE_BOUNDS, formulaText } from '../../domain';
-import { findDay, latestSpo2, useSelectedDay, useVuelo } from '../../state';
-import { BiometryBanner,
-  IncompleteBanner, Card, DayLineChart, HeroRing, InfoButton, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
+import { findDay, latestSpo2, useTabDay, useVuelo } from '../../state';
+import { DayBanner, Card, DayLineChart, HeroRing, InfoButton, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
 
 export default function BodyTab() {
-  const { week, state, statusText, sync, profileReady, syncFailed } = useVuelo();
+  const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const [picked, setPicked] = useSelectedDay(state.days);
+  const { date: picked, select: setPicked, view, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const chartWidth = width - spacing.md * 4;
   const points = day?.summaryPoints ?? [];
@@ -27,19 +26,22 @@ export default function BodyTab() {
       date={picked}
       statusText={statusText}
       onSync={() => sync('refresh')}
-      banner={
-        <>
-          {profileReady ? null : <BiometryBanner />}
-          {syncFailed ? <IncompleteBanner onRetry={() => sync('retry')} /> : null}
-        </>
-      }
+      banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.state ?? null} calibrating={!!day && day.scores.state === null} />
       </View>
 
       <Card title="Неделя" right={<InfoButton title={FORMULAS.state.title} text={formulaText('state')} />}>
-        <WeekChart days={week} value={(d) => d.scores.state} selected={picked} onSelect={setPicked} width={chartWidth} />
+        <WeekChart
+          days={week}
+          value={(d) => d.scores.state}
+          selected={picked}
+          onSelect={setPicked}
+          width={chartWidth}
+          lockedDate={view.todayLocked ? view.today : null}
+          fallbackDate={view.lastComplete}
+        />
       </Card>
 
       {/* Пустые карточки не показываем вовсе: рамка без данных ничего не говорит. */}

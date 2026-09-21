@@ -51,17 +51,66 @@ export const dayHasAnything = (day: DaySnapshot | null): boolean =>
     day.spo2.length > 0 ||
     day.summaryPoints.length > 0);
 
+/** День полный, если посчитаны все три составляющие — тогда есть и итог. */
+export const isCompleteDay = (day: DaySnapshot | null): boolean => !!day && day.total !== null;
+
+const shiftDate = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+
+export interface DayView {
+  today: string;
+  yesterday: string;
+  /** Сегодня неполный, а полный день раньше есть: точка сегодня с замком, открыт последний полный день. */
+  todayLocked: boolean;
+  /** Последний полный день не позже сегодняшнего. */
+  lastComplete: string | null;
+  /** Какой день открывать по умолчанию на всех вкладках. */
+  defaultDate: string;
+}
+
 /**
- * Какой день открывать. До четырёх утра это ещё «вчера»: ночь не закончилась.
- * Если за нужный день пусто, показываем последний день с данными.
+ * Какой день открывать. Полный сегодня — сегодня; иначе последний полный день (обычно вчера).
+ * До четырёх утра «сегодня» — ещё вчерашние сутки: ночь не закончилась.
+ * Если полных дней нет вовсе, открываем последний день с данными, чтобы было видно «Калибровку».
  */
-export function defaultDay(days: DaySnapshot[], now = new Date()): string {
+export function dayView(days: DaySnapshot[], now = new Date()): DayView {
   const today = todayKey(now);
-  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const yesterday = shiftDate(today, -1);
   const preferred = now.getHours() < DAY_START_HOUR ? yesterday : today;
-  if (dayHasAnything(findDay(days, preferred))) return preferred;
-  const last = [...days].reverse().find(dayHasAnything);
-  return last?.date ?? preferred;
+  const complete = days.filter((d) => d.date <= preferred && isCompleteDay(d)).map((d) => d.date).sort();
+  const lastComplete = complete.length ? complete[complete.length - 1] : null;
+  const todayLocked = !isCompleteDay(findDay(days, today)) && lastComplete !== null;
+  let defaultDate: string;
+  if (lastComplete !== null) defaultDate = lastComplete;
+  else if (dayHasAnything(findDay(days, preferred))) defaultDate = preferred;
+  else defaultDate = [...days].reverse().find(dayHasAnything)?.date ?? preferred;
+  return { today, yesterday, todayLocked, lastComplete, defaultDate };
+}
+
+/** Старое имя: день по умолчанию. */
+export const defaultDay = (days: DaySnapshot[], now = new Date()): string => dayView(days, now).defaultDate;
+
+/** Плашки над экраном. Видна одна, по приоритету. */
+export type BannerKind = 'sync-failed' | 'biometry' | 'today-locked';
+
+export function bannerKind(input: {
+  syncFailed: boolean;
+  profileReady: boolean;
+  todayLocked: boolean;
+  shownDate: string;
+  today: string;
+}): BannerKind | null {
+  if (input.syncFailed) return 'sync-failed';
+  if (!input.profileReady) return 'biometry';
+  if (input.todayLocked && input.shownDate !== input.today) return 'today-locked';
+  return null;
+}
+
+/** «вчерашний день» или «18 сентября» — для плашки и подписи совета. */
+export function dayPhrase(date: string, view: Pick<DayView, 'yesterday'>): string {
+  if (date === view.yesterday) return 'вчерашний день';
+  const [, month, day] = date.split('-');
+  return `${Number(day)} ${MONTHS[Number(month) - 1]}`;
 }
 
 /** Семь календарных дней подряд, последний — сегодня. День без данных остаётся пустым. */
@@ -94,23 +143,28 @@ export const scoreOf = (day: DaySnapshot) => ({
   stateInputs: day.stateInputs,
 });
 
-/** Отчёт за сегодня, уже выданный ранее: чтобы при перезапуске текст не менялся. */
-export function savedReport(state: VueloState, now = new Date()): Report | null {
-  const mode = reportMode(now);
-  const stored = state.reports.find((r) => r.date === todayKey(now) && r.mode === mode);
-  return stored ? { text: stored.text, focus: null, templateId: stored.templateId } : null;
+/** Режим совета для дня: сегодня — по времени суток, прошедший день — «как прошёл день». */
+export const adviceMode = (date: string, now = new Date()): ReportMode =>
+  date === todayKey(now) ? reportMode(now) : 'evening';
+
+/**
+ * Совет для дня. Только для полного дня: по неполному данных не хватает, и совет вышел бы случайным.
+ * Уже выданный совет берём из истории, чтобы при перезапуске текст не менялся.
+ */
+export function adviceFor(state: VueloState, date: string, now = new Date()): Report | null {
+  const day = findDay(state.days, date);
+  if (!isCompleteDay(day) || !day) return null;
+  const mode = adviceMode(date, now);
+  const stored = state.reports.find((r) => r.date === date && r.mode === mode);
+  if (stored) return { text: stored.text, focus: null, templateId: stored.templateId };
+  return buildTemplateReport({ mode, score: scoreOf(day), recentTemplateIds: recentTemplateIds(state.reports) });
 }
 
-/** Отчёт для показа: сохранённый за сегодня, иначе собранный из текущих данных. */
-export function reportToShow(state: VueloState, today: DaySnapshot | null, now = new Date()): Report | null {
-  const stored = savedReport(state, now);
-  if (stored) return stored;
-  if (!today) return null;
-  return buildTemplateReport({
-    mode: reportMode(now),
-    score: scoreOf(today),
-    recentTemplateIds: recentTemplateIds(state.reports),
-  });
+/** Подпись над советом: «Совет», «Совет · вчера», «Совет · 18 сентября». */
+export function adviceLabel(date: string, now = new Date()): string {
+  const view = { yesterday: shiftDate(todayKey(now), -1) };
+  if (date === todayKey(now)) return 'Совет';
+  return date === view.yesterday ? 'Совет · вчера' : `Совет · ${dayPhrase(date, view)}`;
 }
 
 const clock = (ms: number) => {

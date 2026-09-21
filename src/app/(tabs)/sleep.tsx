@@ -1,15 +1,14 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, formulaText } from '../../domain';
-import { findDay, useSelectedDay, useVuelo } from '../../state';
-import { BiometryBanner,
-  IncompleteBanner, Card, HeroRing, InfoButton, Screen, SleepWave, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
+import { findDay, useTabDay, useVuelo } from '../../state';
+import { DayBanner, Card, HeroRing, InfoButton, Screen, SleepWave, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
 
 const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
 
 export default function SleepTab() {
-  const { week, state, statusText, sync, profileReady, syncFailed } = useVuelo();
+  const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const [picked, setPicked] = useSelectedDay(state.days);
+  const { date: picked, select: setPicked, view, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const sleep = day?.sleep;
   const chartWidth = width - spacing.md * 4;
@@ -22,12 +21,7 @@ export default function SleepTab() {
       date={picked}
       statusText={statusText}
       onSync={() => sync('refresh')}
-      banner={
-        <>
-          {profileReady ? null : <BiometryBanner />}
-          {syncFailed ? <IncompleteBanner onRetry={() => sync('retry')} /> : null}
-        </>
-      }
+      banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.sleep ?? null} calibrating={!!day && day.scores.sleep === null} />
@@ -35,7 +29,15 @@ export default function SleepTab() {
       </View>
 
       <Card title="Неделя" right={<InfoButton title={FORMULAS.sleep.title} text={formulaText('sleep')} />}>
-        <WeekChart days={week} value={(d) => d.scores.sleep} selected={picked} onSelect={setPicked} width={chartWidth} />
+        <WeekChart
+          days={week}
+          value={(d) => d.scores.sleep}
+          selected={picked}
+          onSelect={setPicked}
+          width={chartWidth}
+          lockedDate={view.todayLocked ? view.today : null}
+          fallbackDate={view.lastComplete}
+        />
       </Card>
 
       {day?.sleepSegments.length ? (

@@ -176,13 +176,17 @@ export function computeDayScore(input: ScoreInput): DayScore {
     activity: activityScore(input.steps, input.heart, input.age),
     state: stateScore(input.hrv, restingHr, input.spo2),
   };
-  const present = (Object.keys(WEIGHTS) as ComponentId[]).filter((k) => scores[k] !== null);
-  const weightSum = present.reduce((sum, k) => sum + WEIGHTS[k], 0);
+  // Итог — только когда посчитаны все три составляющие. По одной или двум он не строится:
+  // «70 % активности» без сна и организма выглядел бы как оценка всего дня.
+  const complete = (Object.keys(WEIGHTS) as ComponentId[]).every((k) => scores[k] !== null);
+  const weightSum = WEIGHTS.sleep + WEIGHTS.activity + WEIGHTS.state;
   const comp = (k: ComponentId): ComponentScore => ({
     score: scores[k] === null ? null : Math.round(scores[k]),
     weight: scores[k] === null ? 0 : WEIGHTS[k] / weightSum,
   });
-  const total = weightSum === 0 ? null : Math.round(present.reduce((sum, k) => sum + WEIGHTS[k] * (scores[k] as number), 0) / weightSum);
+  const total = complete
+    ? Math.round((Object.keys(WEIGHTS) as ComponentId[]).reduce((sum, k) => sum + WEIGHTS[k] * (scores[k] as number), 0) / weightSum)
+    : null;
   return {
     total,
     sleep: comp('sleep'),

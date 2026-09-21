@@ -1,10 +1,9 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FORMULAS, busiestHour, formulaText, loadIntervals } from '../../domain';
-import { findDay, todayKey, useSelectedDay, useVuelo } from '../../state';
+import { findDay, todayKey, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
-  BiometryBanner,
-  IncompleteBanner,
+  DayBanner,
   Card,
   DayActivityChart,
   HeroRing,
@@ -19,9 +18,9 @@ import {
 } from '../../ui';
 
 export default function ActivityTab() {
-  const { week, state, statusText, sync, profileReady, syncFailed } = useVuelo();
+  const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const [picked, setPicked] = useSelectedDay(state.days);
+  const { date: picked, select: setPicked, view, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const age = profileAge(state.profile);
   const hours = day?.stepsByHour ?? [];
@@ -39,12 +38,7 @@ export default function ActivityTab() {
       date={picked}
       statusText={statusText}
       onSync={() => sync('refresh')}
-      banner={
-        <>
-          {profileReady ? null : <BiometryBanner />}
-          {syncFailed ? <IncompleteBanner onRetry={() => sync('retry')} /> : null}
-        </>
-      }
+      banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.activity ?? null} calibrating={!!day && day.scores.activity === null} />
@@ -57,7 +51,15 @@ export default function ActivityTab() {
       </View>
 
       <Card title="Неделя" right={<InfoButton title={FORMULAS.activity.title} text={formulaText('activity')} />}>
-        <WeekChart days={week} value={(d) => d.scores.activity} selected={picked} onSelect={setPicked} width={chartWidth} />
+        <WeekChart
+          days={week}
+          value={(d) => d.scores.activity}
+          selected={picked}
+          onSelect={setPicked}
+          width={chartWidth}
+          lockedDate={view.todayLocked ? view.today : null}
+          fallbackDate={view.lastComplete}
+        />
       </Card>
 
       <Card title="День" right={<InfoButton title={FORMULAS.busiestHour.title} text={formulaText('busiestHour')} />}>

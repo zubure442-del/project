@@ -88,4 +88,15 @@ describe('РЕАЛЬНЫЙ ЛОГ c: сон в кэше и на экранах',
     expect(state.syncFailed).toBe(false);
     expect(state.lastSyncAt).toBe(SYNC_END.getTime());
   });
+
+  it('итог — только при трёх составляющих: у 16.09 есть лишь организм, итога нет', async () => {
+    const { result } = await replayWeek();
+    const state = applySyncResult({ ...EMPTY_STATE, started: true }, result, null, SYNC_END);
+    const byDate = (date: string) => state.days.find((d) => d.date === date);
+    expect(byDate('2026-09-16')?.scores.state).not.toBeNull();
+    expect(byDate('2026-09-16')?.total).toBeNull();
+    expect(byDate('2026-09-21')?.total).not.toBeNull();
+    // Сегодня полный — совет записан за сегодня, в дневном режиме.
+    expect(state.reports.map((r) => [r.date, r.mode])).toEqual([['2026-09-21', 'day']]);
+  });
 });

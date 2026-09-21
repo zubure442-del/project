@@ -10,3 +10,7 @@ export * from './SleepWave';
 export * from './TabIcons';
 export * from './theme';
 export * from './WeekChart';
+export * from './FreshBadge';
+export * from './LoadingArt';
+export * from './LoadingScreen';
+export * from './TipIcons';

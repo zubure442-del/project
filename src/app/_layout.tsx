@@ -1,51 +1,41 @@
-import { Stack, router, usePathname } from 'expo-router';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef } from 'react';
 import { View } from 'react-native';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { VueloProvider, useVuelo } from '../state';
-import { FreshBadge } from './welcome';
-import { colors } from '../ui';
+import { FreshBadge, LoadingScreen, colors } from '../ui';
+
+/** Экран загрузки плавно появляется и уходит на главный. */
+const OVERLAY_FADE_MS = 400;
 
 function Routes() {
-  const { ready, state, sync, phase, dismissFresh } = useVuelo();
-  const pathname = usePathname();
-  const launched = useRef(false);
+  const { ready, state, phase, loadingMode, dismissFresh } = useVuelo();
 
-  // Вход в приложение: самый первый запуск ждёт «Начать», дальше — правило 10 минут.
-  useEffect(() => {
-    if (!ready || launched.current) return;
-    launched.current = true;
-    if (state.started) sync('launch');
-    else router.push('/welcome');
-  }, [ready, state.started, sync]);
-
-  // Любая синхронизация идёт только через экран загрузки: другого пути к кольцу за данными нет.
-  useEffect(() => {
-    if ((phase === 'loading' || phase === 'failed') && pathname !== '/welcome') router.push('/welcome');
-  }, [phase, pathname]);
-
-  // После «Очистить данные» приложение ведёт себя как при первом запуске.
-  useEffect(() => {
-    if (ready && launched.current && !state.started && pathname !== '/welcome') router.push('/welcome');
-  }, [pathname, ready, state.started]);
+  // Экран загрузки — поверх вкладок, а не отдельным маршрутом: выбранная вкладка сохраняется.
+  // Пока он открыт, вкладки состояние не получают: оно применяется один раз в конце.
+  const loading = !state.started || phase === 'loading' || phase === 'done' || phase === 'failed';
+  // На входе экран появляется сразу, на обновлении по запросу — плавно.
+  const fadeIn = loadingMode === 'refresh' || loadingMode === 'retry';
 
   // Пока читаем кэш, держим тёмный экран: иначе мелькнёт пустой главный.
   if (!ready) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: colors.bg },
-        animation: pathname === '/welcome' ? 'fade' : 'default',
-      }}
-    >
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="welcome" options={{ animation: 'fade', gestureEnabled: false }} />
-      <Stack.Screen name="raw-log" options={{ presentation: 'modal' }} />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="raw-log" options={{ presentation: 'modal' }} />
       </Stack>
+      {loading ? (
+        <Animated.View
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+          entering={fadeIn ? FadeIn.duration(OVERLAY_FADE_MS) : undefined}
+          exiting={FadeOut.duration(OVERLAY_FADE_MS)}
+        >
+          <LoadingScreen />
+        </Animated.View>
+      ) : null}
       {phase === 'fresh' ? <FreshBadge onDone={dismissFresh} /> : null}
     </View>
   );

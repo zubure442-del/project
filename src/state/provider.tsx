@@ -58,8 +58,8 @@ interface Vuelo {
   week: { date: string; day: VueloState['days'][number] | null }[];
   report: Report | null;
   phase: Phase;
-  /** Заголовок экрана загрузки: приветствие или «Обновляем данные» (pull-to-refresh). */
-  loadingMode: 'greeting' | 'refresh';
+  /** Откуда запущена загрузка: от этого заголовок («Обновляем данные» на pull-to-refresh) и появление. */
+  loadingMode: SyncMode;
   error: SyncError | null;
   statusText: string;
   profileReady: boolean;
@@ -70,6 +70,8 @@ interface Vuelo {
   /** Первый запуск: имя (или null — «Пропустить») и старт. Bluetooth спрашиваем только после этого. */
   markStarted: (name: string | null) => void;
   dismissFresh: () => void;
+  /** Экран загрузки дошёл до конца (или «Открыть с сохранёнными данными»): закрываем его. */
+  finishLoading: () => void;
   saveProfile: (profile: Profile) => void;
   /** Удаляет данные, историю, профиль и логи. Привязка к кольцу остаётся. */
   clearData: () => void;
@@ -96,7 +98,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<VueloState>(EMPTY_STATE);
   const [ready, setReady] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [loadingMode, setLoadingMode] = useState<'greeting' | 'refresh'>('greeting');
+  const [loadingMode, setLoadingMode] = useState<SyncMode>('launch');
   const [error, setError] = useState<SyncError | null>(null);
   const lastLiveAt = useRef(0);
   const ring = useRef<RingBle | null>(null);
@@ -105,16 +107,6 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   /** Живой замер идёт после загрузки; новая загрузка его прерывает и дожидается. */
   const liveTask = useRef<Promise<void>>(Promise.resolve());
   const stopLive = useRef(false);
-
-  useEffect(() => {
-    void loadState().then((loaded) => {
-      // Автоочистка кэша при запуске: дальше CACHE_DAYS хранить незачем.
-      const cleaned = { ...loaded, raw: keepRecentDays(loaded.raw) };
-      latest.current = cleaned;
-      setState(cleaned);
-      setReady(true);
-    });
-  }, []);
 
   const commit = useCallback((next: VueloState) => {
     latest.current = next;
@@ -167,7 +159,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       running.current = true;
       stopLive.current = true;
       setError(null);
-      setLoadingMode(mode === 'refresh' ? 'refresh' : 'greeting');
+      setLoadingMode(mode);
       loadProgress.reset();
       setPhase('loading');
 
@@ -246,6 +238,22 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     [commit, maybeLiveMeasure],
   );
 
+  // Вход в приложение. Самый первый запуск ждёт имя; дальше — правило 10 минут.
+  // Загрузка стартует в том же кадре, что и готовность кэша: главный экран не мелькает.
+  const booted = useRef(false);
+  useEffect(() => {
+    if (booted.current) return;
+    booted.current = true;
+    void loadState().then((loaded) => {
+      // Автоочистка кэша при запуске: дальше CACHE_DAYS хранить незачем.
+      const cleaned = { ...loaded, raw: keepRecentDays(loaded.raw) };
+      latest.current = cleaned;
+      setState(cleaned);
+      setReady(true);
+      if (cleaned.started) sync('launch');
+    });
+  }, [sync]);
+
   // Возврат из фона: правило 10 минут. «active» после шторки или системного окна — не возврат.
   useEffect(() => {
     let previous: AppStateStatus = AppState.currentState;
@@ -288,6 +296,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   );
 
   const dismissFresh = useCallback(() => setPhase('idle'), []);
+  const finishLoading = useCallback(() => {
+    if (!running.current) setPhase('idle');
+  }, []);
 
   const saveProfile = useCallback(
     (profile: Profile) => {
@@ -319,10 +330,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       forgetRing,
       markStarted,
       dismissFresh,
+      finishLoading,
       saveProfile,
       clearData,
     };
-  }, [clearData, dismissFresh, error, forgetRing, loadingMode, markStarted, phase, ready, saveProfile, state, sync]);
+  }, [clearData, dismissFresh, error, finishLoading, forgetRing, loadingMode, markStarted, phase, ready, saveProfile, state, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

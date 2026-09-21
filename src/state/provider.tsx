@@ -1,84 +1,78 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { nowRingTs } from '../codec';
-import { RingBle, handshake, liveMeasure, runSync, type KnownRing, type RingProfile, type SyncStage } from '../ble';
-import type { AutoMeasurePeriod } from '../codec';
+import {
+  RingBle,
+  clearPacketLog,
+  emptySyncResult,
+  handshake,
+  liveMeasure,
+  logNote,
+  runSync,
+  type KnownRing,
+  type RingProfile,
+} from '../ble';
 import type { Report } from '../domain';
-import { clearPacketLog } from '../ble';
 import {
   EMPTY_STATE,
-  addReport,
   buildSnapshots,
   clearState,
   isProfileComplete,
   keepLastDays,
   keepRecentDays,
-  loadedDays,
   loadState,
   mergeRaw,
   profileAge,
   saveState,
   splitByDay,
   toSyncResult,
-  type DaySnapshot,
   type Profile,
   type VueloState,
 } from '../storage';
-import {
-  CACHE_FRESH_MS,
-  applySync,
-  findDay,
-  isFresh,
-  reportMode,
-  reportToShow,
-  syncStatusText,
-  todayKey,
-  weekDays,
-} from './day';
-
+import { CACHE_FRESH_MS, findDay, isFresh, reportToShow, syncStatusText, todayKey, weekDays } from './day';
+import { loadProgress } from './loading';
+import { applySyncResult, planDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
 export const FRESH_MS = CACHE_FRESH_MS;
-/** Сегодня и вчера запрашиваем всегда: ночь через полночь кольцо отдаёт двумя днями. */
-export const ALWAYS_DAYS = 2;
-export const FIRST_PHASE_DAYS = ALWAYS_DAYS;
-export const TOTAL_DAYS = 7;
-/** Предел первой фазы. Пока идут пакеты, её не прерываем, но бесконечно не ждём. */
+/** Предел выгрузки. Пока идут пакеты, её не прерываем, но бесконечно не ждём. */
 export const HARD_CAP_MS = 120000;
 /** Если последний замер старше этого, запускаем один живой замер. */
 export const GAP_MIN = 90;
 /** Живой замер не чаще одного раза в это время. */
 export const LIVE_MEASURE_COOLDOWN_MS = 30 * 60 * 1000;
 
-export type Phase = 'idle' | 'first' | 'done' | 'failed' | 'fresh';
+/**
+ * idle — ничего не идёт; loading — открыт экран загрузки; done — загрузка кончилась;
+ * failed — связь не установилась, на экране загрузки текст ошибки; fresh — данные свежие, к кольцу не идём.
+ */
+export type Phase = 'idle' | 'loading' | 'done' | 'failed' | 'fresh';
 /** Три разные беды, о которых говорим по-разному. */
 export type SyncError = 'not-found' | 'lost' | 'slow';
+/** Откуда запущена синхронизация. Любой запуск идёт через экран загрузки. */
+export type SyncMode = 'launch' | 'resume' | 'refresh' | 'retry';
 
 interface Vuelo {
   state: VueloState;
   ready: boolean;
-  today: DaySnapshot | null;
-  week: { date: string; day: DaySnapshot | null }[];
+  week: { date: string; day: VueloState['days'][number] | null }[];
   report: Report | null;
-  stage: SyncStage | null;
   phase: Phase;
-  progress: number;
-  packets: number;
-  /** Связь с кольцом установлена: значит «не найдено» показывать нельзя. */
-  connected: boolean;
+  /** Заголовок экрана загрузки: приветствие или «Обновляем данные» (pull-to-refresh). */
+  loadingMode: 'greeting' | 'refresh';
   error: SyncError | null;
   statusText: string;
   profileReady: boolean;
-  sync: () => void;
+  /** Последняя синхронизация закончилась ошибкой связи: плашка «Не все данные загружены». */
+  syncFailed: boolean;
+  sync: (mode?: SyncMode) => void;
   forgetRing: () => void;
-  markStarted: () => void;
+  /** Первый запуск: имя (или null — «Пропустить») и старт. Bluetooth спрашиваем только после этого. */
+  markStarted: (name: string | null) => void;
   dismissFresh: () => void;
   saveProfile: (profile: Profile) => void;
-  setAutoMeasure: (minutes: AutoMeasurePeriod) => void;
-  /** Удаляет данные, историю, биометрию и логи. Привязка к кольцу остаётся. */
+  /** Удаляет данные, историю, профиль и логи. Привязка к кольцу остаётся. */
   clearData: () => void;
-  /** Не все дни догрузились: показываем плашку с «Повторить». */
-  incomplete: boolean;
 }
 
 const Context = createContext<Vuelo | null>(null);
@@ -89,37 +83,28 @@ export function useVuelo(): Vuelo {
   return value;
 }
 
-/** Календарная дата для смещения в днях назад. */
-const dateForOffset = (offset: number, now = new Date()): string =>
-  new Date(Date.parse(`${todayKey(now)}T00:00:00Z`) - offset * 86400000).toISOString().slice(0, 10);
-
-const EMPTY_SYNC = {
-  steps: [], sleep: [], heart: [], spo2: [], summary: [], activity: null, battery: null,
-  packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 },
-};
-
 const toRingProfile = (profile: Profile): RingProfile | null => {
   const age = profileAge(profile);
   if (!isProfileComplete(profile) || age === null) return null;
   return { age, heightCm: profile.heightCm as number, weightKg: profile.weightKg as number, male: profile.sex === 'male' };
 };
 
+/** Дать экрану загрузки отрисовать новый этап перед тяжёлым расчётом. */
+const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 16));
+
 export function VueloProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<VueloState>(EMPTY_STATE);
   const [ready, setReady] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [stage, setStage] = useState<SyncStage | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [packets, setPackets] = useState(0);
-  const [connected, setConnected] = useState(false);
-  /** Связь могла появиться уже после начала попытки, поэтому дублируем её в ref. */
-  const connectedRef = useRef(false);
+  const [loadingMode, setLoadingMode] = useState<'greeting' | 'refresh'>('greeting');
   const [error, setError] = useState<SyncError | null>(null);
-  const [incomplete, setIncomplete] = useState(false);
   const lastLiveAt = useRef(0);
   const ring = useRef<RingBle | null>(null);
   const running = useRef(false);
   const latest = useRef(EMPTY_STATE);
+  /** Живой замер идёт после загрузки; новая загрузка его прерывает и дожидается. */
+  const liveTask = useRef<Promise<void>>(Promise.resolve());
+  const stopLive = useRef(false);
 
   useEffect(() => {
     void loadState().then((loaded) => {
@@ -137,29 +122,6 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     void saveState(next);
   }, []);
 
-  /** Процент только растёт: откат назад выглядел бы как сбой. */
-  const advance = useCallback((value: number) => setProgress((p) => Math.max(p, value)), []);
-
-  /** Заряд обновляем независимо от правила свежести: он меняется всё время. */
-  const refreshBattery = useCallback(async () => {
-    const device = ring.current;
-    // Без защиты вызовы накладывались и слали 0x13/0x03/0x0B пачками.
-    if (!device || device.status !== 'ready' || running.current) return;
-    running.current = true;
-    try {
-      const off = device.onPacket(() => undefined);
-      const result = await runSync(device, { fromDay: 0, days: 0, extras: true });
-      off();
-      if (result.battery !== null) {
-        commit({ ...latest.current, battery: result.battery, batteryAt: Date.now() });
-      }
-    } catch {
-      // Заряд не критичен: молча оставляем прежний.
-    } finally {
-      running.current = false;
-    }
-  }, [commit]);
-
   /**
    * Один живой замер, если кольцо давно ничего не мерило.
    * Работает только при открытом приложении: в фоне iOS такое не разрешает.
@@ -173,12 +135,12 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       if (!quiet || Date.now() - lastLiveAt.current < LIVE_MEASURE_COOLDOWN_MS) return;
       lastLiveAt.current = Date.now();
       try {
-        const measured = await liveMeasure(device);
-        if (!measured) return;
+        const measured = await liveMeasure(device, undefined, () => stopLive.current);
+        if (!measured || stopLive.current) return;
         const ts = nowRingTs(Date.now(), -new Date().getTimezoneOffset() * 60);
         const source = latest.current;
         const raw = mergeRaw(source.raw, splitByDay({
-          ...EMPTY_SYNC,
+          ...emptySyncResult(),
           heart: [{ ts, value: measured.pulse, raw: [measured.pulse] }],
         }));
         const days = buildSnapshots(toSyncResult(raw), profileAge(source.profile) ?? source.age);
@@ -190,127 +152,117 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
-  const sync = useCallback(() => {
-    if (running.current) return;
-    const base = latest.current;
-    if (isFresh(base)) {
-      setPhase('fresh');
-      void refreshBattery();
-      return;
-    }
-    running.current = true;
-    void (async () => {
+  /**
+   * Единственный путь к кольцу за данными. Любой запуск (вход, возврат из фона,
+   * pull-to-refresh, «Повторить») открывает экран загрузки; по ходу выгрузки
+   * состояние не трогаем — оно применяется один раз в конце.
+   */
+  const sync = useCallback(
+    (mode: SyncMode = 'launch') => {
+      if (running.current) return;
+      if (isFresh(latest.current)) {
+        setPhase('fresh');
+        return;
+      }
+      running.current = true;
+      stopLive.current = true;
       setError(null);
-      setIncomplete(false);
-      connectedRef.current = false;
-      setConnected(false);
-      const startedAt = Date.now();
-      setProgress(0);
-      setPhase('first');
-      const device = ring.current ?? new RingBle(base.ring);
-      ring.current = device;
-      let known: KnownRing | null = null;
-      let firstPhaseOk = false;
+      setLoadingMode(mode === 'refresh' ? 'refresh' : 'greeting');
+      loadProgress.reset();
+      setPhase('loading');
 
-      /** Кладёт выгрузку в кэш: ряды дополняются по дню и типу, пустое не затирает. */
-      const store = (result: Awaited<ReturnType<typeof runSync>>) => {
-        const source = latest.current;
-        const raw = mergeRaw(source.raw, splitByDay(result));
-        const days = buildSnapshots(toSyncResult(raw, result.battery), profileAge(source.profile) ?? source.age);
-        if (!days.length) return;
-        const next = applySync({ ...source, raw, ring: known ?? source.ring }, days, result);
-        commit({
-          ...next.state,
-          reports: addReport(next.state.reports, {
-            date: todayKey(),
-            mode: reportMode(new Date()),
-            templateId: next.report.templateId,
-            text: next.report.text,
-          }),
-        });
-      };
-
-      try {
-        device.onStatus = (s) => setStage(s === 'scanning' || s === 'connecting' ? 'connecting' : null);
+      void (async () => {
+        await liveTask.current;
+        stopLive.current = false;
+        const base = latest.current;
+        const device = ring.current ?? new RingBle(base.ring);
+        ring.current = device;
+        let known: KnownRing | null = null;
         device.onKnown = (k) => {
           known = k;
         };
-        setStage('connecting');
-        await device.connect();
-        connectedRef.current = true;
-        setConnected(true);
-        // Рукопожатие — один раз на подключение: раньше оно уходило дважды подряд.
-        if (device.needsHandshake()) {
-          setStage('configuring');
-          await handshake(device, toRingProfile(base.profile), base.autoMeasureMin);
-          device.markHandshakeDone();
-        }
+        device.onStatus = () => undefined;
+        let connected = false;
+        try {
+          // Этап 1: поиск, соединение, рукопожатие.
+          try {
+            await device.connect();
+            connected = true;
+            // Рукопожатие — один раз на подключение, порядок 0x01 → 0x19 → 0x02.
+            if (device.needsHandshake()) {
+              await handshake(device, toRingProfile(base.profile), base.autoMeasureMin);
+              device.markHandshakeDone();
+            }
+          } catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            logNote(`нет связи: ${message}`);
+            const kind: SyncError = connected ? 'lost' : message.includes('не отвечает') ? 'slow' : 'not-found';
+            const next = { ...latest.current, syncFailed: true };
+            commit(next);
+            setError(kind);
+            loadProgress.set({ finished: true });
+            // Экран ошибки — только если связи не было вовсе или показывать нечего.
+            setPhase(connected && next.days.length ? 'done' : 'failed');
+            return;
+          }
 
-        const bump = () => setPackets((n) => n + 1);
-        // Одна фаза: на главный экран пускаем только после полной выгрузки.
-        // По ходу интерфейс не трогаем — разбор пакетов и пересчёт заметно лагали.
-        const cached = loadedDays(base.raw, todayKey());
-        const needed: number[] = [];
-        for (let day = 0; day < TOTAL_DAYS; day++) {
-          if (day < ALWAYS_DAYS || !cached.has(dateForOffset(day))) needed.push(day);
-        }
-        const result = await runSync(device, {
-          fromDay: needed[0] ?? 0,
-          days: needed.length ? needed[needed.length - 1] - needed[0] + 1 : ALWAYS_DAYS,
-          extras: true,
-          hardCapMs: HARD_CAP_MS,
-          onStage: setStage,
-          onProgress: advance,
-          onPacket: bump,
-        });
-        store(result);
-        firstPhaseOk = latest.current.days.length > 0;
-        setIncomplete(Date.now() - startedAt > HARD_CAP_MS);
-        setProgress(1);
-        setPhase('done');
-        void maybeLiveMeasure(device);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        // Частичная загрузка — не провал: данные за сегодня уже в кэше.
-        if (firstPhaseOk) {
-          setPhase('done');
-        } else {
-          setError(connectedRef.current ? 'lost' : message.includes('не отвечает') ? 'slow' : 'not-found');
-          commit({ ...latest.current, syncFailed: true });
-          setPhase('failed');
-        }
-      } finally {
-        setStage(null);
-        running.current = false;
-      }
-    })();
-  }, [advance, commit, maybeLiveMeasure, refreshBattery]);
+          // Этап 2: запросы по дням.
+          loadProgress.set({ stage: 2 });
+          const plan = planDays(base.completeDays);
+          logNote(plan.note);
+          let packets = 0;
+          const result = await runSync(device, {
+            days: plan.days,
+            extras: true,
+            hardCapMs: HARD_CAP_MS,
+            onProgress: (fraction) => loadProgress.set({ fraction }),
+            onPacket: () => loadProgress.set({ packets: ++packets }),
+            onNote: logNote,
+          });
 
-  // Возврат приложения из фона: приветствие и загрузка, если кэш устарел.
-  useEffect(() => {
-    const listener = (next: AppStateStatus) => {
-      if (next !== 'active' || !latest.current.started) return;
-      if (isFresh(latest.current)) {
-        void refreshBattery();
-        return;
-      }
-      sync();
-    };
-    const sub = AppState.addEventListener('change', listener);
-    return () => sub.remove();
-  }, [refreshBattery, sync]);
+          // Этап 3: разбор и расчёты.
+          loadProgress.set({ stage: 3 });
+          await yieldFrame();
+          const next = applySyncResult(latest.current, result, known);
 
-  const setAutoMeasure = useCallback(
-    (minutes: AutoMeasurePeriod) => commit({ ...latest.current, autoMeasureMin: minutes }),
-    [commit],
+          // Этап 4: запись кэша, потом одно применение состояния.
+          loadProgress.set({ stage: 4 });
+          await saveState(next);
+          latest.current = next;
+          setState(next);
+          loadProgress.set({ finished: true });
+          if (result.error) {
+            setError('lost');
+            setPhase(next.days.length ? 'done' : 'failed');
+          } else {
+            setPhase('done');
+            liveTask.current = maybeLiveMeasure(device);
+          }
+        } finally {
+          running.current = false;
+        }
+      })();
+    },
+    [commit, maybeLiveMeasure],
   );
+
+  // Возврат из фона: правило 10 минут. «active» после шторки или системного окна — не возврат.
+  useEffect(() => {
+    let previous: AppStateStatus = AppState.currentState;
+    const sub = AppState.addEventListener('change', (next) => {
+      const fromBackground = previous === 'background';
+      previous = next;
+      if (next === 'active' && fromBackground && latest.current.started) sync('resume');
+    });
+    return () => sub.remove();
+  }, [sync]);
 
   const clearData = useCallback(() => {
     void (async () => {
       clearPacketLog();
       const cleared = await clearState();
-      // Привязка к кольцу остаётся: её убирает «Забыть кольцо».
-      commit({ ...cleared, started: latest.current.started, ring: latest.current.ring });
+      // Привязка к кольцу остаётся: её убирает «Забыть кольцо». Дальше — как первый запуск.
+      commit({ ...cleared, ring: latest.current.ring });
       setPhase('idle');
     })();
   }, [commit]);
@@ -325,7 +277,16 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     })();
   }, [commit]);
 
-  const markStarted = useCallback(() => commit({ ...latest.current, started: true }), [commit]);
+  const markStarted = useCallback(
+    (name: string | null) => {
+      const trimmed = name?.trim() || null;
+      const current = latest.current;
+      commit({ ...current, started: true, profile: { ...current.profile, name: trimmed ?? current.profile.name } });
+      sync('launch');
+    },
+    [commit, sync],
+  );
+
   const dismissFresh = useCallback(() => setPhase('idle'), []);
 
   const saveProfile = useCallback(
@@ -334,7 +295,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       commit(next);
       // Кольцу профиль нужен сразу: пульсовые зоны и расход считает оно само.
       const forRing = toRingProfile(profile);
-      if (forRing && ring.current?.status === 'ready') void handshake(ring.current, forRing).catch(() => undefined);
+      if (forRing && ring.current?.status === 'ready' && !running.current) {
+        void handshake(ring.current, forRing).catch(() => undefined);
+      }
     },
     [commit],
   );
@@ -344,27 +307,22 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     return {
       state,
       ready,
-      today,
       week: weekDays(state.days),
       report: reportToShow(state, today),
-      stage,
       phase,
-      progress,
-      packets,
-      connected,
+      loadingMode,
       error,
       statusText: syncStatusText(state),
       profileReady: isProfileComplete(state.profile),
+      syncFailed: state.syncFailed && state.started,
       sync,
       forgetRing,
       markStarted,
       dismissFresh,
       saveProfile,
-      setAutoMeasure,
       clearData,
-      incomplete,
     };
-  }, [clearData, connected, dismissFresh, error, forgetRing, incomplete, markStarted, packets, phase, progress, ready, saveProfile, setAutoMeasure, stage, state, sync]);
+  }, [clearData, dismissFresh, error, forgetRing, loadingMode, markStarted, phase, ready, saveProfile, state, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

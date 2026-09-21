@@ -75,8 +75,13 @@ export interface VueloState {
   age: number | null;
   /** Полные ряды по дням: из них пересчитываются сводки. */
   raw: RawByDay;
-  /** Последняя попытка синхронизации не удалась. */
+  /** Последняя попытка синхронизации закончилась ошибкой связи: висит плашка «Повторить». */
   syncFailed: boolean;
+  /**
+   * Дни, выгруженные целиком: все потоки закрыты маркером конца. Их больше не запрашиваем
+   * (кроме сегодня и вчера). Пустой день с маркером тоже здесь.
+   */
+  completeDays: string[];
   /** Профиль: нужен для 0x02 и расчёта пульсовых зон. */
   profile: Profile;
   /** Частота автозамеров кольца, минуты: уходит в байт 6 команды 0x19. */
@@ -116,7 +121,7 @@ export const isProfileComplete = (p: Profile): boolean =>
   p.sex !== null && p.heightCm !== null && p.weightKg !== null && p.birthYear !== null;
 
 export const EMPTY_STATE: VueloState = {
-  days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, battery: null,
+  days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, completeDays: [], battery: null,
   caloriesToday: null, caloriesDate: null,
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false,
 };

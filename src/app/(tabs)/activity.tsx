@@ -19,7 +19,7 @@ import {
 } from '../../ui';
 
 export default function ActivityTab() {
-  const { week, state, phase, progress, packets, statusText, sync, profileReady, incomplete } = useVuelo();
+  const { week, state, statusText, sync, profileReady, syncFailed } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
@@ -38,14 +38,11 @@ export default function ActivityTab() {
       title="Активность"
       date={picked}
       statusText={statusText}
-      loading={phase === 'first'}
-      progress={progress}
-      packets={packets}
-      onSync={sync}
+      onSync={() => sync('refresh')}
       banner={
         <>
           {profileReady ? null : <BiometryBanner />}
-          {incomplete ? <IncompleteBanner onRetry={sync} /> : null}
+          {syncFailed ? <IncompleteBanner onRetry={() => sync('retry')} /> : null}
         </>
       }
     >

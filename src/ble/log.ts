@@ -1,6 +1,7 @@
 /** Кольцевой буфер сырых пакетов: нужен, чтобы присылать логи на разбор. */
 
-export type PacketDirection = 'in' | 'out';
+/** 'note' — служебная строка приложения (например, какие дни запрошены и почему). */
+export type PacketDirection = 'in' | 'out' | 'note';
 
 export interface LoggedPacket {
   /** Время телефона в миллисекундах. */
@@ -18,6 +19,13 @@ const toHex = (bytes: Uint8Array) =>
 
 export function logPacket(direction: PacketDirection, bytes: Uint8Array): void {
   buffer.push({ at: Date.now(), direction, hex: toHex(bytes) });
+  if (buffer.length > LIMIT) buffer.splice(0, buffer.length - LIMIT);
+  listeners.forEach((l) => l());
+}
+
+/** Строка-пояснение в отладочном логе. */
+export function logNote(text: string): void {
+  buffer.push({ at: Date.now(), direction: 'note', hex: text });
   if (buffer.length > LIMIT) buffer.splice(0, buffer.length - LIMIT);
   listeners.forEach((l) => l());
 }
@@ -42,5 +50,6 @@ const stamp = (at: number) => {
 
 /** Текст для отправки на разбор: время, направление и байты. */
 export function formatPacketLog(items: LoggedPacket[] = packetLog()): string {
-  return items.map((p) => `${stamp(p.at)} ${p.direction === 'in' ? '<-' : '->'} ${p.hex}`).join('\n');
+  const arrow = { in: '<-', out: '->', note: '#' } as const;
+  return items.map((p) => `${stamp(p.at)} ${arrow[p.direction]} ${p.hex}`).join('\n');
 }

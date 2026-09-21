@@ -1,7 +1,6 @@
 import { dateKey, nowRingTs } from '../codec';
 import { buildTemplateReport, formatMinute, type Report, type ReportMode } from '../domain';
-import { keepLastDays, recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
-import type { SyncResult } from '../ble/sync';
+import { recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
 
 /** Если данные свежее десяти минут, к кольцу не идём. */
 export const CACHE_FRESH_MS = 10 * 60 * 1000;
@@ -77,7 +76,7 @@ export function weekDays(days: DaySnapshot[], now = new Date()): { date: string;
 
 const c = (score: number | null) => ({ score, weight: score === null ? 0 : 1 });
 
-const EMPTY_SCORE = {
+export const EMPTY_SCORE = {
   total: null,
   sleep: c(null),
   activity: c(null),
@@ -86,7 +85,7 @@ const EMPTY_SCORE = {
   stateInputs: { hrv: false, restingHr: false, spo2: false },
 };
 
-const scoreOf = (day: DaySnapshot) => ({
+export const scoreOf = (day: DaySnapshot) => ({
   total: day.total,
   sleep: c(day.scores.sleep),
   activity: c(day.scores.activity),
@@ -112,29 +111,6 @@ export function reportToShow(state: VueloState, today: DaySnapshot | null, now =
     score: scoreOf(today),
     recentTemplateIds: recentTemplateIds(state.reports),
   });
-}
-
-/** Результат синхронизации поверх состояния: ряды дополняются по дню и типу данных. */
-export function applySync(state: VueloState, days: DaySnapshot[], sync: SyncResult, now = new Date()) {
-  const kept = keepLastDays(days);
-  const today = findDay(kept, todayKey(now));
-  const report = buildTemplateReport({
-    mode: reportMode(now),
-    score: today ? scoreOf(today) : EMPTY_SCORE,
-    recentTemplateIds: recentTemplateIds(state.reports),
-  });
-  return {
-    state: {
-      ...state,
-      days: kept,
-      lastSyncAt: now.getTime(),
-      syncFailed: false,
-      battery: sync.battery ?? state.battery,
-      caloriesToday: sync.activity ? sync.activity.calories : state.caloriesToday,
-      caloriesDate: sync.activity ? todayKey(now) : state.caloriesDate,
-    },
-    report,
-  };
 }
 
 const clock = (ms: number) => {

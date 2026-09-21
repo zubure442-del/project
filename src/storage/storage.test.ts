@@ -16,7 +16,7 @@ const heartAt = (from: string, values: number[], stepMin = 30): HeartSample[] =>
 
 const empty: SyncResult = {
   steps: [], sleep: [], heart: [], spo2: [], summary: [], activity: null, battery: null,
-  packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 },
+  packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 }, completeDays: [], error: null, capped: false,
 };
 
 /** Ночь 18→19 сентября: 5 часов лёгкого и час глубокого сна. */

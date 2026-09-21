@@ -20,7 +20,7 @@ import {
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 export default function TodayTab() {
-  const { week, report, state, phase, progress, packets, statusText, sync, profileReady, incomplete } = useVuelo();
+  const { week, report, state, statusText, sync, profileReady, syncFailed } = useVuelo();
   const { width } = useWindowDimensions();
   const [picked, setPicked] = useSelectedDay(state.days);
   const day = findDay(state.days, picked);
@@ -34,14 +34,11 @@ export default function TodayTab() {
       title="Итог"
       date={picked}
       statusText={statusText}
-      loading={phase === 'first'}
-      progress={progress}
-      packets={packets}
-      onSync={sync}
+      onSync={() => sync('refresh')}
       banner={
         <>
           {profileReady ? null : <BiometryBanner />}
-          {incomplete ? <IncompleteBanner onRetry={sync} /> : null}
+          {syncFailed ? <IncompleteBanner onRetry={() => sync('retry')} /> : null}
         </>
       }
     >

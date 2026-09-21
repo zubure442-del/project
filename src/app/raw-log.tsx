@@ -55,7 +55,7 @@ export default function RawLogScreen() {
         {items.length ? (
           items.map((p, i) => (
             <Text key={i} style={styles.line} selectable>
-              {stamp(p.at)} {p.direction === 'in' ? '<-' : '->'} {p.hex}
+              {stamp(p.at)} {p.direction === 'in' ? '<-' : p.direction === 'out' ? '->' : '#'} {p.hex}
             </Text>
           ))
         ) : (

@@ -87,15 +87,6 @@ export function keepRecentDays(raw: RawByDay, limit = CACHE_DAYS): RawByDay {
   return Object.fromEntries(dates.map((d) => [d, raw[d]]));
 }
 
-/** Какие дни уже закрыты и полностью загружены: их не перезапрашиваем. */
-export function loadedDays(raw: RawByDay, today: string): Set<string> {
-  return new Set(
-    Object.values(raw)
-      .filter((d) => d.date < today && (d.steps.length > 0 || d.heart.length > 0 || d.summary.length > 0))
-      .map((d) => d.date),
-  );
-}
-
 /** Обратно в вид выгрузки, чтобы пересчитать сводки теми же функциями. */
 export function toSyncResult(raw: RawByDay, battery: number | null = null): SyncResult {
   const steps: Sample[] = [];
@@ -131,6 +122,9 @@ export function toSyncResult(raw: RawByDay, battery: number | null = null): Sync
     activity: null,
     battery,
     packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 },
+    completeDays: [],
+    error: null,
+    capped: false,
   };
 }
 

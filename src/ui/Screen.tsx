@@ -1,9 +1,6 @@
-import { useEffect, useRef, type ReactNode } from 'react';
-import * as Haptics from 'expo-haptics';
+import type { ReactNode } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ProgressArc } from './ProgressArc';
 import { colors, radius, spacing } from './theme';
 
 const WEEKDAY = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -23,45 +20,24 @@ export interface ScreenProps {
   /** Дата выбранного дня. */
   date: string;
   statusText: string;
-  /** Идёт фоновая догрузка. */
-  loading: boolean;
-  progress: number;
-  packets: number;
+  /** Обновление: открывает экран загрузки (или «Данные актуальны», если кэш свежий). */
   onSync: () => void;
   /** Плашка над содержимым: например, о незаполненной биометрии. */
   banner?: ReactNode;
   children: ReactNode;
 }
 
-export function Screen({ title, date, statusText, loading, progress, packets, onSync, banner, children }: ScreenProps) {
+export function Screen({ title, date, statusText, onSync, banner, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
-  const wasLoading = useRef(false);
-
-  // Лёгкая отдача, когда догрузка закончилась.
-  useEffect(() => {
-    if (wasLoading.current && !loading) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    wasLoading.current = loading;
-  }, [loading]);
 
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <Text style={styles.title}>{title}</Text>
-        <Pressable style={styles.statusRow} onPress={onSync} disabled={loading}>
-          {loading ? (
-            <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(300)} style={styles.row}>
-              <ProgressArc size={16} progress={progress} pulse={packets} />
-              <Text style={styles.status}>
-                {formatDayTitle(date)} · Загрузка · {Math.round(progress * 100)} %
-              </Text>
-            </Animated.View>
-          ) : (
-            <Animated.View entering={FadeIn.duration(300)}>
-              <Text style={styles.status}>
-                {formatDayTitle(date)} · {statusText}
-              </Text>
-            </Animated.View>
-          )}
+        <Pressable style={styles.statusRow} onPress={onSync}>
+          <Text style={styles.status}>
+            {formatDayTitle(date)} · {statusText}
+          </Text>
         </Pressable>
       </View>
       {banner}

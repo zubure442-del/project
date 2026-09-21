@@ -90,7 +90,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
   const byDay = new Map(fixtures.cases.map((c) => [c.day_offset, c.packets.map(hexToBytes)]));
   it('кислород снова запрашивается и разбирается', async () => {
     const { transport, sent } = fakeRing((c) => (c[0] === 0x40 ? (byDay.get(c[1]) ?? []) : []));
-    const p = runSync(transport, { days: 3 });
+    const p = runSync(transport, { days: [0, 1, 2] });
     await vi.runAllTimersAsync();
     const r = await p;
     expect(sent[0][0]).toBe(0x13);
@@ -100,7 +100,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
   });
   it('на тишину запрос повторяется один раз, но выгрузка идёт дальше', async () => {
     const { transport, sent } = fakeRing(() => []);
-    const p = runSync(transport, { days: 1 });
+    const p = runSync(transport, { days: [0] });
     await vi.runAllTimersAsync();
     await p;
     // 0x11 больше не шлём; каждый архивный запрос ушёл дважды, разовые 0x03 и 0x0B — по разу
@@ -110,7 +110,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
   it('в окне первого пакета второй запрос не уходит', async () => {
     // Кольцо молчит: повтор допустим, но не раньше FIRST_PACKET_MS.
     const { transport, sent, sentAt } = fakeRing(() => []);
-    const p = runSync(transport, { days: 1 });
+    const p = runSync(transport, { days: [0] });
     await vi.runAllTimersAsync();
     await p;
     const stepsAt = sent.map((c, i) => ({ code: c[0], at: sentAt[i] })).filter((x) => x.code === 0x10);
@@ -124,7 +124,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
       (c) => (c[0] === 0x10 ? [hexToBytes('10 9c 3a af 6a 00 00 00 15 2b 00 00 00 00 00 33 07 00 00 00')] : []),
       7000,
     );
-    const p = runSync(transport, { days: 1 });
+    const p = runSync(transport, { days: [0] });
     await vi.runAllTimersAsync();
     const r = await p;
     expect(sent.filter((c) => c[0] === 0x10)).toHaveLength(1);
@@ -133,7 +133,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
 
   it('явный конец потока (16 ff) повтора не вызывает', async () => {
     const { transport, sent } = fakeRing((c) => (c[0] === 0x16 ? [command(0x16, 0xff)] : []));
-    const p = runSync(transport, { days: 1 });
+    const p = runSync(transport, { days: [0] });
     await vi.runAllTimersAsync();
     await p;
     expect(sent.filter((c) => c[0] === 0x16)).toHaveLength(1);
@@ -143,7 +143,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
     const { transport } = fakeRing((c) =>
       c[0] === 0x10 ? [hexToBytes('14 26 8c b0 6a 47 00 00 00 00 00 00 00 00 00 00 00 00 00 00')] : [],
     );
-    const p = runSync(transport, { days: 1 });
+    const p = runSync(transport, { days: [0] });
     await vi.runAllTimersAsync();
     const r = await p;
     expect(r.heart.map((h) => h.value)).toEqual([71]);
@@ -151,7 +151,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
 
   it('на ответ «занято» запрос не повторяем, а ждём', async () => {
     const { transport, sent } = fakeRing((c) => (c[0] === 0x10 ? [command(0x06, 0x02)] : []));
-    const p = runSync(transport, { days: 1 });
+    const p = runSync(transport, { days: [0] });
     await vi.runAllTimersAsync();
     await p;
     expect(sent.filter((c) => c[0] === 0x10)).toHaveLength(1);
@@ -161,13 +161,13 @@ describe('выгрузка с реальными пакетами 0x40 и под
     const withMarker = fakeRing((c) => (c[0] === 0x10 ? [command(0x10, 0x7c, 0xc1, 0xb1, 0x6a)] : []));
     const silent = fakeRing(() => []);
     const t0 = Date.now();
-    const withMarkerRun = runSync(withMarker.transport, { days: 1 });
+    const withMarkerRun = runSync(withMarker.transport, { days: [0] });
     await vi.runAllTimersAsync();
     await withMarkerRun;
     const fast = Date.now() - t0;
 
     const t1 = Date.now();
-    const silentRun = runSync(silent.transport, { days: 1 });
+    const silentRun = runSync(silent.transport, { days: [0] });
     await vi.runAllTimersAsync();
     await silentRun;
     const slow = Date.now() - t1;
@@ -180,7 +180,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
     const { transport, sent } = fakeRing((c) =>
       c[0] === 0x10 ? [command(0x10, 0x00, 0x60, 0xae, 0x6a, 5, 5, 5)] : [],
     );
-    const p = runSync(transport, { days: 1 });
+    const p = runSync(transport, { days: [0] });
     await vi.runAllTimersAsync();
     const r = await p;
     expect(sent.filter((c) => c[0] === 0x10)).toHaveLength(1);
@@ -190,7 +190,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
     const { transport } = fakeRing((c) =>
       c[0] === 0x03 ? [command(0x03, 0, 0, 0, 0, 100, 0, 0, 0)] : c[0] === 0x10 ? [command(0x0b, 64)] : [],
     );
-    const p = runSync(transport, { days: 1 });
+    const p = runSync(transport, { days: [0] });
     await vi.runAllTimersAsync();
     const r = await p;
     expect(r.battery).toBe(64);

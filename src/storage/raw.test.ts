@@ -9,7 +9,7 @@ const ring = (s: string) => Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
 
 const empty: SyncResult = {
   steps: [], sleep: [], heart: [], spo2: [], summary: [], activity: null, battery: null,
-  packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 },
+  packetCounts: { steps: 0, sleep: 0, heart: 0, spo2: 0, summary: 0 }, completeDays: [], error: null, capped: false,
 };
 
 const summary: SummaryRecord[] = [

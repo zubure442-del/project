@@ -85,7 +85,7 @@ describe('РЕАЛЬНЫЕ БАЙТЫ: сон приходит в ответ н�
 
   it('сон попадает в выгрузку, хотя пришёл в чужом окне', async () => {
     const { transport, sent } = fakeRing();
-    const p = runSync(transport, { days: 2 });
+    const p = runSync(transport, { days: [0, 1] });
     await vi.runAllTimersAsync();
     const r = await p;
 
@@ -99,7 +99,7 @@ describe('РЕАЛЬНЫЕ БАЙТЫ: сон приходит в ответ н�
   it('из этих минут собирается ночь с глубокой и лёгкой фазой', async () => {
     const { transport } = fakeRing();
     // кольцо в этом логе отвечает на день −1, поэтому запрашиваем два дня
-    const p = runSync(transport, { days: 2 });
+    const p = runSync(transport, { days: [0, 1] });
     await vi.runAllTimersAsync();
     const r = await p;
 
@@ -122,7 +122,7 @@ describe('РЕАЛЬНЫЕ БАЙТЫ: сон приходит в ответ н�
         return () => listeners.delete(l);
       },
     };
-    const p = runSync(transport, { days: 1 });
+    const p = runSync(transport, { days: [0] });
     await vi.runAllTimersAsync();
     expect((await p).sleep).toEqual([]);
   });

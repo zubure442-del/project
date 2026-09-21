@@ -1,9 +1,9 @@
 import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AccessibilityInfo, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useVuelo } from '../state';
+import { canLeave, loadProgress, nextShownStage, shownPercent, useVuelo, type ShownStage } from '../state';
 import { ProgressArc, colors, radius, spacing } from '../ui';
 
 /** Границы приветствия по времени суток. */
@@ -14,10 +14,6 @@ export const GREETINGS = [
 ] as const;
 export const GREETING_NIGHT = 'Доброй ночи';
 
-/** Приветствие висит хотя бы столько, даже если данные пришли мгновенно. */
-const MIN_VISIBLE_MS = 1200;
-/** Кольцо давно молчит — предупреждаем, но продолжаем ждать. */
-const SLOW_MS = 8000;
 
 export function greeting(now = new Date(), name?: string | null): string {
   const h = now.getHours();
@@ -25,7 +21,6 @@ export function greeting(now = new Date(), name?: string | null): string {
   return name ? `${base}, ${name}` : base;
 }
 
-const STAGE_TEXT = { connecting: 'Ищем кольцо', configuring: 'Настраиваем', loading: 'Загружаем данные' } as const;
 
 /** Три разные беды — три разных текста. В заголовке суть, в тексте только что делать. */
 const PROBLEMS = {
@@ -63,49 +58,45 @@ function useDelayedText(text: string) {
   return state;
 }
 
+const STAGE_TEXT = ['Подключаемся к кольцу', 'Забираем данные', 'Считаем показатели', 'Собираем итог'] as const;
+
+const leave = () => (router.canGoBack() ? router.back() : router.replace('/'));
+
 export default function Welcome() {
-  const { state, phase, stage, progress, packets, error, sync, markStarted } = useVuelo();
+  const { state, phase, error, sync, markStarted, loadingMode } = useVuelo();
   const insets = useSafeAreaInsets();
   const [reduceMotion, setReduceMotion] = useState(false);
-  const [slow, setSlow] = useState(false);
-  const shownAt = useRef(0);
-  const lastPacket = useRef(0);
-  const needsStart = !state.started && !state.days.length;
+  const real = useSyncExternalStore(loadProgress.subscribe, loadProgress.get);
+  const [shown, setShown] = useState<ShownStage>(() => ({ stage: 1, since: Date.now() }));
+  const [percent, setPercent] = useState(0);
+  const shownRef = useRef(shown);
+  const percentRef = useRef(0);
+  const needsStart = !state.started;
 
   useEffect(() => {
-    shownAt.current = Date.now();
-    lastPacket.current = Date.now();
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
   }, []);
 
-  // Пакеты приходят часто: отметку держим в ref, состояние трогаем раз в секунду по таймеру.
+  // Этапы идут за реальными событиями, но каждый висит на экране не меньше положенного.
   useEffect(() => {
-    lastPacket.current = Date.now();
-  }, [packets]);
-
-  useEffect(() => {
-    if (needsStart) return;
+    if (needsStart || phase === 'failed') return;
     const timer = setInterval(() => {
-      const quiet = Date.now() - lastPacket.current > SLOW_MS;
-      setSlow((was) => (was === quiet ? was : quiet));
-    }, 1000);
+      const now = Date.now();
+      const progress = loadProgress.get();
+      const next = nextShownStage(shownRef.current, progress, now);
+      if (next !== shownRef.current) setShown((shownRef.current = next));
+      const p = shownPercent(percentRef.current, next, progress);
+      if (p !== percentRef.current) setPercent((percentRef.current = p));
+      if (phase === 'done' && canLeave(next, progress, now)) {
+        clearInterval(timer);
+        leave();
+      }
+    }, 100);
     return () => clearInterval(timer);
-  }, [needsStart]);
-
-  // Уходим на главный экран, когда первая фаза закончилась либо когда данные за сегодня уже есть.
-  useEffect(() => {
-    if (needsStart) return;
-    const enough = phase === 'done';
-    if (!enough) return;
-    const wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - shownAt.current));
-    const timer = setTimeout(() => router.replace('/'), wait);
-    return () => clearTimeout(timer);
   }, [needsStart, phase]);
 
-  const open = () => router.replace('/');
   const problem = phase === 'failed' ? PROBLEMS[error ?? 'not-found'] : null;
-  const percent = stage === 'loading' ? ` · ${String(Math.round(progress * 100)).padStart(2, ' ')} %` : '';
-  const status = useDelayedText(stage ? `${STAGE_TEXT[stage]}${percent}` : 'Готовим данные');
+  const status = useDelayedText(`${STAGE_TEXT[shown.stage - 1]} · шаг ${shown.stage} из 4`);
 
   if (problem) {
     return (
@@ -119,15 +110,11 @@ export default function Welcome() {
         </View>
         <Pressable
           style={styles.button}
-          onPress={() => {
-            setSlow(false);
-            shownAt.current = Date.now();
-            sync();
-          }}
+          onPress={() => sync('retry')}
         >
           <Text style={styles.buttonText}>Повторить</Text>
         </Pressable>
-        <Pressable style={styles.secondary} onPress={open}>
+        <Pressable style={styles.secondary} onPress={leave}>
           <Text style={styles.secondaryText}>Открыть с сохранёнными данными</Text>
         </Pressable>
       </View>
@@ -135,19 +122,19 @@ export default function Welcome() {
   }
 
   return (
-    <Pressable style={styles.root} onPress={needsStart ? undefined : open}>
+    <View style={styles.root}>
       <View style={{ height: insets.top + spacing.xl }} />
       <Animated.Text entering={FadeIn.duration(600)} style={styles.greeting}>
         {/* При обновлении по запросу приветствие не показываем: это не новый вход. */}
-        {state.started && state.lastSyncAt !== null ? greeting(new Date(), state.profile.name) : greeting()}
+        {loadingMode === 'refresh' && !needsStart ? 'Обновляем данные' : greeting(new Date(), state.profile.name)}
       </Animated.Text>
 
       <View style={styles.center}>
         <ProgressArc
           size={168}
-          progress={needsStart ? 0 : progress}
-          pulse={packets}
-          breathing={!needsStart && phase === 'first'}
+          progress={needsStart ? 0 : percent}
+          pulse={real.packets}
+          breathing={!needsStart && phase === 'loading'}
           reduceMotion={reduceMotion}
           showLogo
         />
@@ -156,11 +143,6 @@ export default function Welcome() {
             <Animated.Text style={[styles.stageText, { opacity: status.visible ? 1 : 0 }]}>
               {status.shown}
             </Animated.Text>
-            {slow ? (
-              <Animated.Text entering={FadeIn.duration(280)} style={styles.slow}>
-                Кольцо отвечает медленно…
-              </Animated.Text>
-            ) : null}
           </View>
         )}
       </View>
@@ -168,11 +150,7 @@ export default function Welcome() {
       {needsStart ? (
         <Pressable
           style={styles.button}
-          onPress={() => {
-            markStarted();
-            shownAt.current = Date.now();
-            sync();
-          }}
+          onPress={() => markStarted(null)}
         >
           <Text style={styles.buttonText}>Начать</Text>
         </Pressable>
@@ -182,7 +160,7 @@ export default function Welcome() {
         <Text style={styles.note}>Bluetooth нужен для связи с кольцом. Данные остаются на телефоне</Text>
         <Text style={styles.note}>Не медицинский прибор. Показатели носят справочный характер</Text>
       </View>
-    </Pressable>
+    </View>
   );
 }
 

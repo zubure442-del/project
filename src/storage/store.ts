@@ -17,6 +17,8 @@ export async function loadState(): Promise<VueloState> {
       reports: parsed.reports ?? [],
       lastSyncAt: parsed.lastSyncAt ?? null,
       syncFailed: parsed.syncFailed ?? false,
+      // Старый кэш не знал о маркерах: один раз выгрузим неделю целиком и отметим дни.
+      completeDays: parsed.completeDays ?? [],
       battery: parsed.battery ?? null,
       caloriesToday: parsed.caloriesToday ?? null,
       caloriesDate: parsed.caloriesDate ?? null,

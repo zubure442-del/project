@@ -1,5 +1,5 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { STEPS_DEFAULT_NORM, type ComponentId } from '../../domain';
+import { distanceMeters, formatDistance, type ComponentId } from '../../domain';
 import { adviceFor, adviceLabel, findDay, useTabDay, useVuelo } from '../../state';
 import {
   DayBanner,
@@ -25,8 +25,6 @@ export default function TodayTab() {
   const advice = adviceFor(state, picked);
   const chartWidth = width - spacing.md * 4;
   const steps = day?.steps ?? null;
-  // Своя норма дня; у старых сводок из кэша её нет — тогда 10 000.
-  const norm = day?.stepNorm?.value ?? STEPS_DEFAULT_NORM;
   // Кольцо отдаёт расход только за текущий день, за прошлые ничего не показываем.
   // Калории выбранного дня по нашей модели; нет биометрии — «—».
   const calories = day?.calories ?? null;
@@ -53,25 +51,20 @@ export default function TodayTab() {
         ))}
       </View>
 
-      <Card title="Шаги и калории">
+      <Card title="Дистанция и калории">
         {steps === null ? (
           <Skeleton height={44} />
         ) : (
-          <>
-            <View style={styles.stepsRow}>
-              <Text style={styles.steps}>{steps.toLocaleString('ru-RU')}</Text>
-              <View style={styles.calories}>
-                <Text style={styles.caloriesValue}>{calories === null ? '—' : calories.toLocaleString('ru-RU')}</Text>
-                <Text style={styles.caloriesLabel}>ккал</Text>
-              </View>
+          <View style={styles.stepsRow}>
+            {/* Дистанция — от шагов после шумоподавления и роста из профиля. */}
+            <Text style={styles.steps}>
+              {state.profile.heightCm === null ? '—' : formatDistance(distanceMeters(steps, state.profile.heightCm))}
+            </Text>
+            <View style={styles.calories}>
+              <Text style={styles.caloriesValue}>{calories === null ? '—' : calories.toLocaleString('ru-RU')}</Text>
+              <Text style={styles.caloriesLabel}>ккал</Text>
             </View>
-            <View style={styles.normRow}>
-              <View style={styles.track}>
-                <View style={[styles.fill, { width: `${Math.min(100, (steps / norm) * 100)}%` }]} />
-              </View>
-              <Text style={styles.norm}>из {norm.toLocaleString('ru-RU')}</Text>
-            </View>
-          </>
+          </View>
         )}
       </Card>
 
@@ -131,9 +124,5 @@ const styles = StyleSheet.create({
   adviceLabel: { color: colors.textMuted, fontSize: 13, marginBottom: spacing.xs },
   adviceEmpty: { color: colors.textFaint, fontSize: 15 },
   poweredBy: { color: colors.textFaint, fontSize: 11, marginTop: spacing.sm, textAlign: 'right' },
-  normRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
-  track: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.track },
-  norm: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
-  fill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },
   report: { color: colors.text, fontSize: 16, lineHeight: 24 },
 });

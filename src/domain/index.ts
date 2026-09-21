@@ -1,5 +1,5 @@
 export * from './week';
-export * from './formulas';
+export * from './tab-info';
 export * from './charts';
 export * from './heart';
 export * from './report';

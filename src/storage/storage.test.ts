@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { HeartSample, Sample, SummaryRecord } from '../codec';
+import type { Sample, SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
 import { buildSnapshots, keepLastDays } from './build';
 import { addReport, recentTemplateIds } from './store';
@@ -10,9 +10,6 @@ const ring = (s: string) => Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
 /** Минуты одного значения подряд. */
 const minutes = (from: string, count: number, value: number): Sample[] =>
   Array.from({ length: count }, (_, i) => ({ ts: ring(from) + i * 60, value }));
-
-const heartAt = (from: string, values: number[], stepMin = 30): HeartSample[] =>
-  values.map((value, i) => ({ ts: ring(from) + i * stepMin * 60, value, raw: [value] }));
 
 const empty: SyncResult = {
   steps: [], sleep: [], heart: [], spo2: [], summary: [], activity: null, battery: null,

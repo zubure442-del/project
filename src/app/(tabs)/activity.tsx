@@ -1,14 +1,12 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { FORMULAS, busiestHour, formulaText, weekCalories } from '../../domain';
-import { findDay, heroHint, missingInputs, useTabDay, useVuelo } from '../../state';
+import { TAB_INFO, tabInfoText, busiestHour, weekCalories } from '../../domain';
+import { findDay, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
   DayBanner,
   Card,
   DayActivityChart,
-  HeroHint,
   HeroRing,
-  InfoButton,
   Screen,
   Skeleton,
   WeekBars,
@@ -22,7 +20,7 @@ import {
 export default function ActivityTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase, view } = useTabDay();
+  const { date: picked, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const age = profileAge(state.profile);
   const hours = day?.stepsByHour ?? [];
@@ -35,6 +33,7 @@ export default function ActivityTab() {
 
   return (
     <Screen
+      info={{ title: TAB_INFO.activity.title, text: tabInfoText('activity') }}
       title="Активность"
       statusText={statusText}
       onSync={() => sync('refresh')}
@@ -42,7 +41,6 @@ export default function ActivityTab() {
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.activity ?? null} />
-        {(day?.scores.activity ?? null) === null ? <HeroHint text={heroHint('activity', picked, view.today)} missing={missingInputs('activity', day)} /> : null}
         {day?.steps != null ? (
           <Text style={styles.summary}>
             {day.steps.toLocaleString('ru-RU')} шагов · {calories === null ? '—' : calories.toLocaleString('ru-RU')} ккал
@@ -50,7 +48,7 @@ export default function ActivityTab() {
         ) : null}
       </View>
 
-      <Card title="Неделя" right={<InfoButton title={FORMULAS.activity.title} text={formulaText('activity')} />}>
+      <Card title="Неделя">
         <WeekChart
           days={week}
           value={(d) => d.scores.activity}
@@ -59,7 +57,7 @@ export default function ActivityTab() {
         />
       </Card>
 
-      <Card title="День" right={<InfoButton title={FORMULAS.busiestHour.title} text={formulaText('busiestHour')} />}>
+      <Card title="День">
         {day ? (
           <DayActivityChart
             heart={day.heart}
@@ -77,7 +75,7 @@ export default function ActivityTab() {
         </View>
       </Card>
 
-      <Card title="Калории · неделя" right={<InfoButton title={FORMULAS.calories.title} text={formulaText('calories')} />}>
+      <Card title="Калории · неделя">
         <Text style={styles.weekTotal}>
           {weekTotal === null ? '—' : weekTotal.toLocaleString('ru-RU')}
           <Text style={styles.weekUnit}> ккал</Text>

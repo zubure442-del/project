@@ -15,9 +15,6 @@ export const CARDIO_WEIGHT = 4;
 export const SLEEP_TARGET_MIN = 420;
 export const SLEEP_VOLUME_WEIGHT = 0.7;
 export const DEEP_RATIO_BEST = { from: 0.15, to: 0.25 } as const;
-export const HRV_TARGET = 65;
-export const RESTING_HR_TARGET = 60;
-export const RESTING_HR_PENALTY = 2.5;
 /** Пульсовые зоны, которые учитывает оценка активности: доля от максимального пульса и очки. */
 export const CARDIO_ZONES = [
   { from: 0.85, points: 2 },
@@ -86,8 +83,6 @@ export interface DayScore {
   /** Какие входы «организма» удалось посчитать — для объяснения в интерфейсе. */
 }
 
-const clamp = (x: number, lo = 0, hi = 100) => Math.min(hi, Math.max(lo, x));
-const avg = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
 
 export function sleepScore(night: SleepSession | null): number | null {
   if (!night) return null;

@@ -1,14 +1,14 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { FORMULAS, formulaText } from '../../domain';
-import { findDay, heroHint, missingInputs, useTabDay, useVuelo } from '../../state';
-import { DayBanner, Card, HeroHint, HeroRing, InfoButton, Screen, SleepWave, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
+import { TAB_INFO, tabInfoText } from '../../domain';
+import { findDay, useTabDay, useVuelo } from '../../state';
+import { DayBanner, Card, HeroRing, Screen, SleepWave, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
 
 const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
 
 export default function SleepTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase, view } = useTabDay();
+  const { date: picked, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const sleep = day?.sleep;
   const chartWidth = width - spacing.md * 4;
@@ -17,6 +17,7 @@ export default function SleepTab() {
 
   return (
     <Screen
+      info={{ title: TAB_INFO.sleep.title, text: tabInfoText('sleep') }}
       title="Сон"
       statusText={statusText}
       onSync={() => sync('refresh')}
@@ -24,11 +25,10 @@ export default function SleepTab() {
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.sleep ?? null} />
-        {(day?.scores.sleep ?? null) === null ? <HeroHint text={heroHint('sleep', picked, view.today)} missing={missingInputs('sleep', day)} /> : null}
         {sleep ? <Text style={styles.summary}>{hhmm(sleep.totalMin)}</Text> : null}
       </View>
 
-      <Card title="Неделя" right={<InfoButton title={FORMULAS.sleep.title} text={formulaText('sleep')} />}>
+      <Card title="Неделя">
         <WeekChart
           days={week}
           value={(d) => d.scores.sleep}
@@ -43,7 +43,7 @@ export default function SleepTab() {
         </Card>
       ) : null}
 
-      <Card right={<InfoButton title={FORMULAS.deepShare.title} text={formulaText('deepShare')} />}>
+      <Card>
         {sleep && deepShare !== null ? (
           <>
             <View style={styles.bar}>

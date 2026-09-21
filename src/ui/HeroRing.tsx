@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Defs, LinearGradient, RadialGradient, Stop } from 'react-native-svg';
-import { InfoButton } from './Sheet';
 import { colors } from './theme';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -118,26 +117,9 @@ export function HeroRing({
   );
 }
 
-/**
- * Одна строка под кольцом, когда оценки нет: что делать сегодня или «Нет данных за этот день».
- * В «i» — чего именно не хватает.
- */
-export function HeroHint({ text, missing }: { text: string; missing: string[] }) {
-  return (
-    <View style={styles.hint}>
-      <Text style={styles.hintText} numberOfLines={2}>
-        {text}
-      </Text>
-      {missing.length ? <InfoButton title="Чего не хватает" text={`Не хватает: ${missing.join(', ')}`} /> : null}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   center: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   value: { color: colors.text, fontWeight: '200', letterSpacing: -1 },
   collecting: { color: colors.textMuted, fontSize: 13 },
-  hint: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 24 },
-  hintText: { color: colors.textMuted, fontSize: 14, textAlign: 'center', flexShrink: 1 },
   caption: { color: colors.textMuted, fontSize: 14, marginTop: 2 },
 });

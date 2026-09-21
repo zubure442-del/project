@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CalendarButton } from './Calendar';
+import { InfoButton } from './Sheet';
 import { colors, radius, spacing } from './theme';
 
 const WEEKDAY = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -18,6 +19,8 @@ export const weekdayName = (date: string) => WEEKDAY[new Date(`${date}T12:00:00Z
 
 export interface ScreenProps {
   title: string;
+  /** Один «i» в шапке: описание метрик вкладки простыми словами. На «Сегодня» его нет. */
+  info?: { title: string; text: string };
   statusText: string;
   /** Обновление: открывает экран загрузки (или «Данные актуальны», если кэш свежий). */
   onSync: () => void;
@@ -26,14 +29,17 @@ export interface ScreenProps {
   children: ReactNode;
 }
 
-export function Screen({ title, statusText, onSync, banner, children }: ScreenProps) {
+export function Screen({ title, info, statusText, onSync, banner, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
 
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.titleRow}>
-          <Text style={styles.title}>{title}</Text>
+          <View style={styles.titleLeft}>
+            <Text style={styles.title}>{title}</Text>
+            {info ? <InfoButton title={info.title} text={info.text} /> : null}
+          </View>
           {/* Календарь: выбранный день один на все вкладки. */}
           <CalendarButton />
         </View>
@@ -91,6 +97,7 @@ export const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  titleLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1 },
   title: { color: colors.text, fontSize: 28, fontWeight: '600', flexShrink: 1 },
   spacer: { flex: 1 },
   statusRow: { marginTop: 4, height: 20, justifyContent: 'center' },

@@ -1,13 +1,11 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { FORMULAS, STEPS_DEFAULT_NORM, formulaText, type ComponentId } from '../../domain';
-import { adviceFor, adviceLabel, findDay, heroHint, missingInputs, useTabDay, useVuelo } from '../../state';
+import { STEPS_DEFAULT_NORM, type ComponentId } from '../../domain';
+import { adviceFor, adviceLabel, findDay, useTabDay, useVuelo } from '../../state';
 import {
   DayBanner,
   COMPONENT_LABEL,
   Card,
-  HeroHint,
   HeroRing,
-  InfoButton,
   Ring,
   Screen,
   Skeleton,
@@ -22,7 +20,7 @@ const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 export default function TodayTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase, view } = useTabDay();
+  const { date: picked, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const advice = adviceFor(state, picked);
   const chartWidth = width - spacing.md * 4;
@@ -42,7 +40,6 @@ export default function TodayTab() {
     >
       <View style={styles.total}>
         <HeroRing value={day?.total ?? null} size={Math.min(214, width - 140)} />
-        {(day?.total ?? null) === null ? <HeroHint text={heroHint('total', picked, view.today)} missing={missingInputs('total', day)} /> : null}
       </View>
 
       <View style={styles.components}>
@@ -56,7 +53,7 @@ export default function TodayTab() {
         ))}
       </View>
 
-      <Card title="Шаги и калории" right={<InfoButton title={FORMULAS.stepNorm.title} text={formulaText('stepNorm')} />}>
+      <Card title="Шаги и калории">
         {steps === null ? (
           <Skeleton height={44} />
         ) : (
@@ -66,7 +63,6 @@ export default function TodayTab() {
               <View style={styles.calories}>
                 <Text style={styles.caloriesValue}>{calories === null ? '—' : calories.toLocaleString('ru-RU')}</Text>
                 <Text style={styles.caloriesLabel}>ккал</Text>
-                <InfoButton title="Калории" text={formulaText('calories')} />
               </View>
             </View>
             <View style={styles.normRow}>
@@ -98,7 +94,7 @@ export default function TodayTab() {
         <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
       </Card>
 
-      <Card title="Неделя" right={<InfoButton title={FORMULAS.total.title} text={formulaText('total')} />}>
+      <Card title="Неделя">
         <WeekChart
           days={week}
           value={(d) => d.total}

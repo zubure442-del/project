@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptySyncResult } from '../ble/sync';
 import { visibleDays } from '../domain/week';
 import { EMPTY_STATE, type DaySnapshot, type VueloState } from '../storage';
-import { HERO_HINTS, adviceFor, adviceLabel, bannerKind, dayPhrase, dayView, heroHint, missingInputs, selectedDay, shortDate, todayTabLabel } from './day';
+import { adviceFor, adviceLabel, bannerKind, dayPhrase, dayView, selectedDay, shortDate, todayTabLabel } from './day';
 import { applySyncResult } from './sync-plan';
 
 const NOON = new Date(2026, 8, 21, 13, 0);
@@ -128,22 +128,5 @@ describe('СИНТЕТИЧЕСКИЕ: календарь — один выбра
     expect(shortDate('2026-09-21')).toBe('21 сен');
     expect(todayTabLabel(TODAY, TODAY)).toBe('Сегодня');
     expect(todayTabLabel(YESTERDAY, TODAY)).toBe('20 сен');
-  });
-});
-
-describe('СИНТЕТИЧЕСКИЕ: «Данные собираются» вместо числа', () => {
-  it('сегодня — что сделать; прошлый день — без обещаний', () => {
-    expect(heroHint('sleep', TODAY, TODAY)).toBe(HERO_HINTS.sleepToday);
-    expect(heroHint('activity', TODAY, TODAY)).toBe(HERO_HINTS.wearToday);
-    expect(heroHint('state', TODAY, TODAY)).toBe(HERO_HINTS.wearToday);
-    expect(heroHint('sleep', YESTERDAY, TODAY)).toBe('Нет данных за этот день.');
-  });
-
-  it('в «i» — чего именно не хватает', () => {
-    const incomplete = day(TODAY, false);
-    expect(missingInputs('state', incomplete)).toEqual(['вариабельность', 'пульс во сне', 'кислород']);
-    expect(missingInputs('total', incomplete)).toEqual(['организм']);
-    expect(missingInputs('sleep', null)).toEqual(['сон за ночь']);
-    expect(missingInputs('activity', { ...incomplete, steps: null })).toEqual(['шаги']);
   });
 });

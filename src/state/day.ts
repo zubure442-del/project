@@ -145,37 +145,6 @@ export function shortDate(date: string): string {
 /** Подпись центральной вкладки: «Сегодня», если выбран сегодняшний день, иначе дата. */
 export const todayTabLabel = (selected: string, today: string) => (selected === today ? 'Сегодня' : shortDate(selected));
 
-/** Кольца-герои вкладок. */
-export type HeroMetric = 'total' | 'sleep' | 'activity' | 'state';
-
-export const HERO_HINTS = {
-  sleepToday: 'Сон появится утром. Поносите кольцо ночью.',
-  wearToday: 'Поносите кольцо ещё немного, данные появятся.',
-  pastDay: 'Нет данных за этот день.',
-} as const;
-
-/** Строка под кольцом без оценки: про сегодня — что сделать, про прошлый день — без обещаний. */
-export function heroHint(metric: HeroMetric, date: string, today: string): string {
-  if (date !== today) return HERO_HINTS.pastDay;
-  return metric === 'sleep' ? HERO_HINTS.sleepToday : HERO_HINTS.wearToday;
-}
-
-/** Чего именно не хватает для оценки — для «i» под кольцом. */
-export function missingInputs(metric: HeroMetric, day: DaySnapshot | null): string[] {
-  if (metric === 'total') {
-    const names = { sleep: 'сон', activity: 'активность', state: 'организм' } as const;
-    return (Object.keys(names) as (keyof typeof names)[]).filter((k) => !day || day.scores[k] === null).map((k) => names[k]);
-  }
-  if (metric === 'sleep') return !day || day.sleep === null ? ['сон за ночь'] : [];
-  if (metric === 'activity') return !day || day.steps === null ? ['шаги'] : [];
-  const inputs = day?.stateInputs ?? { hrv: false, restingHr: false, spo2: false };
-  return [
-    !inputs.hrv ? 'вариабельность' : null,
-    !inputs.restingHr ? 'пульс во сне' : null,
-    !inputs.spo2 ? 'кислород' : null,
-  ].filter((v): v is string => v !== null);
-}
-
 /** Семь календарных дней подряд, последний — сегодня. День без данных остаётся пустым. */
 export function weekDays(days: DaySnapshot[], now = new Date()): { date: string; day: DaySnapshot | null }[] {
   const byDate = new Map(days.map((d) => [d.date, d]));

@@ -1,12 +1,12 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { FORMULAS, STRESS_ZONE_BOUNDS, formulaText } from '../../domain';
-import { findDay, heroHint, latestSpo2, missingInputs, useTabDay, useVuelo } from '../../state';
-import { DayBanner, Card, DayLineChart, HeroHint, HeroRing, InfoButton, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
+import { TAB_INFO, tabInfoText, STRESS_ZONE_BOUNDS } from '../../domain';
+import { findDay, latestSpo2, useTabDay, useVuelo } from '../../state';
+import { DayBanner, Card, DayLineChart, HeroRing, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
 
 export default function BodyTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase, view } = useTabDay();
+  const { date: picked, banner, shownPhrase } = useTabDay();
   const day = findDay(state.days, picked);
   const chartWidth = width - spacing.md * 4;
   const points = day?.summaryPoints ?? [];
@@ -22,6 +22,7 @@ export default function BodyTab() {
 
   return (
     <Screen
+      info={{ title: TAB_INFO.organism.title, text: tabInfoText('organism') }}
       title="Организм"
       statusText={statusText}
       onSync={() => sync('refresh')}
@@ -29,10 +30,9 @@ export default function BodyTab() {
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.state ?? null} />
-        {(day?.scores.state ?? null) === null ? <HeroHint text={heroHint('state', picked, view.today)} missing={missingInputs('state', day)} /> : null}
       </View>
 
-      <Card title="Неделя" right={<InfoButton title={FORMULAS.state.title} text={formulaText('state')} />}>
+      <Card title="Неделя">
         <WeekChart
           days={week}
           value={(d) => d.scores.state}
@@ -43,13 +43,13 @@ export default function BodyTab() {
 
       {/* Пустые карточки не показываем вовсе: рамка без данных ничего не говорит. */}
       {stress.length ? (
-        <Card title="Стресс" right={<InfoButton title={FORMULAS.stress.title} text={formulaText('stress')} />}>
+        <Card title="Стресс">
           <DayLineChart points={stress} width={chartWidth} fixed={{ min: 0, max: 100 }} guides={STRESS_ZONE_BOUNDS} />
         </Card>
       ) : null}
 
       {spo2.length ? (
-        <Card title="Кислород" right={<InfoButton title={FORMULAS.state.title} text={formulaText('state')} />}>
+        <Card title="Кислород">
           <DayLineChart points={spo2} width={chartWidth} unit="%" fixed={{ min: 90, max: 100 }} />
         </Card>
       ) : lastSpo2 ? (
@@ -61,19 +61,19 @@ export default function BodyTab() {
       ) : null}
 
       {hrv.length ? (
-        <Card title="Вариабельность" right={<InfoButton title={FORMULAS.hrv.title} text={formulaText('hrv')} />}>
+        <Card title="Вариабельность">
           <DayLineChart points={hrv} width={chartWidth} unit="мс" />
         </Card>
       ) : null}
 
       {pressure.length ? (
-        <Card title="Давление · оценка" right={<InfoButton title={FORMULAS.pressure.title} text={formulaText('pressure')} />}>
+        <Card title="Давление · оценка">
           <PressureChart points={pressure} width={chartWidth} />
         </Card>
       ) : null}
 
       {glucose.length ? (
-        <Card title="Глюкоза · оценка" right={<InfoButton title={FORMULAS.glucose.title} text={formulaText('glucose')} />}>
+        <Card title="Глюкоза · оценка">
           <DayLineChart points={glucose} width={chartWidth} unit="ммоль/л" />
         </Card>
       ) : null}

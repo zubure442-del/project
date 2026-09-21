@@ -4,8 +4,6 @@ import type { DaySnapshot } from '../storage';
 export const MIN_STEPS_FOR_DAY = 500;
 /** Пока дней мало, точки не растягиваем на всю ширину, а держим в центре. */
 export const MAX_DAY_SPACING = 56;
-/** Чип динамики показываем, только когда есть чем усреднять. */
-export const MIN_DAYS_FOR_TREND = 3;
 
 export const hasData = (day: DaySnapshot | null): day is DaySnapshot =>
   !!day && (day.sleep !== null || (day.steps ?? 0) >= MIN_STEPS_FOR_DAY);

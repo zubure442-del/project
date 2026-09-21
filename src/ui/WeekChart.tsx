@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { MAX_DAY_SPACING, MIN_DAYS_FOR_TREND, hasData, visibleDays } from '../domain';
+import { MAX_DAY_SPACING, hasData, visibleDays } from '../domain';
 import type { DaySnapshot } from '../storage';
 import { Sheet } from './Sheet';
 import { colors, radius, spacing, withAlpha } from './theme';
@@ -34,7 +34,6 @@ function LockGlyph({ cx, cy }: { cx: number; cy: number }) {
 
 /** Компактный график за 7 дней. Числа только над выбранной точкой. */
 export function WeekChart({ days, value, selected, onSelect, width, lockedDate = null, fallbackDate = null }: WeekChartProps) {
-  const [touched, setTouched] = useState(false);
   const [lockedOpen, setLockedOpen] = useState(false);
   const height = 96;
   const top = 22;
@@ -78,14 +77,7 @@ export function WeekChart({ days, value, selected, onSelect, width, lockedDate =
       void Haptics.selectionAsync();
       onSelect(date);
     }
-    setTouched(true);
   };
-
-  const average = known.length ? known.reduce((a, b) => a + b, 0) / known.length : null;
-  const trend =
-    known.length >= MIN_DAYS_FOR_TREND && selectedValue !== null && average !== null
-      ? Math.round(selectedValue - average)
-      : null;
 
   if (!shown.length) return null;
 
@@ -95,7 +87,6 @@ export function WeekChart({ days, value, selected, onSelect, width, lockedDate =
       onMoveShouldSetResponder={() => true}
       onResponderGrant={(e) => pick(e, true)}
       onResponderMove={(e) => pick(e, false)}
-      onResponderRelease={() => setTouched(false)}
     >
       <Svg width={width} height={height}>
         {[top, bottom].map((gy) => (
@@ -156,11 +147,6 @@ export function WeekChart({ days, value, selected, onSelect, width, lockedDate =
           </SvgText>
         ))}
       </Svg>
-      {trend !== null && !touched ? (
-        <Text style={styles.trend}>
-          {trend > 0 ? '↑' : trend < 0 ? '↓' : '→'} {Math.abs(trend)} к неделе
-        </Text>
-      ) : null}
       <Sheet visible={lockedOpen} title="Сегодня" onClose={() => setLockedOpen(false)}>
         <Text style={styles.sheetText}>
           Данных за сегодня ещё нет. Итог появится, когда будут сон, активность и состояние организма. Пока можно
@@ -183,7 +169,6 @@ export function WeekChart({ days, value, selected, onSelect, width, lockedDate =
 }
 
 const styles = StyleSheet.create({
-  trend: { color: colors.textMuted, fontSize: 13, marginTop: spacing.xs },
   sheetText: { color: colors.textMuted, fontSize: 15, lineHeight: 22 },
   sheetButton: {
     backgroundColor: colors.accent,

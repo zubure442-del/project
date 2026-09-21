@@ -1,5 +1,5 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { FORMULAS, busiestHour, formulaText, loadIntervals } from '../../domain';
+import { FORMULAS, busiestHour, formulaText } from '../../domain';
 import { findDay, todayKey, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
@@ -26,10 +26,6 @@ export default function ActivityTab() {
   const hours = day?.stepsByHour ?? [];
   const best = day ? busiestHour(hours, day.heart.map((p) => ({ m: p.m, v: p.v })), age) : null;
   const chartWidth = width - spacing.md * 4;
-  const zones = day
-    ? loadIntervals(day.heart.map((p) => ({ m: p.m, v: p.v })), age, day.stepsByMinute, day.restingHr)
-    : [];
-  const loadMinutes = Math.round(zones.reduce((sum, z) => sum + (z.to - z.from), 0));
   const calories = picked === todayKey() ? state.caloriesToday : null;
 
   return (
@@ -74,12 +70,6 @@ export default function ActivityTab() {
         ) : (
           <Skeleton height={130} />
         )}
-        {zones.length ? (
-          <Text style={styles.zones}>
-            {zones.length} {plural(zones.length, 'эпизод', 'эпизода', 'эпизодов')} · {Math.floor(loadMinutes / 60)} ч{' '}
-            {String(loadMinutes % 60).padStart(2, '0')} м
-          </Text>
-        ) : null}
         <View style={[ui.statRow, styles.stats]}>
           <Stat label="Шаги" value={day?.steps != null ? day.steps.toLocaleString('ru-RU') : '—'} />
           <Stat label="Самый активный час" value={best !== null ? `${best}:00` : '—'} />
@@ -89,18 +79,8 @@ export default function ActivityTab() {
   );
 }
 
-/** Русские окончания для «период / периода / периодов». */
-function plural(n: number, one: string, few: string, many: string): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return one;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
-  return many;
-}
-
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: spacing.md, gap: spacing.xs },
   summary: { color: colors.textMuted, fontSize: 16 },
   stats: { marginTop: spacing.md },
-  zones: { color: colors.textMuted, fontSize: 14, marginTop: spacing.xs },
 });

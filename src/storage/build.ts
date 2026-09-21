@@ -1,6 +1,7 @@
 import { dateKey, nowRingTs, wallClock, type Sample, type SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
 import {
+  CONSISTENCY_WINDOW_DAYS,
   PERSONAL_BASELINE_DAYS,
   STEP_HISTORY_DAYS,
   activeCalories,
@@ -8,6 +9,7 @@ import {
   dayOrganism,
   organismSamples,
   personalBaseline,
+  wakeMinuteOf,
   type Body,
   buildSleepSessions,
   cleanHeart,
@@ -103,8 +105,12 @@ export function buildSnapshots(
   const today = dateKey(nowTs);
   const nowMinute = minuteOfDay(nowTs);
 
+  // Дни — по порядку: сну нужны подъёмы прошлых дней и вчерашняя оценка активности.
+  const wakeByDate = new Map<string, number>();
+  const activityByDate = new Map<string, number | null>();
+
   const snapshots: DaySnapshot[] = [];
-  for (const date of dates) {
+  for (const date of [...dates].sort()) {
     const heart = heartByDate.get(date) ?? [];
     const spo2 = spo2ByDate.get(date) ?? [];
     const stepSamples = stepsByDate.get(date);
@@ -121,8 +127,15 @@ export function buildSnapshots(
       toPoints(spo2),
     );
     const organism = dayOrganism(samples, baselineFor(date), date === today ? nowMinute : 1440);
-    const stepNorm = resolveStepNorm(norms[date], historyBefore(date), sleepScore(night));
-    const score = computeDayScore({ night, steps, heart, age, organism: organism.score, stepGoal: stepNorm.value });
+    const sleepContext = {
+      previousWakes: Array.from({ length: CONSISTENCY_WINDOW_DAYS }, (_, i) => wakeByDate.get(shiftDate(date, -(i + 1))))
+        .filter((v): v is number => v !== undefined),
+      yesterdayActivity: activityByDate.get(shiftDate(date, -1)) ?? null,
+    };
+    const stepNorm = resolveStepNorm(norms[date], historyBefore(date), sleepScore(night, sleepContext));
+    const score = computeDayScore({ night, steps, heart, age, organism: organism.score, stepGoal: stepNorm.value, sleepContext });
+    if (night) wakeByDate.set(date, wakeMinuteOf(night));
+    activityByDate.set(date, score.activity.score);
 
     snapshots.push({
       date,

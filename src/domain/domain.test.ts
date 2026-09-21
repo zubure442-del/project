@@ -104,8 +104,10 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
     expect(r.state.score).toBeNull();
   });
   it('по одной или двум составляющим итог не строится никогда', () => {
-    const r = computeDayScore({ ...base, night: night(336, 84) }); // 420 мин, 20% глубокого = 100
-    expect(r.sleep.score).toBe(100);
+    // 420 мин и 20 % глубокого: длительность и глубина по 100; подъём в 8:54 — ранность 35:
+    // 0.45 × 100 + 0.25 × 100 + 0.20 × 35 = 77
+    const r = computeDayScore({ ...base, night: night(336, 84) });
+    expect(r.sleep.score).toBe(77);
     expect(r.total).toBeNull();
     expect(r.activity.weight).toBe(0);
     const two = computeDayScore({ ...base, night: night(336, 84), steps: 10000 });
@@ -117,9 +119,9 @@ describe('СИНТЕТИЧЕСКИЕ: итог Vuelo', () => {
     expect(r.sleep.weight).toBeCloseTo(0.15);
     expect(r.activity.weight).toBeCloseTo(0.7);
     expect(r.state.weight).toBeCloseTo(0.15);
-    // сон 100, активность 70 (шаги*0.7), состояние 100 -> 15+49+15
+    // сон 77, активность 70 (шаги × 0.7), организм 100 → 11.55 + 49 + 15 = 75.55
     expect(r.activity.score).toBe(70);
-    expect(r.total).toBe(79);
+    expect(r.total).toBe(76);
   });
   it('итог растёт по мере шагов в течение дня', () => {
     const full = { ...base, night: night(336, 84), organism: 100, heart: nightHeart(night(336, 84)) };

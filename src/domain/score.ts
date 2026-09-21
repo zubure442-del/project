@@ -13,7 +13,6 @@ export const CARDIO_REFERENCE_MIN = 30;
 export const STEPS_WEIGHT = 0.7;
 export const CARDIO_WEIGHT = 4;
 export const SLEEP_TARGET_MIN = 420;
-export const SLEEP_VOLUME_WEIGHT = 0.7;
 export const DEEP_RATIO_BEST = { from: 0.15, to: 0.25 } as const;
 /** Пульсовые зоны, которые учитывает оценка активности: доля от максимального пульса и очки. */
 export const CARDIO_ZONES = [
@@ -55,6 +54,8 @@ export interface ScoreInput {
   heart: Sample[];
   /** Возраст для максимального пульса; null — неизвестен (кардио-бонус не начисляется). */
   age: number | null;
+  /** Для оценки сна: прошлые подъёмы и вчерашняя активность. */
+  sleepContext?: SleepContext;
   /** «Организм» v2, посчитанный по замерам дня (organism.ts); null — покрытия не хватило. */
   organism: number | null;
   /** Норма шагов этого дня (см. steps-norm.ts). Нет — 10 000. */
@@ -84,16 +85,77 @@ export interface DayScore {
 }
 
 
-export function sleepScore(night: SleepSession | null): number | null {
-  if (!night) return null;
-  const total = sleepMinutes(night);
-  const volume = Math.min(100, (total / SLEEP_TARGET_MIN) * 100);
-  const deepRatio = night.deepMin / total;
-  const quality =
-    deepRatio >= DEEP_RATIO_BEST.from && deepRatio <= DEEP_RATIO_BEST.to
-      ? 100
-      : Math.max(0, 100 - Math.abs((DEEP_RATIO_BEST.from + DEEP_RATIO_BEST.to) / 2 - deepRatio) * 400);
-  return volume * SLEEP_VOLUME_WEIGHT + quality * (1 - SLEEP_VOLUME_WEIGHT);
+/** Новая модель сна: длительность, глубина и время пробуждения; сверху — бонус за вчерашнюю активность. */
+export const SLEEP_WEIGHTS = { duration: 0.45, depth: 0.25, wake: 0.2 } as const;
+/** Пробуждение: 5:00 и раньше — 100, 11:00 и позже — 0 (минуты от полуночи). */
+export const WAKE_EARLY_REF = 300;
+export const WAKE_LATE_REF = 660;
+/** Постоянство считаем, если за последние 7 дней есть хотя бы 3 предыдущих ночи. */
+export const CONSISTENCY_WINDOW_DAYS = 7;
+export const CONSISTENCY_MIN_DAYS = 3;
+/** Разброс подъёма в полтора часа обнуляет постоянство. */
+export const CONSISTENCY_K = 100 / 90;
+export const EARLINESS_SHARE = 0.6;
+export const ACTIVITY_SLEEP_BONUS_MAX = 10;
+
+const clampScore = (x: number) => Math.min(100, Math.max(0, x));
+
+/** Длительность: минуты сна к цели. */
+export const sleepDurationScore = (night: SleepSession) => Math.min(100, (sleepMinutes(night) / SLEEP_TARGET_MIN) * 100);
+
+/** Глубина: доля глубокого сна в лучшем коридоре — 100, дальше по штрафу. */
+export function sleepDepthScore(night: SleepSession): number {
+  const deepRatio = night.deepMin / sleepMinutes(night);
+  return deepRatio >= DEEP_RATIO_BEST.from && deepRatio <= DEEP_RATIO_BEST.to
+    ? 100
+    : Math.max(0, 100 - Math.abs((DEEP_RATIO_BEST.from + DEEP_RATIO_BEST.to) / 2 - deepRatio) * 400);
+}
+
+/** Ранность подъёма: W — время пробуждения в минутах от полуночи. */
+export const earliness = (wakeMinute: number) =>
+  clampScore((100 * (WAKE_LATE_REF - wakeMinute)) / (WAKE_LATE_REF - WAKE_EARLY_REF));
+
+/** Постоянство подъёма: разброс времени пробуждения за предыдущие дни и сегодня. Мало истории — null. */
+export function wakeConsistency(previousWakes: readonly number[], wakeMinute: number): number | null {
+  if (previousWakes.length < CONSISTENCY_MIN_DAYS) return null;
+  const all = [...previousWakes, wakeMinute];
+  const mean = all.reduce((a, b) => a + b, 0) / all.length;
+  const stdev = Math.sqrt(all.reduce((sum, v) => sum + (v - mean) ** 2, 0) / all.length);
+  return clampScore(100 - stdev * CONSISTENCY_K);
+}
+
+/** Компонент пробуждения: 0.6 × ранность + 0.4 × постоянство; без постоянства — только ранность. */
+export function wakeComponent(wakeMinute: number, previousWakes: readonly number[] = []): number {
+  const early = earliness(wakeMinute);
+  const steady = wakeConsistency(previousWakes, wakeMinute);
+  return steady === null ? early : EARLINESS_SHARE * early + (1 - EARLINESS_SHARE) * steady;
+}
+
+/** Бонус к сну за вчерашнюю активность: до 10 баллов; нет вчерашней оценки — 0. */
+export const activitySleepBonus = (yesterdayActivity: number | null | undefined) =>
+  yesterdayActivity == null ? 0 : (clampScore(yesterdayActivity) / 100) * ACTIVITY_SLEEP_BONUS_MAX;
+
+export interface SleepContext {
+  /** Время пробуждения за предыдущие дни (до 7), минуты от полуночи. */
+  previousWakes?: number[];
+  /** Оценка активности вчера. */
+  yesterdayActivity?: number | null;
+}
+
+/** Минута пробуждения — конец ночи по «настенному» времени кольца. */
+export const wakeMinuteOf = (night: SleepSession) => {
+  const minute = Math.floor(night.end / 60) % 1440;
+  return minute < 0 ? minute + 1440 : minute;
+};
+
+/** Оценка сна = clamp(0.45 × длительность + 0.25 × глубина + 0.20 × пробуждение + бонус, 0, 100). */
+export function sleepScore(night: SleepSession | null, context: SleepContext = {}): number | null {
+  if (!night || sleepMinutes(night) === 0) return null;
+  const weighted =
+    SLEEP_WEIGHTS.duration * sleepDurationScore(night) +
+    SLEEP_WEIGHTS.depth * sleepDepthScore(night) +
+    SLEEP_WEIGHTS.wake * wakeComponent(wakeMinuteOf(night), context.previousWakes);
+  return clampScore(weighted + activitySleepBonus(context.yesterdayActivity));
 }
 
 export function cardioPoints(heart: Sample[], age: number | null): number | null {
@@ -154,7 +216,7 @@ export const SPO2_PENALTY = 20;
 export function computeDayScore(input: ScoreInput): DayScore {
   const restingHr = restingHeartRate(input.heart, input.night);
   const scores: Record<ComponentId, number | null> = {
-    sleep: sleepScore(input.night),
+    sleep: sleepScore(input.night, input.sleepContext),
     activity: activityScore(input.steps, input.heart, input.age, input.stepGoal),
     state: input.organism,
   };

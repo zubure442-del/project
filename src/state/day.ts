@@ -60,72 +60,55 @@ const shiftDate = (date: string, days: number) =>
 export interface DayView {
   today: string;
   yesterday: string;
-  /** Сегодня неполный, а полный день раньше есть: точка сегодня с замком, открыт последний полный день. */
-  todayLocked: boolean;
-  /** Последний полный день не позже сегодняшнего. */
+  /** Последний полный день не позже сегодняшнего: для него пишется совет в историю. */
   lastComplete: string | null;
   /** Какой день открывать по умолчанию на всех вкладках. */
   defaultDate: string;
 }
 
 /**
- * Какой день открывать. Полный сегодня — сегодня; иначе последний полный день (обычно вчера).
- * До четырёх утра «сегодня» — ещё вчерашние сутки: ночь не закончилась.
- * Если полных дней нет вовсе, открываем последний день с данными: там видно, что данные собираются.
+ * Какой день открывать: сегодняшний (до четырёх утра — вчерашние сутки, ночь не закончилась).
+ * Никаких перебросов на вчера: если у дня нет всех трёх метрик, «Сегодня» показывает экран
+ * калибровки, а Сон, Активность и Организм не открываются, пока не выбран полный день.
  */
 export function dayView(days: DaySnapshot[], now = new Date()): DayView {
   const today = todayKey(now);
   const yesterday = shiftDate(today, -1);
   const preferred = now.getHours() < DAY_START_HOUR ? yesterday : today;
-  const complete = days.filter((d) => d.date <= preferred && isCompleteDay(d)).map((d) => d.date).sort();
-  const lastComplete = complete.length ? complete[complete.length - 1] : null;
-  const todayLocked = !isCompleteDay(findDay(days, today)) && lastComplete !== null;
-  let defaultDate: string;
-  if (lastComplete !== null) defaultDate = lastComplete;
-  else if (dayHasAnything(findDay(days, preferred))) defaultDate = preferred;
-  else defaultDate = [...days].reverse().find(dayHasAnything)?.date ?? preferred;
-  return { today, yesterday, todayLocked, lastComplete, defaultDate };
+  const complete = days.filter((d) => d.date <= today && isCompleteDay(d)).map((d) => d.date).sort();
+  return { today, yesterday, lastComplete: complete.length ? complete[complete.length - 1] : null, defaultDate: preferred };
 }
 
-/**
- * Какой день показан на всех вкладках. Выбор из календаря действует до следующей синхронизации;
- * заблокированный сегодня и дни вне недели выбрать нельзя — тогда день по умолчанию.
- */
+/** Какой день показан на всех вкладках: выбор из календаря действует до следующей синхронизации. */
 export function selectedDay(
   picked: { date: string; key: number } | null,
   view: DayView,
   weekDates: readonly string[],
   syncKey: number,
 ): string {
-  const valid =
-    picked !== null &&
-    picked.key === syncKey &&
-    !(view.todayLocked && picked.date === view.today) &&
-    weekDates.includes(picked.date);
+  const valid = picked !== null && picked.key === syncKey && weekDates.includes(picked.date);
   return valid ? picked.date : view.defaultDate;
 }
 
 /** Старое имя: день по умолчанию. */
 export const defaultDay = (days: DaySnapshot[], now = new Date()): string => dayView(days, now).defaultDate;
 
-/** Плашки над экраном. Видна одна, по приоритету: ошибка → биометрия → цель → неполный сегодня. */
-export type BannerKind = 'sync-failed' | 'biometry' | 'goal' | 'today-locked';
+/** Плашки над экраном. Видна одна, по приоритету: ошибка синхронизации → биометрия → цель. */
+export type BannerKind = 'sync-failed' | 'biometry' | 'goal';
 
-export function bannerKind(input: {
-  syncFailed: boolean;
-  profileReady: boolean;
-  /** Цель выбрана. Необязательный вход — по умолчанию считаем выбранной. */
-  goalReady?: boolean;
-  todayLocked: boolean;
-  shownDate: string;
-  today: string;
-}): BannerKind | null {
+export function bannerKind(input: { syncFailed: boolean; profileReady: boolean; goalReady?: boolean }): BannerKind | null {
   if (input.syncFailed) return 'sync-failed';
   if (!input.profileReady) return 'biometry';
   if (input.goalReady === false) return 'goal';
-  if (input.todayLocked && input.shownDate !== input.today) return 'today-locked';
   return null;
 }
+
+/** Вкладки, которые открываются только для полного дня (все три метрики). */
+export const FULL_DAY_TABS = ['sleep', 'activity', 'body'] as const;
+
+/** Можно ли открыть вкладку: «Сегодня» и «Профиль» — всегда, остальные — только для полного дня. */
+export const tabAvailable = (route: string, dayComplete: boolean) =>
+  dayComplete || !(FULL_DAY_TABS as readonly string[]).includes(route);
 
 /** «вчерашний день» или «18 сентября» — для плашки и подписи совета. */
 export function dayPhrase(date: string, view: Pick<DayView, 'yesterday'>): string {

@@ -18,3 +18,4 @@ export * from './TabBar';
 export * from './Calendar';
 export * from './WeekBars';
 export * from './Onboarding';
+export * from './Calibration';

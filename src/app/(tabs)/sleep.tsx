@@ -8,7 +8,7 @@ const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minut
 export default function SleepTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner } = useTabDay();
   const day = findDay(state.days, picked);
   const sleep = day?.sleep;
   const chartWidth = width - spacing.md * 4;
@@ -21,7 +21,7 @@ export default function SleepTab() {
       title="Сон"
       statusText={statusText}
       onSync={() => sync('refresh')}
-      banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
+      banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.sleep ?? null} />

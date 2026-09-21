@@ -20,7 +20,7 @@ import {
 export default function ActivityTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner } = useTabDay();
   const day = findDay(state.days, picked);
   const age = profileAge(state.profile);
   const hours = day?.stepsByHour ?? [];
@@ -39,7 +39,7 @@ export default function ActivityTab() {
       title="Активность"
       statusText={statusText}
       onSync={() => sync('refresh')}
-      banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
+      banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.activity ?? null} />

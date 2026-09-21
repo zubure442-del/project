@@ -1,4 +1,4 @@
-import { bannerKind, dayPhrase, type BannerKind, type DayView } from './day';
+import { bannerKind, findDay, isCompleteDay, type BannerKind, type DayView } from './day';
 import { profileAlerts } from './profile';
 import { useVuelo } from './provider';
 
@@ -9,14 +9,13 @@ export interface TabDay {
   view: DayView;
   /** Какая плашка видна (одна, по приоритету). */
   banner: BannerKind | null;
-  /** «вчерашний день» или «18 сентября» — для плашки «показан …». */
-  shownPhrase: string;
+  /** У выбранного дня есть все три метрики. Иначе — экран калибровки и закрытые вкладки. */
+  complete: boolean;
 }
 
 /**
  * Выбранный день — общий для всех вкладок, выбирается в календаре в шапке.
- * По умолчанию — последний полный день; пока сегодня неполный, выбрать его нельзя.
- * Выбор сбрасывается после каждой синхронизации: полный сегодня откроется сам.
+ * По умолчанию — сегодня. Выбор сбрасывается после каждой синхронизации.
  */
 export function useTabDay(): TabDay {
   const { state, syncFailed, dayView: view, selectedDate: date, selectDay } = useVuelo();
@@ -30,10 +29,7 @@ export function useTabDay(): TabDay {
       syncFailed,
       profileReady: alerts.banner !== 'biometry',
       goalReady: !alerts.missing.has('goal'),
-      todayLocked: view.todayLocked,
-      shownDate: date,
-      today: view.today,
     }),
-    shownPhrase: dayPhrase(date, view),
+    complete: isCompleteDay(findDay(state.days, date)),
   };
 }

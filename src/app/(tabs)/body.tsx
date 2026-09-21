@@ -6,7 +6,7 @@ import { DayBanner, Card, DayLineChart, HeroRing, PressureChart, Screen, WeekCha
 export default function BodyTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner } = useTabDay();
   const day = findDay(state.days, picked);
   const chartWidth = width - spacing.md * 4;
   const points = day?.summaryPoints ?? [];
@@ -26,7 +26,7 @@ export default function BodyTab() {
       title="Организм"
       statusText={statusText}
       onSync={() => sync('refresh')}
-      banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
+      banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
         <HeroRing value={day?.scores.state ?? null} />

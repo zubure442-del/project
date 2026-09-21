@@ -39,23 +39,11 @@ export function IncompleteBanner({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/** Серая плашка: сегодня ещё неполный, показан последний полный день. */
-export function TodayLockedBanner({ phrase }: { phrase: string }) {
-  return (
-    <View style={[styles.root, styles.neutral]}>
-      <Text style={styles.neutralText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-        Ещё нет данных за сегодня · показан {phrase}
-      </Text>
-    </View>
-  );
-}
-
-/** Одна плашка над экраном по приоритету: ошибка синхронизации, биометрия, неполный сегодня. */
-export function DayBanner({ kind, phrase, onRetry }: { kind: BannerKind | null; phrase: string; onRetry: () => void }) {
+/** Одна плашка над экраном по приоритету: ошибка синхронизации, биометрия, цель. */
+export function DayBanner({ kind, onRetry }: { kind: BannerKind | null; onRetry: () => void }) {
   if (kind === 'sync-failed') return <IncompleteBanner onRetry={onRetry} />;
   if (kind === 'biometry') return <BiometryBanner />;
   if (kind === 'goal') return <GoalBanner />;
-  if (kind === 'today-locked') return <TodayLockedBanner phrase={phrase} />;
   return null;
 }
 

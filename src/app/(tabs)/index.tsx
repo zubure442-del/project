@@ -4,6 +4,7 @@ import { adviceFor, adviceLabel, findDay, useTabDay, useVuelo } from '../../stat
 import {
   DayBanner,
   COMPONENT_LABEL,
+  Calibration,
   Card,
   HeroRing,
   Ring,
@@ -20,12 +21,11 @@ const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 export default function TodayTab() {
   const { week, state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner, shownPhrase } = useTabDay();
+  const { date: picked, banner, complete } = useTabDay();
   const day = findDay(state.days, picked);
   const advice = adviceFor(state, picked);
   const chartWidth = width - spacing.md * 4;
   const steps = day?.steps ?? null;
-  // Кольцо отдаёт расход только за текущий день, за прошлые ничего не показываем.
   // Калории выбранного дня по нашей модели; нет биометрии — «—».
   const calories = day?.calories ?? null;
 
@@ -34,8 +34,12 @@ export default function TodayTab() {
       title="Итог"
       statusText={statusText}
       onSync={() => sync('refresh')}
-      banner={<DayBanner kind={banner} phrase={shownPhrase} onRetry={() => sync('retry')} />}
+      banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
+      {!complete ? (
+        <Calibration />
+      ) : (
+      <>
       <View style={styles.total}>
         <HeroRing value={day?.total ?? null} size={Math.min(214, width - 140)} />
       </View>
@@ -95,6 +99,8 @@ export default function TodayTab() {
           width={chartWidth}
         />
       </Card>
+      </>
+      )}
     </Screen>
   );
 }

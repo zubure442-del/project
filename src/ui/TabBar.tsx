@@ -1,11 +1,16 @@
+import * as Haptics from 'expo-haptics';
 import type { BottomTabBarProps } from 'expo-router/tabs';
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { findDay, isCompleteDay, tabAvailable, useVuelo } from '../state';
 import { Logo } from './Logo';
 import { CENTER_SIZE, TAB_ICON_SIZE, TAB_ICON_TOP, TAB_LABEL_LINE, TAB_LABEL_SIZE, tabBarLayout } from './tabBarLayout';
 import { colors } from './theme';
 
 /** Маршрут центральной кнопки «Сегодня». */
 const CENTER_ROUTE = 'index';
+/** Недоступная вкладка — приглушена. */
+const UNAVAILABLE_OPACITY = 0.35;
 
 /**
  * Нижняя панель со своей разметкой: круг «Сегодня» приподнят и всегда стоит
@@ -14,6 +19,13 @@ const CENTER_ROUTE = 'index';
 export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarProps) {
   // Ширина экрана на вертикальную разметку не влияет: считаем только высоты.
   const layout = tabBarLayout(0, insets.bottom);
+  // Для дня без всех трёх метрик Сон, Активность и Организм закрыты: на «Сегодня» — экран калибровки.
+  const { state: vuelo, selectedDate } = useVuelo();
+  const complete = isCompleteDay(findDay(vuelo.days, selectedDate));
+  const current = state.routes[state.index]?.name;
+  useEffect(() => {
+    if (current && !tabAvailable(current, complete)) navigation.navigate(CENTER_ROUTE);
+  }, [complete, current, navigation]);
   return (
     <View style={[styles.bar, { height: layout.barHeight }]}>
       {state.routes.map((route, index) => {
@@ -21,7 +33,12 @@ export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarP
         const focused = state.index === index;
         const color = focused ? colors.accent : colors.textFaint;
         const title = options.title ?? route.name;
+        const available = tabAvailable(route.name, complete);
         const onPress = () => {
+          if (!available) {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            return;
+          }
           const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
           if (!focused && !event.defaultPrevented) navigation.navigate(route.name, route.params);
         };
@@ -29,9 +46,9 @@ export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarP
           <Pressable
             key={route.key}
             onPress={onPress}
-            style={styles.item}
+            style={[styles.item, !available && { opacity: UNAVAILABLE_OPACITY }]}
             accessibilityRole="button"
-            accessibilityState={{ selected: focused }}
+            accessibilityState={{ selected: focused, disabled: !available }}
             accessibilityLabel={title}
           >
             {route.name === CENTER_ROUTE ? (

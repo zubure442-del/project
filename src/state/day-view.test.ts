@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptySyncResult } from '../ble/sync';
-import { visibleDays } from '../domain/week';
 import { EMPTY_STATE, type DaySnapshot, type VueloState } from '../storage';
-import { adviceFor, adviceLabel, bannerKind, dayPhrase, dayView, selectedDay, shortDate, todayTabLabel } from './day';
+import { adviceFor, adviceLabel, bannerKind, dayPhrase, dayView, selectedDay, shortDate, tabAvailable, todayTabLabel } from './day';
 import { applySyncResult } from './sync-plan';
 
 const NOON = new Date(2026, 8, 21, 13, 0);
@@ -31,24 +30,15 @@ const day = (date: string, complete: boolean): DaySnapshot => ({
 
 const state = (days: DaySnapshot[]): VueloState => ({ ...EMPTY_STATE, started: true, days });
 
-describe('СИНТЕТИЧЕСКИЕ: сегодня заблокирован, пока неполный', () => {
-  it('сегодня неполный — замок, по умолчанию последний полный день (вчера)', () => {
+describe('СИНТЕТИЧЕСКИЕ: экран калибровки вместо переброса на вчера', () => {
+  it('по умолчанию открыт сегодняшний день, даже если он неполный', () => {
     const view = dayView([day(YESTERDAY, true), day(TODAY, false)], NOON);
-    expect(view.todayLocked).toBe(true);
-    expect(view.defaultDate).toBe(YESTERDAY);
+    expect(view.defaultDate).toBe(TODAY);
     expect(view.lastComplete).toBe(YESTERDAY);
   });
 
-  it('как только сегодня полный — замка нет и открывается сегодня', () => {
-    const view = dayView([day(YESTERDAY, true), day(TODAY, true)], NOON);
-    expect(view.todayLocked).toBe(false);
-    expect(view.defaultDate).toBe(TODAY);
-  });
-
-  it('полных дней ещё нет вовсе — сегодня не блокируем, на нём «Данные собираются»', () => {
-    const view = dayView([day(YESTERDAY, false), day(TODAY, false)], NOON);
-    expect(view.todayLocked).toBe(false);
-    expect(view.defaultDate).toBe(TODAY);
+  it('данных нет вовсе — всё равно сегодня, без поиска «последнего дня с данными»', () => {
+    expect(dayView([], NOON).defaultDate).toBe(TODAY);
   });
 
   it('до четырёх утра открываем вчерашние сутки', () => {
@@ -56,31 +46,27 @@ describe('СИНТЕТИЧЕСКИЕ: сегодня заблокирован, �
     expect(view.defaultDate).toBe(YESTERDAY);
   });
 
-  it('замок виден в неделе, даже если за сегодня совсем пусто', () => {
-    const week = [
-      { date: YESTERDAY, day: day(YESTERDAY, true) },
-      { date: TODAY, day: null },
-    ];
-    expect(visibleDays(week).map((w) => w.date)).toEqual([YESTERDAY]);
-    expect(visibleDays(week, TODAY).map((w) => w.date)).toEqual([YESTERDAY, TODAY]);
+  it('для неполного дня Сон, Активность и Организм закрыты, «Сегодня» и «Профиль» открыты', () => {
+    for (const route of ['sleep', 'activity', 'body']) {
+      expect(tabAvailable(route, false)).toBe(false);
+      expect(tabAvailable(route, true)).toBe(true);
+    }
+    expect(tabAvailable('index', false)).toBe(true);
+    expect(tabAvailable('profile', false)).toBe(true);
   });
 });
 
 describe('СИНТЕТИЧЕСКИЕ: одна плашка по приоритету', () => {
-  const base = { syncFailed: false, profileReady: true, todayLocked: true, shownDate: YESTERDAY, today: TODAY };
+  const base = { syncFailed: false, profileReady: true };
   it('ошибка синхронизации важнее всего', () => {
     expect(bannerKind({ ...base, syncFailed: true, profileReady: false })).toBe('sync-failed');
   });
   it('потом биометрия', () => {
     expect(bannerKind({ ...base, profileReady: false })).toBe('biometry');
   });
-  it('потом «показан вчерашний день»', () => {
-    expect(bannerKind(base)).toBe('today-locked');
-    expect(dayPhrase(YESTERDAY, { yesterday: YESTERDAY })).toBe('вчерашний день');
+  it('плашки «показан вчерашний день» больше нет', () => {
+    expect(bannerKind(base)).toBeNull();
     expect(dayPhrase('2026-09-18', { yesterday: YESTERDAY })).toBe('18 сентября');
-  });
-  it('если сегодня полный — плашки нет', () => {
-    expect(bannerKind({ ...base, todayLocked: false, shownDate: TODAY })).toBeNull();
   });
 });
 
@@ -114,15 +100,16 @@ describe('СИНТЕТИЧЕСКИЕ: календарь — один выбра
   const view = dayView([day(YESTERDAY, true), day(TODAY, false)], NOON);
   const week = ['2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18', '2026-09-19', YESTERDAY, TODAY];
 
-  it('без выбора — последний полный день', () => {
-    expect(selectedDay(null, view, week, 1)).toBe(YESTERDAY);
+  it('без выбора — сегодня', () => {
+    expect(selectedDay(null, view, week, 1)).toBe(TODAY);
   });
   it('выбранный в календаре день действует до следующей синхронизации', () => {
     expect(selectedDay({ date: '2026-09-18', key: 1 }, view, week, 1)).toBe('2026-09-18');
-    expect(selectedDay({ date: '2026-09-18', key: 1 }, view, week, 2)).toBe(YESTERDAY);
+    expect(selectedDay({ date: '2026-09-18', key: 1 }, view, week, 2)).toBe(TODAY);
   });
-  it('неполный сегодня выбрать нельзя', () => {
-    expect(selectedDay({ date: TODAY, key: 1 }, view, week, 1)).toBe(YESTERDAY);
+  it('любой день недели выбирается, в том числе неполный сегодня', () => {
+    expect(selectedDay({ date: TODAY, key: 1 }, view, week, 1)).toBe(TODAY);
+    expect(selectedDay({ date: '2026-09-01', key: 1 }, view, week, 1)).toBe(TODAY);
   });
   it('подпись центральной вкладки: «Сегодня» или дата', () => {
     expect(shortDate('2026-09-21')).toBe('21 сен');

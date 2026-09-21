@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptySyncResult } from '../ble/sync';
 import { EMPTY_STATE, type DaySnapshot, type VueloState } from '../storage';
-import { adviceFor, adviceLabel, bannerKind, dayPhrase, dayView, selectedDay, shortDate, tabAvailable, todayTabLabel } from './day';
+import { adviceFor, adviceLabel, bannerKind, coffeeInput, dayPhrase, dayView, selectedDay, shortDate, tabAvailable, todayTabLabel } from './day';
 import { applySyncResult } from './sync-plan';
 
 const NOON = new Date(2026, 8, 21, 13, 0);
@@ -115,5 +115,24 @@ describe('СИНТЕТИЧЕСКИЕ: календарь — один выбра
     expect(shortDate('2026-09-21')).toBe('21 сен');
     expect(todayTabLabel(TODAY, TODAY)).toBe('Сегодня');
     expect(todayTabLabel(YESTERDAY, TODAY)).toBe('20 сен');
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: данные для «Кофейного окна»', () => {
+  const withNight = (date: string, from: number, to: number): DaySnapshot => ({
+    ...day(date, true),
+    sleepSegments: [{ from, to: from + 60, stage: 'light' }, { from: from + 60, to, stage: 'deep' }],
+  });
+
+  it('ночь — сегодняшняя; отход ко сну — по прошлым ночам в минутах сегодняшнего дня', () => {
+    const input = coffeeInput([withNight(YESTERDAY, -30, 400), withNight(TODAY, -60, 420)], NOON);
+    expect(input.wakeMinute).toBe(420);
+    expect(input.bedtimes).toEqual([1410, 1380]);
+    expect(input.nowMinute).toBe(13 * 60);
+  });
+
+  it('сна за сегодня ещё нет — последняя доступная ночь; сна нет вовсе — подъёма нет', () => {
+    expect(coffeeInput([withNight(YESTERDAY, -30, 400), day(TODAY, false)].map((d) => d.date === TODAY ? { ...d, sleep: null } : d), NOON).wakeMinute).toBe(400);
+    expect(coffeeInput([], NOON).wakeMinute).toBeNull();
   });
 });

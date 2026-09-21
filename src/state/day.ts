@@ -1,5 +1,5 @@
 import { dateKey, nowRingTs } from '../codec';
-import { buildTemplateReport, formatMinute, type Report, type ReportMode } from '../domain';
+import { buildTemplateReport, formatMinute, type CoffeeInput, type Report, type ReportMode } from '../domain';
 import { recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
 
 /** Если данные свежее десяти минут, к кольцу не идём. */
@@ -127,6 +127,27 @@ export function shortDate(date: string): string {
 
 /** Подпись центральной вкладки: «Сегодня», если выбран сегодняшний день, иначе дата. */
 export const todayTabLabel = (selected: string, today: string) => (selected === today ? 'Сегодня' : shortDate(selected));
+
+/**
+ * Данные для «Кофейного окна»: ночь — сегодняшняя, а если её ещё нет — последняя доступная;
+ * обычный отход ко сну — по последним ночам (в минутах от полуночи дня пробуждения + 1440).
+ */
+export function coffeeInput(days: DaySnapshot[], now = new Date()): CoffeeInput & { night: DaySnapshot | null } {
+  const today = todayKey(now);
+  const withSleep = [...days]
+    .filter((d) => d.date <= today && d.sleep !== null && d.sleepSegments.length > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const night = withSleep.find((d) => d.date === today) ?? withSleep[withSleep.length - 1] ?? null;
+  const segments = night?.sleepSegments ?? [];
+  return {
+    night,
+    wakeMinute: segments.length ? segments[segments.length - 1].to : null,
+    sleepScore: night?.scores.sleep ?? null,
+    sleepMinutes: night?.sleep?.totalMin ?? null,
+    bedtimes: withSleep.map((d) => d.sleepSegments[0].from + 1440),
+    nowMinute: now.getHours() * 60 + now.getMinutes(),
+  };
+}
 
 /** Семь календарных дней подряд, последний — сегодня. День без данных остаётся пустым. */
 export function weekDays(days: DaySnapshot[], now = new Date()): { date: string; day: DaySnapshot | null }[] {

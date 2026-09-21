@@ -10,3 +10,4 @@ export * from './calories';
 export * from './organism';
 export * from './step-noise';
 export * from './distance';
+export * from './coffee';

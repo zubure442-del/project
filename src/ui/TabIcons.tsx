@@ -53,14 +53,6 @@ export const ProfileIcon = ({ color, size = 24 }: IconProps) => (
   </Svg>
 );
 
-/** Иконка центральной кнопки «Сегодня»: кольцо с дугой. */
-export const RingIcon = ({ color, size = 26 }: IconProps) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24">
-    <Circle cx="12" cy="12" r="8" stroke={color as string} strokeWidth="1.6" fill="none" opacity={0.4} />
-    <Path d="M12 4a8 8 0 0 1 7.1 4.3" stroke={color as string} strokeWidth="2.6" strokeLinecap="round" fill="none" />
-  </Svg>
-);
-
 /** Искра рядом с заголовком совета. */
 export const SparkIcon = ({ color, size = 18 }: IconProps) => (
   <Svg width={size} height={size} viewBox="0 0 24 24">

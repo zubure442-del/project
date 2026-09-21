@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { useVuelo } from '../../state';
-import { ActivityIcon, BodyIcon, ProfileIcon, RingIcon, SleepIcon, colors } from '../../ui';
+import { ActivityIcon, BodyIcon, Logo, ProfileIcon, SleepIcon, colors } from '../../ui';
 
 /** Ниже этого заряда на иконке профиля появляется точка. */
 export const LOW_BATTERY = 20;
@@ -40,10 +40,11 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: '',
-          tabBarIcon: ({ focused }) => (
-            <View style={[styles.center, focused && styles.centerOn]}>
-              <RingIcon color={focused ? colors.bg : colors.textMuted} size={26} />
+          title: 'Сегодня',
+          // Статичный знак V в оранжевом круге: никаких дуг, похожих на загрузку.
+          tabBarIcon: () => (
+            <View style={styles.center}>
+              <Logo size={28} color={colors.bg} />
             </View>
           ),
         }}
@@ -59,11 +60,10 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: colors.card,
+    backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: -18,
   },
-  centerOn: { backgroundColor: colors.accent },
   dot: { position: 'absolute', top: -1, right: -3, width: 8, height: 8, borderRadius: 4, backgroundColor: '#E5705F' },
 });

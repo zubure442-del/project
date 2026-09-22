@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import { TipGlyph } from './TipIcons';
 import { colors, spacing } from './theme';
 
 export const CALIBRATION_TITLE = 'Считаем вашу активность';
@@ -8,11 +9,7 @@ export const CALIBRATION_TEXT =
 /** Для прошлого дня обещать «несколько часов» нельзя: данных за него уже не прибавится. */
 export const CALIBRATION_PAST_TEXT = 'За этот день данных недостаточно.';
 
-/**
- * «Сегодня» для дня без всех трёх метрик: песочные часы вместо логотипа. Частичные метрики и шаги здесь не показываем,
- * даже если что-то уже есть: неполная картина дня выглядела бы как оценка.
- */
-/** Песочные часы: данные ещё копятся. */
+/** Песочные часы: данные за сегодня ещё копятся. */
 function Hourglass({ size = 64 }: { size?: number }) {
   const p = { stroke: colors.accent, strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   return (
@@ -24,10 +21,19 @@ function Hourglass({ size = 64 }: { size?: number }) {
   );
 }
 
+/** Размер знака над текстом экрана калибровки. */
+const GLYPH_SIZE = 64;
+
+/**
+ * «Сегодня» для дня без всех трёх метрик. Частичные метрики и шаги здесь не показываем,
+ * даже если что-то уже есть: неполная картина дня выглядела бы как оценка.
+ * Сегодня — песочные часы (данные ещё придут). Прошлый день — знак «i» из набора подсказок:
+ * данных за него уже не прибавится, и значок ожидания обещал бы лишнее.
+ */
 export function Calibration({ today }: { today: boolean }) {
   return (
     <View style={styles.root}>
-      <Hourglass />
+      {today ? <Hourglass size={GLYPH_SIZE} /> : <TipGlyph name="info" size={GLYPH_SIZE} />}
       {today ? <Text style={styles.title}>{CALIBRATION_TITLE}</Text> : null}
       <Text style={styles.text}>{today ? CALIBRATION_TEXT : CALIBRATION_PAST_TEXT}</Text>
     </View>

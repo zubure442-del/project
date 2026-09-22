@@ -1,13 +1,13 @@
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { TREND_MIN_DAYS, trendPhrase, type Trend } from '../domain';
+import { trendPhrase, type Trend } from '../domain';
+import { shortDate, todayKey } from '../state/day';
 import { Card } from './Screen';
 import { colors, radius, spacing, withAlpha } from './theme';
 
 export const TREND_TITLE = 'Динамика за неделю';
-/** Пока второй недели нет, сравнивать не с чем — говорим об этом прямо. */
-export const TREND_WAIT_TEXT = 'Сравним с прошлой неделей, когда наберётся вторая неделя данных';
-export const TREND_EMPTY_TEXT = 'Данных за неделю пока нет';
+/** Сравнивать нечего: за неделю есть меньше двух дней с данными. */
+export const TREND_EMPTY_TEXT = 'Пока мало данных для сравнения';
 /** Шкала полосок: оценки всегда 0–100. */
 const SCALE = 100;
 
@@ -44,33 +44,29 @@ function CompareBar({ label, value, strong }: { label: string; value: number | n
   );
 }
 
+/** Подписи полосок: неделя к неделе или свежий день к началу недели. */
+function barLabels(trend: Trend): { current: string; previous: string } {
+  if (trend.mode !== 'days') return { current: 'Эта неделя', previous: 'Прошлая' };
+  const today = todayKey();
+  return {
+    current: trend.currentDate === today ? 'Сегодня' : shortDate(trend.currentDate ?? today),
+    previous: shortDate(trend.previousDate ?? today),
+  };
+}
+
 /**
  * «Динамика за неделю» вместо прежнего недельного графика: насколько показатель вырос
- * или упал по сравнению с предыдущей неделей, плюс две полоски со средними.
- * Сегодняшний незавершённый день в сравнение не входит (см. `weekTrend`).
+ * или упал. Карточка видна всегда: пока второй недели нет, сравнивается свежий день
+ * с самым старым днём недели (`weekTrend`), а совсем без данных остаётся заголовок.
  */
 export function WeekTrendCard({ trend }: { trend: Trend }) {
   const { percent, current, previous } = trend;
-  const sign = percent === null ? '' : percent > 0 ? '+' : '';
+  const labels = barLabels(trend);
 
   return (
     <Card title={TREND_TITLE}>
       {percent === null ? (
-        <View style={styles.wait}>
-          {current === null ? (
-            <Text style={styles.waitText}>{TREND_EMPTY_TEXT}</Text>
-          ) : (
-            <>
-              <Text style={styles.average}>
-                {Math.round(current)}
-                <Text style={styles.averageUnit}> в среднем за неделю</Text>
-              </Text>
-              <Text style={styles.waitText}>
-                {trend.currentDays < TREND_MIN_DAYS ? 'Пока мало дней с данными для сравнения' : TREND_WAIT_TEXT}
-              </Text>
-            </>
-          )}
-        </View>
+        <Text style={styles.waitText}>{TREND_EMPTY_TEXT}</Text>
       ) : (
         <>
           <View style={styles.head}>
@@ -79,16 +75,16 @@ export function WeekTrendCard({ trend }: { trend: Trend }) {
             </View>
             <View style={styles.headText}>
               <Text style={styles.percent}>
-                {sign}
+                {percent > 0 ? '+' : ''}
                 {percent}
                 <Text style={styles.percentSign}> %</Text>
               </Text>
-              <Text style={styles.phrase}>{trendPhrase(percent)}</Text>
+              <Text style={styles.phrase}>{trendPhrase(percent, trend.mode)}</Text>
             </View>
           </View>
           <View style={styles.bars}>
-            <CompareBar label="Эта неделя" value={current} strong />
-            <CompareBar label="Прошлая" value={previous} strong={false} />
+            <CompareBar label={labels.current} value={current} strong />
+            <CompareBar label={labels.previous} value={previous} strong={false} />
           </View>
         </>
       )}
@@ -118,8 +114,5 @@ const styles = StyleSheet.create({
   fill: { height: '100%', borderRadius: radius.pill },
   barValue: { color: colors.text, fontSize: 15, width: 30, textAlign: 'right', fontVariant: ['tabular-nums'] },
   barValueFaint: { color: colors.textMuted },
-  wait: { gap: spacing.xs },
-  average: { color: colors.text, fontSize: 34, fontWeight: '200', fontVariant: ['tabular-nums'] },
-  averageUnit: { color: colors.textMuted, fontSize: 15, fontWeight: '400' },
-  waitText: { color: colors.textFaint, fontSize: 13, lineHeight: 18 },
+  waitText: { color: colors.textFaint, fontSize: 14 },
 });

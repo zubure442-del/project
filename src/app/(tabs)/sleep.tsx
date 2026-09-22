@@ -1,6 +1,6 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { TAB_INFO, tabInfoText } from '../../domain';
-import { findDay, trendFor, useTabDay, useVuelo } from '../../state';
+import { findDay, sleepHrFor, trendFor, useTabDay, useVuelo } from '../../state';
 import { DayBanner, Card, HeroRing, Screen, SleepWave, Skeleton, WeekTrendCard, colors, spacing, withAlpha } from '../../ui';
 
 const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
@@ -11,6 +11,8 @@ export default function SleepTab() {
   const { date: picked, banner } = useTabDay();
   const day = findDay(state.days, picked);
   const sleep = day?.sleep;
+  // Пульс во сне — отдельной карточкой: возрастные границы и своя норма по прошлым ночам.
+  const sleepHr = sleepHrFor(state, picked);
   const chartWidth = width - spacing.md * 4;
   const deepShare = sleep && sleep.totalMin > 0 ? Math.round((sleep.deepMin / sleep.totalMin) * 100) : null;
   const lightShare = deepShare === null ? null : 100 - deepShare;
@@ -47,16 +49,21 @@ export default function SleepTab() {
               <Legend color={colors.accent} label="Глубокий" value={`${hhmm(sleep.deepMin)} · ${deepShare} %`} />
               <Legend color={withAlpha(colors.accent, 0.4)} label="Лёгкий" value={`${hhmm(sleep.lightMin)} · ${lightShare} %`} />
             </View>
-            {day?.restingHrSource === 'night' && day.restingHr ? (
-              <View style={styles.chip}>
-                <Text style={styles.chipText}>Пульс во сне {day.restingHr}</Text>
-              </View>
-            ) : null}
           </>
         ) : (
           <Skeleton height={72} />
         )}
       </Card>
+
+      {sleepHr ? (
+        <Card title="Пульс во сне">
+          <Text style={styles.hrValue}>
+            {sleepHr.value}
+            <Text style={styles.hrUnit}> уд/мин</Text>
+          </Text>
+          <Text style={[styles.hrText, sleepHr.seeDoctor && styles.hrWarn]}>{sleepHr.text}</Text>
+        </Card>
+      ) : null}
     </Screen>
   );
 }
@@ -80,6 +87,8 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   legendLabel: { color: colors.textMuted, fontSize: 15, flex: 1 },
   legendValue: { color: colors.text, fontSize: 15 },
-  chip: { alignSelf: 'flex-start', marginTop: spacing.md, backgroundColor: colors.track, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
-  chipText: { color: colors.textMuted, fontSize: 13 },
+  hrValue: { color: colors.text, fontSize: 38, fontWeight: '200', fontVariant: ['tabular-nums'] },
+  hrUnit: { color: colors.textMuted, fontSize: 15, fontWeight: '400' },
+  hrText: { color: colors.textMuted, fontSize: 14, lineHeight: 20, marginTop: spacing.xs },
+  hrWarn: { color: colors.danger },
 });

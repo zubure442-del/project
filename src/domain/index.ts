@@ -13,3 +13,4 @@ export * from './distance';
 export * from './coffee';
 export * from './relay';
 export * from './trend';
+export * from './sleep-hr';

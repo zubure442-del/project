@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { KCAL_PER_PIZZA_SLICE, formatCount, pizzaSlices, pluralRu, weekCalories } from '../domain';
+import { formatCount, pizzaSlices, pluralRu, weekCalories } from '../domain';
 import { PizzaSlice } from './Pizza';
 import { Card } from './Screen';
 import { Sheet } from './Sheet';
@@ -11,8 +11,6 @@ import { colors, spacing } from './theme';
 export const CALORIES_WEEK_TITLE = 'Расход активных калорий за неделю';
 /** Больше кусков в ряд не рисуем: дальше это каша. Точное число остаётся в подписи. */
 export const PIZZA_MAX_SLICES = 12;
-/** Хвостик меньше этого не рисуем отдельным куском. */
-const PIZZA_MIN_TAIL = 0.12;
 
 const SLICE_FORMS = ['кусок', 'куска', 'кусков'] as const;
 const WEEK_DAY = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -22,17 +20,16 @@ const dayTitle = (date: string) => {
   return `${WEEK_DAY[d.getUTCDay()]}, ${d.getUTCDate()} ${MONTH_SHORT[d.getUTCMonth()]}`;
 };
 
-/** Ряд кусков: целые закрашены, последний — на сколько хватило калорий. */
+/** Ряд целых кусков: дробных не бывает, лишние прячем за «+N». */
 function SliceRow({ slices, size = 30 }: { slices: number; size?: number }) {
-  const full = Math.min(PIZZA_MAX_SLICES, Math.floor(slices));
-  const tail = slices - Math.floor(slices);
-  const shown = [...Array<number>(full).fill(1)];
-  if (full < PIZZA_MAX_SLICES && tail >= PIZZA_MIN_TAIL) shown.push(tail);
-  const hidden = Math.max(0, Math.floor(slices) - full);
+  const whole = Math.floor(slices);
+  const shown = Math.min(PIZZA_MAX_SLICES, whole);
+  const hidden = whole - shown;
+  if (!whole) return null;
   return (
     <View style={styles.slices}>
-      {shown.map((fill, i) => (
-        <PizzaSlice key={i} size={size} fill={fill} />
+      {Array.from({ length: shown }, (_, i) => (
+        <PizzaSlice key={i} size={size} />
       ))}
       {hidden > 0 ? <Text style={styles.more}>+{hidden}</Text> : null}
     </View>
@@ -47,8 +44,7 @@ function SliceRow({ slices, size = 30 }: { slices: number; size?: number }) {
 export function CaloriesWeekCard({ days, width }: { days: { date: string; value: number | null }[]; width: number }) {
   const [open, setOpen] = useState(false);
   const total = weekCalories(days.map((d) => d.value));
-  const slices = total === null ? 0 : pizzaSlices(total);
-  const rounded = Math.round(slices);
+  const slices = total === null ? 0 : Math.floor(pizzaSlices(total));
 
   return (
     <>
@@ -66,9 +62,11 @@ export function CaloriesWeekCard({ days, width }: { days: { date: string; value:
             <Text style={styles.unit}> ккал</Text>
           </Text>
           <SliceRow slices={slices} />
-          <Text style={styles.caption}>
-            ≈ {rounded} {pluralRu(rounded, SLICE_FORMS)} пиццы · один кусок ≈ {formatCount(KCAL_PER_PIZZA_SLICE)} ккал
-          </Text>
+          {slices > 0 ? (
+            <Text style={styles.caption}>
+              {slices} {pluralRu(slices, SLICE_FORMS)} пиццы
+            </Text>
+          ) : null}
         </Card>
       </Pressable>
 
@@ -91,10 +89,6 @@ export function CaloriesWeekCard({ days, width }: { days: { date: string; value:
             </View>
           ))}
         </View>
-        <Text style={styles.note}>
-          Один кусок пиццы — примерно {formatCount(KCAL_PER_PIZZA_SLICE)} ккал. Считаем только активные калории,
-          без обычного расхода в покое.
-        </Text>
       </Sheet>
     </>
   );
@@ -114,5 +108,4 @@ const styles = StyleSheet.create({
   rowSlices: { flex: 1 },
   rowValue: { color: colors.textMuted, fontSize: 14, fontVariant: ['tabular-nums'] },
   rowEmpty: { color: colors.textFaint, fontSize: 14, flex: 1, textAlign: 'right' },
-  note: { color: colors.textFaint, fontSize: 12, lineHeight: 18, marginTop: spacing.md },
 });

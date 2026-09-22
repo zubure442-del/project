@@ -60,13 +60,13 @@ export default function BodyTab() {
       ) : null}
 
       {pressure.length ? (
-        <Card title="Давление · оценка">
+        <Card title="Давление">
           <PressureChart points={pressure} width={chartWidth} />
         </Card>
       ) : null}
 
       {glucose.length ? (
-        <Card title="Глюкоза · оценка">
+        <Card title="Глюкоза">
           <DayLineChart points={glucose} width={chartWidth} unit="ммоль/л" />
         </Card>
       ) : null}

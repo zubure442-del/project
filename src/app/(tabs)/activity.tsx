@@ -1,6 +1,5 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import {
-  STEPS_DEFAULT_NORM,
   TAB_INFO,
   busiestHour,
   distanceMeters,
@@ -36,8 +35,6 @@ export default function ActivityTab() {
   const chartWidth = width - spacing.md * 4;
   // Калории считаем сами для любого дня; нет биометрии — «—».
   const calories = day?.calories ?? null;
-  // Шаги за день — после шумоподавления, норма — своя на день.
-  const norm = day?.stepNorm?.value ?? STEPS_DEFAULT_NORM;
   const weekBars = week.map((w) => ({ date: w.date, value: w.day?.calories ?? null }));
   // Дистанция — от шагов после шумоподавления и роста из профиля; нет роста — не показываем.
   const distance = day?.steps != null && state.profile.heightCm !== null
@@ -63,16 +60,6 @@ export default function ActivityTab() {
             <Text style={styles.burned}>Сожжено {calories === null ? '—' : formatCount(calories)} ккал</Text>
           </>
         ) : null}
-        {day?.steps != null ? (
-          <View style={styles.norm}>
-            <View style={styles.track}>
-              <View style={[styles.fill, { width: `${Math.min(100, (day.steps / norm) * 100)}%` }]} />
-            </View>
-            <Text style={styles.normText}>
-              {Math.round((day.steps / norm) * 100)} % нормы · {formatCount(norm)}
-            </Text>
-          </View>
-        ) : null}
       </View>
 
       <WeekTrendCard trend={trendFor(state, 'activity', picked)} />
@@ -90,7 +77,7 @@ export default function ActivityTab() {
           <Skeleton height={130} />
         )}
         <View style={[ui.statRow, styles.stats]}>
-          <Stat label="Шаги" value={day?.steps != null ? formatCount(day.steps) : '—'} />
+          {/* Шаги уже написаны вверху экрана — под графиком только самый активный час. */}
           <Stat label="Самый активный час" value={best !== null ? `${best}:00` : '—'} />
         </View>
       </Card>
@@ -104,9 +91,5 @@ const styles = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: spacing.md, gap: spacing.xs },
   summary: { color: colors.text, fontSize: 17 },
   burned: { color: colors.textMuted, fontSize: 15 },
-  norm: { width: '70%', gap: 6, alignItems: 'center' },
-  track: { alignSelf: 'stretch', height: 4, borderRadius: 2, backgroundColor: colors.track },
-  fill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },
-  normText: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   stats: { marginTop: spacing.md },
 });

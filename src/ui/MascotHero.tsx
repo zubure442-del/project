@@ -1,20 +1,20 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import type { RelayView } from '../domain';
+import { formatCount, type RelayView } from '../domain';
 import { Mascot, mascotHeightFor } from './Mascot';
-import { NutsPill, RELAY_TITLE, RelaySheet } from './Relay';
-import { RelayGlyph } from './RewardIcons';
-import { colors, radius, spacing, withAlpha } from './theme';
+import { RELAY_TITLE, RelaySheet, StreakBadge } from './Relay';
+import { colors, radius, spacing } from './theme';
 
 /** Высота фигуры: не больше этого и не шире доли экрана, чтобы рядом поместилось число. */
 const MASCOT_MAX_HEIGHT = 230;
 const MASCOT_WIDTH_SHARE = 0.55;
 
 /**
- * Блок маскота на «Сегодня»: фигура, итог дня рядом (не поверх), баланс орехов
- * и строка «Эстафета от Лиса ›». Вся область — от ушей до ног вместе с числом — нажимается
- * и открывает лист с эстафетой, балансом и магазином. Строка внизу говорит, куда нажимать.
+ * Блок маскота на «Сегодня»: фигура и итог дня рядом (не поверх). Под ними узкая полоска:
+ * огонёк серии и шаги к норме — коротко, без лишних надписей. Вся область — от ушей до ног
+ * вместе с числом и полоской — нажимается и открывает «Эстафету от Лиса»: там баланс орехов,
+ * прогресс дня, лестница серии и магазин.
  */
 export function MascotHero({ total, relay, width }: { total: number | null; relay: RelayView; width: number }) {
   const [open, setOpen] = useState(false);
@@ -41,14 +41,14 @@ export function MascotHero({ total, relay, width }: { total: number | null; rela
                 <Text style={styles.of}>из 100</Text>
               </>
             ) : null}
-            <View style={styles.balance}>
-              <NutsPill nuts={relay.nuts} />
-            </View>
           </View>
         </View>
-        <View style={styles.cta}>
-          <RelayGlyph size={18} />
-          <Text style={styles.ctaText}>{RELAY_TITLE}</Text>
+        <View style={styles.strip}>
+          <StreakBadge streak={relay.streak} />
+          <Text style={styles.steps}>
+            {formatCount(relay.steps)}
+            <Text style={styles.norm}> / {formatCount(relay.norm)}</Text>
+          </Text>
           <Text style={styles.chevron}>›</Text>
         </View>
       </Pressable>
@@ -65,17 +65,18 @@ const styles = StyleSheet.create({
   label: { color: colors.textMuted, fontSize: 15 },
   total: { color: colors.text, fontSize: 76, fontWeight: '200', letterSpacing: -2, fontVariant: ['tabular-nums'] },
   of: { color: colors.textFaint, fontSize: 13, marginTop: -4 },
-  balance: { marginTop: spacing.md },
-  cta: {
+  strip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    paddingLeft: spacing.sm,
+    paddingRight: spacing.md,
+    paddingVertical: 10,
     borderRadius: radius.card,
-    backgroundColor: withAlpha(colors.accent, 0.12),
+    backgroundColor: colors.card,
   },
-  ctaText: { color: colors.accent, fontSize: 16, fontWeight: '600', flex: 1 },
-  chevron: { color: colors.accent, fontSize: 22, lineHeight: 24 },
+  steps: { color: colors.text, fontSize: 17, flex: 1, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  norm: { color: colors.textMuted, fontSize: 15 },
+  chevron: { color: colors.textFaint, fontSize: 20, lineHeight: 22 },
 });

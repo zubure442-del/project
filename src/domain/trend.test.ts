@@ -38,22 +38,43 @@ describe('СИНТЕТИЧЕСКИЕ: динамика за неделю', () =>
     expect(trend.previousDays).toBe(3);
   });
 
-  it('мало дней в окне — процента нет, но среднее за неделю есть', () => {
-    const few = weekTrend(points([80, 80, null, null, null, null, null, 40, 40, 40, null, null, null, null]), ASOF);
+  it('недели хватает — режим «неделя к неделе»', () => {
+    const trend = weekTrend(points([80, 80, 80, 80, 80, 80, 80, 40, 40, 40, 40, 40, 40, 40]), ASOF);
+    expect(trend.mode).toBe('weeks');
+    expect(trendPhrase(trend.percent as number, trend.mode)).toBe('выше прошлой недели');
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: пока второй недели нет — свежий день к началу недели', () => {
+  it('мало дней в окне — сравниваем день с самым старым днём недели', () => {
+    const few = weekTrend(points([64, null, null, null, null, 80, null, 40, 40, 40, null, null, null, null]), ASOF);
     expect(few.currentDays).toBeLessThan(TREND_MIN_DAYS);
-    expect(few.percent).toBeNull();
-    expect(few.current).toBe(80);
+    expect(few.mode).toBe('days');
+    expect(few.current).toBe(64);
+    expect(few.previous).toBe(80);
+    expect(few.percent).toBe(-20);
+    expect(trendPhrase(few.percent as number, few.mode)).toBe('ниже, чем в начале недели');
   });
 
-  it('второй недели нет вовсе — сравнивать не с чем', () => {
-    const only = weekTrend(points([70, 72, 68, 74, 70, 71, 69]), ASOF);
-    expect(only.previous).toBeNull();
-    expect(only.percent).toBeNull();
-    expect(only.current).toBe(70.6);
+  it('сегодняшний день тоже идёт в сравнение', () => {
+    const trend = weekTrend([{ date: ASOF, value: 90 }, ...points([null, null, null, null, null, 60])], ASOF);
+    expect(trend.mode).toBe('days');
+    expect(trend.currentDate).toBe(ASOF);
+    expect(trend.percent).toBe(50);
   });
 
-  it('прошлая неделя по нулям — процент не считаем, на ноль не делим', () => {
-    const zero = weekTrend(points([50, 50, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ASOF);
+  it('один день с данными — сравнивать не с чем', () => {
+    const one = weekTrend(points([70]), ASOF);
+    expect(one.mode).toBe('none');
+    expect(one.percent).toBeNull();
+  });
+
+  it('совсем нет данных — режим «нет»', () => {
+    expect(weekTrend([], ASOF).mode).toBe('none');
+  });
+
+  it('прошлая неделя по нулям — на ноль не делим', () => {
+    const zero = weekTrend(points([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ASOF);
     expect(zero.percent).toBeNull();
   });
 });

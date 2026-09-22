@@ -7,3 +7,4 @@ export * from './profile';
 export * from './demo';
 export * from './relay';
 export * from './trend';
+export * from './sleep-hr';

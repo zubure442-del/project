@@ -31,6 +31,7 @@ import {
   type VueloState,
 } from '../storage';
 import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
+import { DEMO_STATUS_TEXT, demoState } from './demo';
 import { loadPlan, loadProgress, recordDurations, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withOnboarding } from './profile';
 import { applySyncResult, planDays, rebuildDays } from './sync-plan';
@@ -90,6 +91,10 @@ interface Vuelo {
   reloadProfile: () => void;
   /** Удаляет данные, историю, профиль и логи. Привязка к кольцу остаётся. */
   clearData: () => void;
+  /** Демо-режим включён: экраны показывают синтетические показатели, посчитанные реальными формулами. */
+  demo: boolean;
+  /** Включить или выключить демо-режим (меню разработчика). Реальное состояние и хранилище не трогаются. */
+  setDemo: (on: boolean) => void;
 }
 
 const Context = createContext<Vuelo | null>(null);
@@ -132,6 +137,12 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   /** Счётчик правок профиля: перечитывание из хранилища не должно откатывать свежую правку. */
   const profileVersion = useRef(0);
   const profilePush = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /**
+   * Демо-режим: зерно генератора и момент, на который построены ряды. Только в памяти:
+   * после перезапуска приложения демо выключено. `state` и `latest` всегда настоящие.
+   */
+  const [demo, setDemoSession] = useState<{ seed: number; at: number } | null>(null);
+  const demoOn = useRef(false);
 
   const commit = useCallback((next: VueloState) => {
     latest.current = next;
@@ -177,6 +188,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   const sync = useCallback(
     (mode: SyncMode = 'launch') => {
       if (running.current) return;
+      // В демо к кольцу не идём: демо работает и без кольца, а настоящие данные ждут выключения.
+      if (demoOn.current) return;
       if (isFresh(latest.current)) {
         setPhase('fresh');
         return;
@@ -311,6 +324,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       if (next !== 'active' || !fromBackground) return;
       setPicked(null);
       setClockDay(todayKey());
+      setDemoSession((prev) => prev && { ...prev, at: Date.now() });
       if (latest.current.started) sync('resume');
     });
     return () => sub.remove();
@@ -321,19 +335,29 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     const timer = setInterval(() => {
       const day = todayKey();
       setClockDay((prev) => (prev === day ? prev : day));
+      // Демо после полуночи строится заново: у нового «сегодня» тоже есть данные.
+      setDemoSession((prev) => (prev && todayKey(new Date(prev.at)) !== day ? { ...prev, at: Date.now() } : prev));
     }, CLOCK_CHECK_MS);
     return () => clearInterval(timer);
   }, []);
 
+  const setDemo = useCallback((on: boolean) => {
+    demoOn.current = on;
+    setPicked(null);
+    // Новое зерно на каждое включение: каждый раз своя правдоподобная неделя.
+    setDemoSession(on ? { seed: Date.now() % 2147483647, at: Date.now() } : null);
+  }, []);
+
   const clearData = useCallback(() => {
     void (async () => {
+      setDemo(false);
       clearPacketLog();
       const cleared = await clearState();
       // Привязка к кольцу остаётся: её убирает «Забыть кольцо». Дальше — как первый запуск.
       commit({ ...cleared, ring: latest.current.ring });
       setPhase('idle');
     })();
-  }, [commit]);
+  }, [commit, setDemo]);
 
   const forgetRing = useCallback(() => {
     void (async () => {
@@ -397,26 +421,30 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
+  // Что видят экраны: в демо — синтетические ряды через тот же расчёт, иначе настоящее состояние.
+  // Всё, что пишет в хранилище, работает с `latest` (настоящим), а не с этим.
+  const shown = useMemo(() => (demo ? demoState(state, demo.seed, new Date(demo.at)) : state), [demo, state]);
+
   const value = useMemo<Vuelo>(() => {
     // «Сегодня» — от часов телефона (clockDay): при смене даты всё пересчитывается, даже без новых данных.
     const [y, m, d] = clockDay.split('-').map(Number);
     const clock = new Date(y, m - 1, d, 12);
-    const view = dayView(state.days, clock);
-    const week = weekDays(state.days, clock);
+    const view = dayView(shown.days, clock);
+    const week = weekDays(shown.days, clock);
     return {
-      state,
+      state: shown,
       ready,
       week,
       dayView: view,
-      selectedDate: selectedDay(picked, view, week.map((w) => w.date), state.lastSyncAt ?? 0),
+      selectedDate: selectedDay(picked, view, week.map((w) => w.date), shown.lastSyncAt ?? 0),
       selectDay,
       phase,
       loadingMode,
       error,
-      statusText: syncStatusText(state),
-      profileReady: isProfileComplete(state.profile),
-      goalReady: isGoalSet(state.profile),
-      syncFailed: state.syncFailed && state.started,
+      statusText: demo ? DEMO_STATUS_TEXT : syncStatusText(shown),
+      profileReady: isProfileComplete(shown.profile),
+      goalReady: isGoalSet(shown.profile),
+      syncFailed: shown.syncFailed && shown.started,
       sync,
       forgetRing,
       completeOnboarding,
@@ -425,8 +453,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       saveProfile,
       reloadProfile,
       clearData,
+      demo: demo !== null,
+      setDemo,
     };
-  }, [clearData, clockDay, dismissFresh, error, finishLoading, forgetRing, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, state, sync]);
+  }, [clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

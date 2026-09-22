@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { clearPacketLog, formatPacketLog, packetLog, subscribePacketLog, type LoggedPacket } from '../ble';
+import { useVuelo } from '../state';
 import { colors, radius, spacing } from '../ui';
 
 const stamp = (at: number) => {
@@ -12,9 +13,10 @@ const stamp = (at: number) => {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 };
 
-/** Сырые пакеты кольца: время, направление, hex. Для отправки на разбор. */
+/** Меню разработчика: сырые пакеты кольца (время, направление, hex) для разбора и демо-режим. */
 export default function RawLogScreen() {
   const insets = useSafeAreaInsets();
+  const { demo, setDemo } = useVuelo();
   const [items, setItems] = useState<LoggedPacket[]>(packetLog);
   const [copied, setCopied] = useState(false);
 
@@ -46,6 +48,10 @@ export default function RawLogScreen() {
         <Text style={styles.note}>
           {items.length ? `${items.length} пакетов · «<-» от кольца, «->» команды приложения` : 'Пакетов пока нет.'}
         </Text>
+        {/* Демо: синтетические показатели через настоящий расчёт; реальные данные не трогаются. */}
+        <Pressable style={[styles.button, styles.demo]} onPress={() => setDemo(!demo)}>
+          <Text style={styles.buttonText}>{demo ? 'Выключить демо-режим' : 'Демо-режим'}</Text>
+        </Pressable>
       </View>
 
       <ScrollView
@@ -77,6 +83,7 @@ const styles = StyleSheet.create({
   spacer: { flex: 1 },
   button: { backgroundColor: colors.accent, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8 },
   buttonText: { color: colors.bg, fontSize: 13, fontWeight: '600' },
+  demo: { alignSelf: 'flex-start', marginTop: spacing.xs },
   clear: { paddingHorizontal: 4 },
   clearText: { color: colors.textMuted, fontSize: 13 },
   note: { color: colors.textMuted, fontSize: 12.5 },

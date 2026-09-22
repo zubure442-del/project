@@ -40,6 +40,8 @@ export async function loadProfile(): Promise<Profile> {
 }
 
 export async function saveState(state: VueloState): Promise<void> {
+  // Демо-данные в хранилище не попадают никогда: при выключении демо настоящие данные на месте.
+  if (state.demo) return;
   await AsyncStorage.setItem(KEY, JSON.stringify(state));
 }
 

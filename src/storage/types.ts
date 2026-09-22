@@ -94,6 +94,8 @@ export interface VueloState {
   batteryAt: number | null;
   /** Пользователь нажал «Начать» хотя бы раз: системный запрос Bluetooth уже показывали. */
   started: boolean;
+  /** Состояние демо-режима: живёт только в памяти, `saveState` его не пишет. У настоящего поля нет. */
+  demo?: true;
 }
 
 export type Sex = 'male' | 'female';

@@ -77,6 +77,7 @@ export default function TodayTab() {
           slides={recs.slides}
           advice={recs.advice?.text ?? null}
           adviceLabel={adviceLabel(picked)}
+          relay={recs.relay}
           coffee={recs.coffee}
         />
       ) : null}

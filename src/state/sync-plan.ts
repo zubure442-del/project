@@ -15,6 +15,7 @@ import {
   type VueloState,
 } from '../storage';
 import { DAY_START_HOUR, adviceMode, dayView, findDay, isCompleteDay, scoreOf, todayKey } from './day';
+import { settleRelayState } from './relay';
 
 /** Глубина выгрузки: кольцо хранит неделю. */
 export const TOTAL_DAYS = 7;
@@ -136,14 +137,18 @@ export function applySyncResult(
     battery: sync.battery ?? state.battery,
     batteryAt: sync.battery !== null ? now.getTime() : state.batteryAt,
   };
-  if (sync.error) return { ...base, syncFailed: true };
-  return {
-    ...base,
-    lastSyncAt: now.getTime(),
-    syncFailed: false,
-    syncedAt: markSynced(state.syncedAt, sync.completeDays, now),
-    reports: withAdvice(state.reports, days, now),
-  };
+  // «Эстафета»: орехи за прошедшие дни с нормой — по тому, что теперь в кэше (и после обрыва тоже).
+  if (sync.error) return settleRelayState({ ...base, syncFailed: true }, now);
+  return settleRelayState(
+    {
+      ...base,
+      lastSyncAt: now.getTime(),
+      syncFailed: false,
+      syncedAt: markSynced(state.syncedAt, sync.completeDays, now),
+      reports: withAdvice(state.reports, days, now),
+    },
+    now,
+  );
 }
 
 /**

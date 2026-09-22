@@ -1,6 +1,7 @@
 import { dateKey, nowRingTs } from '../codec';
-import { buildTemplateReport, coffeeWindow, formatMinute, type CoffeeInput, type CoffeeWindow, type Report, type ReportMode } from '../domain';
+import { buildTemplateReport, coffeeWindow, formatMinute, type CoffeeInput, type CoffeeWindow, type RelayView, type Report, type ReportMode } from '../domain';
 import { recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
+import { relayFor } from './relay';
 
 /** Если данные свежее десяти минут, к кольцу не идём. */
 export const CACHE_FRESH_MS = 10 * 60 * 1000;
@@ -150,14 +151,16 @@ export function coffeeInput(days: DaySnapshot[], now = new Date()): CoffeeInput 
   };
 }
 
-/** Рекомендательные карточки «Сегодня» в карусели «AI Ассистент», по порядку. */
-export type AssistantSlide = 'advice' | 'coffee' | 'food' | 'endurance' | 'sleepmode';
+/** Рекомендательные карточки «Сегодня» в карусели «AI Ассистент», по порядку. «Эстафета» — перед кофейным окном. */
+export type AssistantSlide = 'advice' | 'relay' | 'coffee' | 'food' | 'endurance' | 'sleepmode';
 /** Карточки «Скоро»: показываются вместе с остальными рекомендациями. */
 export const SOON_SLIDES = ['food', 'endurance', 'sleepmode'] as const;
 
-/** Рекомендательный слой «Сегодня»: совет, кофейное окно и карточки «Скоро». */
+/** Рекомендательный слой «Сегодня»: совет, «Эстафета», кофейное окно и карточки «Скоро». */
 export interface Recommendations {
   advice: Report | null;
+  /** «Эстафета»: остаток шагов до нормы или «Зелёный свет», огонёк и лестница. */
+  relay: RelayView;
   /** null — оценки сна за сегодня нет, карточки нет. */
   coffee: (CoffeeWindow & { nowMinute: number }) | null;
   slides: AssistantSlide[];
@@ -165,7 +168,7 @@ export interface Recommendations {
 
 /**
  * Рекомендации осмысленны только для текущего дня. Для любого прошлого дня — null:
- * скрываются все карточки-рекомендации целиком (совет, кофейное окно, «Скоро»),
+ * скрываются все карточки-рекомендации целиком (совет, «Эстафета», кофейное окно, «Скоро»),
  * а данные и графики дня остаются.
  */
 export function recommendationsFor(state: VueloState, date: string, now = new Date()): Recommendations | null {
@@ -174,8 +177,9 @@ export function recommendationsFor(state: VueloState, date: string, now = new Da
   const coffee = input ? { ...coffeeWindow(input), nowMinute: input.nowMinute } : null;
   return {
     advice: adviceFor(state, date, now),
+    relay: relayFor(state, now),
     coffee,
-    slides: ['advice', ...(coffee ? (['coffee'] as const) : []), ...SOON_SLIDES],
+    slides: ['advice', 'relay', ...(coffee ? (['coffee'] as const) : []), ...SOON_SLIDES],
   };
 }
 

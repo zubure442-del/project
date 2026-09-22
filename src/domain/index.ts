@@ -12,3 +12,4 @@ export * from './organism';
 export * from './step-noise';
 export * from './distance';
 export * from './coffee';
+export * from './relay';

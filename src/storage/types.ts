@@ -1,7 +1,7 @@
 import type { AutoMeasurePeriod } from '../codec';
 import type { KnownRing } from '../ble';
 import type { RawByDay } from './raw';
-import type { ComponentId, ReportMode, SleepStage, StoredNorm } from '../domain';
+import { EMPTY_RELAY, type ComponentId, type RelayLedger, type ReportMode, type SleepStage, type StoredNorm } from '../domain';
 
 /** Одна точка графика: секунды от начала дня + значение. Так день хранится компактно. */
 export interface DayPoint {
@@ -100,6 +100,8 @@ export interface VueloState {
    * день уходит из недели; сбрасывает его только «Очистить данные».
    */
   hadCompleteDay: boolean;
+  /** «Эстафета»: баланс орехов, пометки «начислено», серия и выплаченные ступени лестницы. */
+  relay: RelayLedger;
   /** Состояние демо-режима: живёт только в памяти, `saveState` его не пишет. У настоящего поля нет. */
   demo?: true;
 }
@@ -135,6 +137,7 @@ export const isProfileComplete = (p: Profile): boolean =>
 export const EMPTY_STATE: VueloState = {
   days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false, hadCompleteDay: false,
+  relay: EMPTY_RELAY,
 };
 /** Сколько дней показываем в недельном графике. */
 export const HISTORY_DAYS = 7;

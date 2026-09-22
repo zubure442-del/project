@@ -20,3 +20,5 @@ export * from './WeekBars';
 export * from './Onboarding';
 export * from './Calibration';
 export * from './Assistant';
+export * from './Relay';
+export * from './RewardIcons';

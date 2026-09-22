@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { EMPTY_RELAY } from '../domain';
 import { migrateSnapshots } from './raw';
 import { EMPTY_PROFILE, EMPTY_STATE, HISTORY_DAYS, type Profile, type StoredReport, type VueloState } from './types';
 
@@ -30,6 +31,7 @@ export async function loadState(): Promise<VueloState> {
       started: parsed.started ?? false,
       // Старый кэш флага не знал: полный день в сохранённых сводках — значит, пользователь уже не новый.
       hadCompleteDay: parsed.hadCompleteDay ?? (parsed.days ?? []).some((d) => d?.total !== null && d?.total !== undefined),
+      relay: { ...EMPTY_RELAY, ...(parsed.relay ?? {}) },
     };
   } catch {
     return EMPTY_STATE; // повреждённое хранилище не должно ломать запуск

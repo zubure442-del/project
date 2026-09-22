@@ -155,14 +155,15 @@ describe('СИНТЕТИЧЕСКИЕ: на прошлых днях рекоме�
   });
   const s = state([full('2026-09-18'), full(YESTERDAY), full(TODAY)]);
 
-  it('сегодня — совет, кофейное окно и карточки «Скоро»', () => {
+  it('сегодня — совет, «Эстафета» перед кофейным окном и карточки «Скоро»', () => {
     const recs = recommendationsFor(s, TODAY, NOON);
     expect(recs?.advice?.text).toBeTruthy();
     expect(recs?.coffee).not.toBeNull();
-    expect(recs?.slides).toEqual(['advice', 'coffee', 'food', 'endurance', 'sleepmode']);
+    expect(recs?.relay).toBeDefined();
+    expect(recs?.slides).toEqual(['advice', 'relay', 'coffee', 'food', 'endurance', 'sleepmode']);
   });
 
-  it('любой прошлый день — весь рекомендательный слой скрыт, хотя день полный и сон есть', () => {
+  it('любой прошлый день — весь рекомендательный слой скрыт (и «Эстафета»), хотя день полный и сон есть', () => {
     for (const date of [YESTERDAY, '2026-09-18', '2026-09-15']) {
       expect(recommendationsFor(s, date, NOON)).toBeNull();
     }

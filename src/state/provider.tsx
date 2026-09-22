@@ -30,6 +30,7 @@ import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText,
 import { DEMO_STATUS_TEXT, demoState } from './demo';
 import { loadPlan, loadProgress, recordDurations, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withOnboarding } from './profile';
+import { settleRelayState } from './relay';
 import { applySyncResult, newUserTodayOnly, planDays, rebuildDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -304,7 +305,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     booted.current = true;
     void loadState().then((loaded) => {
       // Автоочистка кэша при запуске: дальше CACHE_DAYS хранить незачем.
-      const cleaned = { ...loaded, raw: keepRecentDays(loaded.raw) };
+      const trimmed = { ...loaded, raw: keepRecentDays(loaded.raw) };
+      // «Эстафета»: орехи за вчерашние и прошлые дни с нормой — по кэшу, сразу при открытии.
+      const cleaned = settleRelayState(trimmed);
+      if (cleaned !== trimmed) void saveState(cleaned);
       latest.current = cleaned;
       setState(cleaned);
       setReady(true);
@@ -323,10 +327,15 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       setPicked(null);
       setClockDay(todayKey());
       setDemoSession((prev) => prev && { ...prev, at: Date.now() });
+      // Возврат из фона — тоже открытие: проверяем кэш на выполненные дни, даже если к кольцу не пойдём.
+      if (!running.current) {
+        const settled = settleRelayState(latest.current);
+        if (settled !== latest.current) commit(settled);
+      }
       if (latest.current.started) sync('resume');
     });
     return () => sub.remove();
-  }, [sync]);
+  }, [commit, sync]);
 
   // Полночь, пока приложение открыто: дата «сегодня» сменится сама.
   useEffect(() => {

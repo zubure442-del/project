@@ -26,12 +26,10 @@ export interface ScreenProps {
   onSync: () => void;
   /** Плашка над содержимым: например, о незаполненной биометрии. */
   banner?: ReactNode;
-  /** Под кнопкой-датой, справа от статуса: на «Сегодня» — баланс орехов. */
-  accessory?: ReactNode;
   children: ReactNode;
 }
 
-export function Screen({ title, info, statusText, onSync, banner, accessory, children }: ScreenProps) {
+export function Screen({ title, info, statusText, onSync, banner, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -45,14 +43,11 @@ export function Screen({ title, info, statusText, onSync, banner, accessory, chi
           {/* Календарь: выбранный день один на все вкладки. */}
           <CalendarButton />
         </View>
-        <View style={styles.subRow}>
-          <Pressable style={styles.statusRow} onPress={onSync}>
-            <Text style={styles.status} numberOfLines={1}>
-              {statusText}
-            </Text>
-          </Pressable>
-          {accessory}
-        </View>
+        <Pressable style={styles.statusRow} onPress={onSync}>
+          <Text style={styles.status} numberOfLines={1}>
+            {statusText}
+          </Text>
+        </Pressable>
       </View>
       {banner}
 
@@ -105,8 +100,7 @@ export const styles = StyleSheet.create({
   titleLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 1 },
   title: { color: colors.text, fontSize: 28, fontWeight: '600', flexShrink: 1 },
   spacer: { flex: 1 },
-  subRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginTop: 4 },
-  statusRow: { height: 20, justifyContent: 'center', flexShrink: 1 },
+  statusRow: { marginTop: 4, height: 20, justifyContent: 'center' },
   status: { color: colors.textFaint, fontSize: 13, fontVariant: ['tabular-nums'] },
 
   card: {

@@ -1,10 +1,8 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { coffeeClock, type CoffeeWindow, type RelayView } from '../domain';
+import { coffeeClock, type CoffeeWindow } from '../domain';
 import type { AssistantSlide } from '../state/day';
-import { RelayBody, StreakBadge } from './Relay';
-import { RelayGlyph } from './RewardIcons';
 import { SparkIcon } from './TabIcons';
 import { colors, radius, spacing, withAlpha } from './theme';
 
@@ -13,10 +11,9 @@ export const ASSISTANT_HEIGHT = 340;
 const ZONE_RED = withAlpha(colors.danger, 0.6);
 const ZONE_GREEN = '#5DBB8C';
 
-type Glyph = 'relay' | 'coffee' | 'food' | 'bolt' | 'moon';
+type Glyph = 'coffee' | 'food' | 'bolt' | 'moon';
 
 function CardGlyph({ name }: { name: Glyph }) {
-  if (name === 'relay') return <RelayGlyph />;
   const p = { stroke: colors.accent, strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' };
   return (
     <Svg width={22} height={22} viewBox="0 0 24 24">
@@ -96,7 +93,6 @@ interface Slide {
 }
 
 const SLIDES: Slide[] = [
-  { key: 'relay', title: 'Эстафета', glyph: 'relay' },
   { key: 'coffee', title: 'Кофейное окно', glyph: 'coffee' },
   { key: 'food', title: 'Цикл питания', glyph: 'food', soon: 'Подскажет, когда удобнее есть в течение дня.' },
   { key: 'endurance', title: 'Пик выносливости', glyph: 'bolt', soon: 'Покажет время дня, когда тренировки даются легче.' },
@@ -108,27 +104,23 @@ const SLIDES: Slide[] = [
  * из ReportGenerator, дальше карточки функций. Каждый слайд сразу показывает своё содержимое:
  * отдельного нажатия «открыть» нет, единственный жест — свайп. Какие слайды есть, решает
  * `recommendationsFor`: без оценки сна за сегодня «Кофейного окна» нет вовсе.
- * «Эстафета» стоит перед «Кофейным окном» и, как все рекомендации, есть только за сегодня.
+ * «Эстафета от Лиса» живёт не здесь, а в листе по нажатию на маскота.
  */
 export function AssistantCarousel({
   slides,
   advice,
   adviceLabel,
-  relay,
   coffee,
 }: {
   slides: readonly AssistantSlide[];
   advice: string | null;
   adviceLabel: string;
-  relay: RelayView | null;
   coffee: (CoffeeWindow & { nowMinute: number }) | null;
 }) {
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
   const inner = width - spacing.md * 4;
-  const shown = SLIDES.filter(
-    (card) => slides.includes(card.key) && (card.key !== 'coffee' || coffee) && (card.key !== 'relay' || relay),
-  );
+  const shown = SLIDES.filter((card) => slides.includes(card.key) && (card.key !== 'coffee' || coffee));
   const pages = 1 + shown.length;
 
   return (
@@ -166,12 +158,9 @@ export function AssistantCarousel({
                 <CardGlyph name={card.glyph} />
                 <Text style={styles.title}>{card.title}</Text>
                 {card.soon ? <Text style={styles.soon}>Скоро</Text> : null}
-                {card.key === 'relay' && relay ? <StreakBadge streak={relay.streak} /> : null}
               </View>
               {card.soon ? (
                 <Text style={styles.text}>{card.soon}</Text>
-              ) : card.key === 'relay' ? (
-                relay && <RelayBody relay={relay} />
               ) : (
                 coffee && <CoffeeBody coffee={coffee} nowMinute={coffee.nowMinute} width={inner} />
               )}

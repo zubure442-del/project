@@ -1,7 +1,14 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { RELAY_DAY_REWARD, formatCount, pluralRu, type RelayView } from '../domain';
 import { CheckGlyph, FlameGlyph, NutGlyph } from './RewardIcons';
+import { Sheet } from './Sheet';
 import { colors, radius, spacing, withAlpha } from './theme';
+
+/** Название игры — на кнопке под маскотом и в заголовке листа. */
+export const RELAY_TITLE = 'Эстафета от Лиса';
+/** Магазин живёт в том же листе и пока пуст. */
+export const SHOP_TITLE = 'Магазин';
+export const SHOP_EMPTY_TEXT = 'Скоро здесь появятся предметы';
 
 /** «Зелёный свет» — единственный зелёный на карточке, тот же, что у зелёной зоны кофейного окна. */
 export const GREEN_LIGHT = '#5DBB8C';
@@ -10,7 +17,18 @@ const STEP_FORMS = ['шаг', 'шага', 'шагов'] as const;
 const NUT_FORMS = ['орех', 'ореха', 'орехов'] as const;
 const DAY_FORMS = ['день', 'дня', 'дней'] as const;
 
-/** Огонёк с числом дней серии — в шапке карточки. */
+/** Баланс орехов. Крупный — рядом с маскотом на «Сегодня», ещё крупнее — в листе. */
+export function NutsPill({ nuts, big = false }: { nuts: number; big?: boolean }) {
+  return (
+    <View style={[styles.pill, big && styles.pillBig]}>
+      <NutGlyph size={big ? 26 : 20} />
+      <Text style={[styles.pillText, big && styles.pillTextBig]}>{formatCount(nuts)}</Text>
+      {big ? <Text style={styles.pillUnit}>{pluralRu(nuts, NUT_FORMS)}</Text> : null}
+    </View>
+  );
+}
+
+/** Огонёк с числом дней серии. */
 export function StreakBadge({ streak }: { streak: number }) {
   return (
     <View style={styles.streak} accessibilityLabel={`Серия: ${streak} ${pluralRu(streak, DAY_FORMS)} подряд`}>
@@ -27,7 +45,7 @@ export function StreakBadge({ streak }: { streak: number }) {
 export function RelayBody({ relay }: { relay: RelayView }) {
   const share = relay.norm > 0 ? Math.min(1, relay.steps / relay.norm) : 0;
   return (
-    <View style={styles.root}>
+    <View style={styles.body}>
       {relay.met ? (
         <View style={styles.block}>
           <Text style={[styles.big, { color: GREEN_LIGHT }]}>Зелёный свет</Text>
@@ -52,8 +70,13 @@ export function RelayBody({ relay }: { relay: RelayView }) {
         {formatCount(relay.steps)} из {formatCount(relay.norm)}
       </Text>
 
-      <View style={styles.flex} />
-      <Text style={styles.label}>Бонусы за серию</Text>
+      <View style={styles.streakRow}>
+        <Text style={styles.label}>Серия</Text>
+        <Text style={styles.streakDays}>
+          {relay.streak} {pluralRu(relay.streak, DAY_FORMS)} подряд
+        </Text>
+        <StreakBadge streak={relay.streak} />
+      </View>
       <View style={styles.ladder}>
         {relay.ladder.map((rung) => (
           <View key={rung.days} style={styles.rung}>
@@ -76,10 +99,31 @@ export function RelayBody({ relay }: { relay: RelayView }) {
   );
 }
 
+/**
+ * Лист «Эстафета от Лиса»: всё про игру в одном месте — баланс орехов, прогресс дня,
+ * серия с лестницей и магазин. Открывается нажатием на маскота с итогом дня.
+ */
+export function RelaySheet({ visible, relay, onClose }: { visible: boolean; relay: RelayView; onClose: () => void }) {
+  return (
+    <Sheet visible={visible} title={RELAY_TITLE} onClose={onClose}>
+      <View style={styles.sheetHead}>
+        <NutsPill nuts={relay.nuts} big />
+      </View>
+      <RelayBody relay={relay} />
+      <View style={styles.divider} />
+      <Text style={styles.shopTitle}>{SHOP_TITLE}</Text>
+      <View style={styles.shopEmpty}>
+        <NutGlyph size={34} color={colors.textFaint} />
+        <Text style={styles.shopText}>{SHOP_EMPTY_TEXT}</Text>
+      </View>
+    </Sheet>
+  );
+}
+
 const CIRCLE = 40;
 
 const styles = StyleSheet.create({
-  root: { flex: 1, gap: spacing.xs },
+  body: { gap: spacing.xs },
   block: { gap: 2 },
   label: { color: colors.textMuted, fontSize: 13 },
   big: { color: colors.text, fontSize: 38, fontWeight: '200', fontVariant: ['tabular-nums'] },
@@ -89,8 +133,9 @@ const styles = StyleSheet.create({
   barFill: { height: '100%', borderRadius: 3 },
   faintText: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   faint: { color: colors.textFaint },
-  flex: { flex: 1 },
-  ladder: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.xs },
+  streakRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
+  streakDays: { color: colors.text, fontSize: 15, flex: 1 },
+  ladder: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.sm },
   rung: { alignItems: 'center', gap: 6, flex: 1 },
   circle: {
     width: CIRCLE,
@@ -127,4 +172,23 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   streakText: { color: colors.accent, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: withAlpha(colors.accent, 0.14),
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  pillBig: { paddingHorizontal: 16, paddingVertical: 8 },
+  pillText: { color: colors.accent, fontSize: 20, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  pillTextBig: { fontSize: 28, fontWeight: '500' },
+  pillUnit: { color: colors.textMuted, fontSize: 14, marginLeft: 2 },
+  sheetHead: { alignItems: 'center', paddingBottom: spacing.md },
+  divider: { height: 1, backgroundColor: colors.track, marginVertical: spacing.lg },
+  shopTitle: { color: colors.text, fontSize: 17, fontWeight: '500' },
+  shopEmpty: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.lg },
+  shopText: { color: colors.textMuted, fontSize: 15, textAlign: 'center' },
 });

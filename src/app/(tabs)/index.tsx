@@ -18,7 +18,7 @@ import {
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 export default function TodayTab() {
-  const { week, state, statusText, sync } = useVuelo();
+  const { week, state, statusText, sync, dayView } = useVuelo();
   const { width } = useWindowDimensions();
   const { date: picked, banner, complete } = useTabDay();
   const day = findDay(state.days, picked);
@@ -38,7 +38,7 @@ export default function TodayTab() {
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       {!complete ? (
-        <Calibration />
+        <Calibration today={picked === dayView.today} />
       ) : (
       <>
       <View style={styles.total}>

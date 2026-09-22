@@ -41,9 +41,9 @@ describe('СИНТЕТИЧЕСКИЕ: экран калибровки вмест
     expect(dayView([], NOON).defaultDate).toBe(TODAY);
   });
 
-  it('до четырёх утра открываем вчерашние сутки', () => {
-    const view = dayView([day(YESTERDAY, true), day(TODAY, true)], new Date(2026, 8, 21, 2, 30));
-    expect(view.defaultDate).toBe(YESTERDAY);
+  it('ночью тоже открывается сегодняшняя дата, а не вчерашние сутки', () => {
+    expect(dayView([day(YESTERDAY, true), day(TODAY, true)], new Date(2026, 8, 21, 2, 30)).defaultDate).toBe(TODAY);
+    expect(dayView([day(YESTERDAY, true)], new Date(2026, 8, 21, 0, 5)).defaultDate).toBe(TODAY);
   });
 
   it('для неполного дня Сон, Активность и Организм закрыты, «Сегодня» и «Профиль» открыты', () => {

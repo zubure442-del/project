@@ -43,6 +43,8 @@ export const HARD_CAP_MS = 120000;
 export const GAP_MIN = 90;
 /** Профиль уходит кольцу (0x01 → 0x19 → 0x02) через столько после последней правки. */
 export const PROFILE_PUSH_DELAY_MS = 1500;
+/** Как часто сверяем дату «сегодня» с часами телефона. */
+export const CLOCK_CHECK_MS = 60 * 1000;
 /** Живой замер не чаще одного раза в это время. */
 export const LIVE_MEASURE_COOLDOWN_MS = 30 * 60 * 1000;
 
@@ -115,6 +117,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<SyncError | null>(null);
   /** Выбор в календаре. Сбрасывается после каждой синхронизации (ключ — время синхронизации). */
   const [picked, setPicked] = useState<{ date: string; key: number } | null>(null);
+  /**
+   * Сегодняшняя дата по часам телефона. Раньше «сегодня» пересчитывалось только при новых данных:
+   * открыл приложение после полуночи со свежим кэшем — и видел вчерашний день.
+   */
+  const [clockDay, setClockDay] = useState(() => todayKey());
   const lastLiveAt = useRef(0);
   const ring = useRef<RingBle | null>(null);
   const running = useRef(false);
@@ -294,16 +301,29 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     });
   }, [sync]);
 
-  // Возврат из фона: правило 10 минут. «active» после шторки или системного окна — не возврат.
+  // Возврат из фона: при каждом входе открывается сегодняшняя дата, дальше — правило 10 минут.
+  // «active» после шторки или системного окна — не возврат.
   useEffect(() => {
     let previous: AppStateStatus = AppState.currentState;
     const sub = AppState.addEventListener('change', (next) => {
       const fromBackground = previous === 'background';
       previous = next;
-      if (next === 'active' && fromBackground && latest.current.started) sync('resume');
+      if (next !== 'active' || !fromBackground) return;
+      setPicked(null);
+      setClockDay(todayKey());
+      if (latest.current.started) sync('resume');
     });
     return () => sub.remove();
   }, [sync]);
+
+  // Полночь, пока приложение открыто: дата «сегодня» сменится сама.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const day = todayKey();
+      setClockDay((prev) => (prev === day ? prev : day));
+    }, CLOCK_CHECK_MS);
+    return () => clearInterval(timer);
+  }, []);
 
   const clearData = useCallback(() => {
     void (async () => {
@@ -378,8 +398,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<Vuelo>(() => {
-    const view = dayView(state.days);
-    const week = weekDays(state.days);
+    // «Сегодня» — от часов телефона (clockDay): при смене даты всё пересчитывается, даже без новых данных.
+    const [y, m, d] = clockDay.split('-').map(Number);
+    const clock = new Date(y, m - 1, d, 12);
+    const view = dayView(state.days, clock);
+    const week = weekDays(state.days, clock);
     return {
       state,
       ready,
@@ -403,7 +426,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       reloadProfile,
       clearData,
     };
-  }, [clearData, dismissFresh, error, finishLoading, forgetRing, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, state, sync]);
+  }, [clearData, clockDay, dismissFresh, error, finishLoading, forgetRing, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, state, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

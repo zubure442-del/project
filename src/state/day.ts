@@ -39,7 +39,10 @@ export function latestSpo2(days: DaySnapshot[]): { value: number; when: string }
   return null;
 }
 
-/** Граница суток: до этого часа по умолчанию показываем вчерашний день. */
+/**
+ * До этого часа сессия считается ночной (кольцо тогда не отдаёт сон). На выбор дня не влияет:
+ * при входе всегда открывается сегодняшняя дата.
+ */
 export const DAY_START_HOUR = 4;
 
 /** Есть ли за день хоть что-то: шаги, сон, пульс, сводка или кислород. */
@@ -67,16 +70,14 @@ export interface DayView {
 }
 
 /**
- * Какой день открывать: сегодняшний (до четырёх утра — вчерашние сутки, ночь не закончилась).
- * Никаких перебросов на вчера: если у дня нет всех трёх метрик, «Сегодня» показывает экран
- * калибровки, а Сон, Активность и Организм не открываются, пока не выбран полный день.
+ * Какой день открывать: всегда сегодняшний, в том числе ночью. Никаких перебросов на вчера:
+ * если у дня нет всех трёх метрик, «Сегодня» показывает экран калибровки.
  */
 export function dayView(days: DaySnapshot[], now = new Date()): DayView {
   const today = todayKey(now);
   const yesterday = shiftDate(today, -1);
-  const preferred = now.getHours() < DAY_START_HOUR ? yesterday : today;
   const complete = days.filter((d) => d.date <= today && isCompleteDay(d)).map((d) => d.date).sort();
-  return { today, yesterday, lastComplete: complete.length ? complete[complete.length - 1] : null, defaultDate: preferred };
+  return { today, yesterday, lastComplete: complete.length ? complete[complete.length - 1] : null, defaultDate: today };
 }
 
 /** Какой день показан на всех вкладках: выбор из календаря действует до следующей синхронизации. */

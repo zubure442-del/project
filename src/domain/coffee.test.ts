@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  COFFEE_ADVICE_FROM_MIN,
+  COFFEE_ADVICE_UNTIL_MIN,
   COFFEE_CUPS_TEXT,
   COFFEE_CUPS_THREE_FROM,
   COFFEE_CUPS_TWO_FROM,
@@ -77,9 +79,31 @@ describe('СИНТЕТИЧЕСКИЕ: число чашек по оценке с
     });
   });
 
-  it('совет по чашкам — в любой фазе окна, в том числе когда окно уже закрыто', () => {
-    for (const nowMinute of [120, 450, 600, 1000]) {
+  it('совет по чашкам — в любой фазе окна, если сейчас между 6:00 и 18:00', () => {
+    for (const nowMinute of [450, 600, 1000]) {
       expect(coffeeWindow({ ...base, sleepScore: 70, nowMinute }).cups?.n).toBe(2);
+    }
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: совет по чашкам только с 6:00 до 18:00', () => {
+  it('границы окна — именованные константы 6:00 и 18:00', () => {
+    expect(COFFEE_ADVICE_FROM_MIN).toBe(6 * 60);
+    expect(COFFEE_ADVICE_UNTIL_MIN).toBe(18 * 60);
+  });
+
+  it('с 6:00 включительно до 18:00 не включая — совет есть', () => {
+    for (const nowMinute of [360, 361, 720, 1079]) {
+      expect(coffeeWindow({ ...base, wakeMinute: 240, nowMinute }).cups?.n).toBe(2);
+    }
+  });
+
+  it('поздно вечером и ночью — только таймлайн: совета нет, текста вместо него тоже', () => {
+    for (const nowMinute of [0, 120, 359, 1080, 1200, 1439]) {
+      const w = coffeeWindow({ ...base, wakeMinute: 240, nowMinute });
+      expect(w.kind).toBe('window');
+      expect(w).toMatchObject({ start: 330, cutoff: 900 });
+      expect(w.cups).toBeNull();
     }
   });
 });

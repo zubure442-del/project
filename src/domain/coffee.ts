@@ -13,6 +13,17 @@ export const COFFEE_START_DELAY_MIN = 90;
 export const COFFEE_CUTOFF_BUFFER_HOURS = 8;
 /** До этого часа — ночь: окна нет. */
 export const COFFEE_NIGHT_UNTIL_MIN = 5 * 60;
+/**
+ * Совет по числу чашек показываем только в разумное время: с 6:00 до 18:00 (минуты от полуночи).
+ * Вне окна — только таймлайн, без совета и без текста вместо него.
+ */
+export const COFFEE_ADVICE_FROM_MIN = 6 * 60;
+export const COFFEE_ADVICE_UNTIL_MIN = 18 * 60;
+
+/** Виден ли совет по чашкам в эту минуту суток: [6:00, 18:00). */
+export const coffeeAdviceVisible = (nowMinute: number): boolean =>
+  nowMinute >= COFFEE_ADVICE_FROM_MIN && nowMinute < COFFEE_ADVICE_UNTIL_MIN;
+
 /** Число чашек по оценке сна: ниже первого порога — 1, ниже второго — 2, дальше — 3. */
 export const COFFEE_CUPS_TWO_FROM = 60;
 export const COFFEE_CUPS_THREE_FROM = 90;
@@ -52,6 +63,7 @@ export function averageBedtime(bedtimes: readonly number[]): number {
 /**
  * Карточка «Кофейного окна»: статус над таймлайном и совет по числу чашек под ним.
  * Старт позже отсечки — «Сегодня лучше без кофе», таймлайн целиком красный и совета по чашкам нет.
+ * Совет по чашкам — только с 6:00 до 18:00 (`coffeeAdviceVisible`), иначе `cups: null`.
  */
 export type CoffeeWindow =
   | { kind: 'no-window'; text: string; start: number; cutoff: number; cups: null }
@@ -61,7 +73,8 @@ export type CoffeeWindow =
       start: number;
       cutoff: number;
       phase: 'before' | 'open' | 'after';
-      cups: { n: CoffeeCups; text: string };
+      /** null — вне окна показа совета (6:00–18:00): только таймлайн. */
+      cups: { n: CoffeeCups; text: string } | null;
     };
 
 export interface CoffeeInput {
@@ -80,8 +93,9 @@ export function coffeeWindow(input: CoffeeInput): CoffeeWindow {
   if (start >= cutoff) return { kind: 'no-window', text: COFFEE_TEXT.noWindow, start, cutoff, cups: null };
 
   const n = coffeeCups(input.sleepScore);
-  const base = { kind: 'window' as const, start, cutoff, cups: { n, text: COFFEE_CUPS_TEXT[n] } };
   const now = input.nowMinute;
+  const cups = coffeeAdviceVisible(now) ? { n, text: COFFEE_CUPS_TEXT[n] } : null;
+  const base = { kind: 'window' as const, start, cutoff, cups };
   if (now < COFFEE_NIGHT_UNTIL_MIN || now >= cutoff) return { ...base, text: COFFEE_TEXT.closed, phase: 'after' };
   if (now < start) return { ...base, text: `Окно откроется в ${hhmm(start)}`, phase: 'before' };
   return { ...base, text: `Окно открыто до ${hhmm(cutoff)}`, phase: 'open' };

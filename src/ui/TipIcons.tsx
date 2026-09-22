@@ -2,7 +2,7 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { colors } from './theme';
 
 /** Иконки строк на карточках экрана загрузки. Простые линии 24×24 в акцентном цвете. */
-export type TipIcon = 'finger' | 'sensor' | 'fit' | 'pulse' | 'moon' | 'split' | 'total' | 'phone' | 'info';
+export type TipIcon = 'finger' | 'sensor' | 'fit' | 'pulse' | 'moon' | 'split' | 'total' | 'phone' | 'info' | 'steps' | 'heart' | 'spark';
 
 export function TipGlyph({ name, size = 22, color = colors.accent }: { name: TipIcon; size?: number; color?: string }) {
   const p = { stroke: color, strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' };
@@ -38,6 +38,15 @@ export function TipGlyph({ name, size = 22, color = colors.accent }: { name: Tip
           <Path {...p} d="M4.5 16a8 8 0 1 1 15 0" />
           <Path {...p} d="M12 12l3.5-3" />
         </>
+      ) : name === 'steps' ? (
+        <>
+          <Path {...p} d="M8 3.5c1.7 0 2.5 1.8 2.5 4s-.8 4.5-2.5 4.5S5.5 9.7 5.5 7.5 6.3 3.5 8 3.5zM6 14.5h4v2a2 2 0 0 1-4 0z" />
+          <Path {...p} d="M16 7c1.7 0 2.5 1.8 2.5 4s-.8 4.5-2.5 4.5-2.5-2.3-2.5-4.5S14.3 7 16 7zM14 18h4v1.5a2 2 0 0 1-4 0z" />
+        </>
+      ) : name === 'heart' ? (
+        <Path {...p} d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />
+      ) : name === 'spark' ? (
+        <Path {...p} d="M12 3.5c.9 3.6 1.9 4.7 5.5 5.6-3.6.9-4.6 1.9-5.5 5.6-.9-3.7-1.9-4.7-5.5-5.6 3.6-.9 4.6-2 5.5-5.6zM18.5 15c.4 1.6.9 2.1 2.5 2.5-1.6.4-2.1.9-2.5 2.5-.4-1.6-.9-2.1-2.5-2.5 1.6-.4 2.1-.9 2.5-2.5z" />
       ) : name === 'phone' ? (
         <>
           <Rect {...p} x={7} y={2.5} width={10} height={19} rx={2.5} />

@@ -58,7 +58,6 @@ export function CalendarButton() {
             );
           })}
         </View>
-        <Text style={styles.legend}>Точка — за день есть Итог</Text>
         <Pressable style={styles.secondary} onPress={() => pick(view.today)}>
           <Text style={styles.secondaryText}>Сегодня</Text>
         </Pressable>
@@ -87,7 +86,6 @@ const styles = StyleSheet.create({
   numberTextOn: { color: colors.bg, fontWeight: '600' },
   dot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.accent, marginVertical: 4.5 },
   dotEmpty: { backgroundColor: 'transparent' },
-  legend: { color: colors.textFaint, fontSize: 12, textAlign: 'center' },
   secondary: { marginTop: spacing.md, paddingVertical: 12, alignItems: 'center', borderRadius: radius.card, backgroundColor: colors.track },
   secondaryText: { color: colors.text, fontSize: 16 },
 });

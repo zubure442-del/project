@@ -8,6 +8,7 @@ import {
   Calibration,
   Card,
   HeroRing,
+  NutsBalance,
   Ring,
   Screen,
   Skeleton,
@@ -35,6 +36,7 @@ export default function TodayTab() {
       statusText={statusText}
       onSync={() => sync('refresh')}
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
+      accessory={<NutsBalance nuts={state.relay.nuts} />}
     >
       {!complete ? (
         <Calibration today={picked === dayView.today} />

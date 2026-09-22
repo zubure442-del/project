@@ -16,6 +16,11 @@ describe('СИНТЕТИЧЕСКИЕ: «Эстафета» в состоянии
   const synced = applySyncResult(base, toSyncResult(generateDemoRaw(11, NOON)), null, NOON);
   const metPast = synced.days.filter((d) => d.date < TODAY && relayDay(d.date, d).steps! >= relayDay(d.date, d).norm);
 
+  it('баланс нового пользователя — 0', () => {
+    expect(EMPTY_STATE.relay.nuts).toBe(0);
+    expect(settleRelayState(EMPTY_STATE, NOON).relay.nuts).toBe(0);
+  });
+
   it('после выгрузки начислено по 5 орехов за каждый прошедший день с нормой — и только за них', () => {
     expect(synced.relay.credited).toEqual(metPast.map((d) => d.date));
     expect(synced.relay.credited).not.toContain(TODAY);

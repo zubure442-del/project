@@ -14,11 +14,8 @@ import {
 } from '../ble';
 import {
   EMPTY_STATE,
-  buildSnapshots,
   clearState,
-  collectStepNorms,
   isProfileComplete,
-  keepLastDays,
   keepRecentDays,
   loadProfile,
   loadState,
@@ -26,7 +23,6 @@ import {
   profileAge,
   saveState,
   splitByDay,
-  toSyncResult,
   type Profile,
   type VueloState,
 } from '../storage';
@@ -167,12 +163,13 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         if (!measured || stopLive.current) return;
         const ts = nowRingTs(Date.now(), -new Date().getTimezoneOffset() * 60);
         const source = latest.current;
+        // Точка добавляется к пульсу дня, а сводки пересобираются тем же расчётом, что после выгрузки.
+        // Раньше здесь был свой пересчёт без биометрии: после живого замера пропадали калории.
         const raw = mergeRaw(source.raw, splitByDay({
           ...emptySyncResult(),
           heart: [{ ts, value: measured.pulse, raw: [measured.pulse] }],
         }));
-        const days = keepLastDays(buildSnapshots(toSyncResult(raw), profileAge(source.profile) ?? source.age, source.stepNorms));
-        if (days.length) commit({ ...source, raw, days, stepNorms: collectStepNorms(source.stepNorms, days) });
+        commit(rebuildDays({ ...source, raw }));
       } catch {
         // Замер не удался — молчим: кольцо могло быть снято.
       }

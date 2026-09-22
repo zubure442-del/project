@@ -64,18 +64,36 @@ export function splitByDay(sync: SyncResult): RawByDay {
   return out;
 }
 
-/** Новые ряды поверх старых: по дню и по типу, и только если новое непусто. */
+/**
+ * Ряд по минутам: новые точки поверх старых. Минута из нового ответа заменяет ту же минуту,
+ * остальные сохранённые минуты остаются. Повтор одной минуты внутри ответа не удваивается.
+ */
+function unionByMinute<T extends readonly [number, ...number[]]>(old: T[], fresh: T[]): T[] {
+  if (!fresh.length) return old;
+  const byMinute = new Map<number, T>();
+  for (const point of old) byMinute.set(point[0], point);
+  for (const point of fresh) byMinute.set(point[0], point);
+  return [...byMinute.values()].sort((a, b) => a[0] - b[0]);
+}
+
+/**
+ * Новые ряды поверх старых: по дню и типу, объединением по минутам.
+ * Раньше непустой ответ заменял ряд дня целиком, и неполный ответ кольца стирал сохранённое:
+ * поток 0x55 без маркера конца (лог d, 21.09 19:53) оставлял часть замеров — «Организм» терял
+ * покрытие, итог пропадал, и на «Сегодня» снова было «Считаем вашу активность». Так же терялась
+ * вечерняя часть ночи (она приходит в окне вчерашнего дня) и весь пульс дня после живого замера.
+ */
 export function mergeRaw(previous: RawByDay, incoming: RawByDay): RawByDay {
   const out: RawByDay = { ...previous };
   for (const [date, fresh] of Object.entries(incoming)) {
     const old = out[date] ?? emptyDay(date);
     out[date] = {
       date,
-      steps: fresh.steps.length ? fresh.steps : old.steps,
-      sleep: fresh.sleep.length ? fresh.sleep : old.sleep,
-      heart: fresh.heart.length ? fresh.heart : old.heart,
-      summary: fresh.summary.length ? fresh.summary : old.summary,
-      spo2: fresh.spo2.length ? fresh.spo2 : old.spo2,
+      steps: unionByMinute(old.steps, fresh.steps),
+      sleep: unionByMinute(old.sleep, fresh.sleep),
+      heart: unionByMinute(old.heart, fresh.heart),
+      summary: unionByMinute(old.summary, fresh.summary),
+      spo2: unionByMinute(old.spo2, fresh.spo2),
     };
   }
   return keepRecentDays(out);

@@ -56,13 +56,42 @@ describe('кэш рядов', () => {
     expect(day?.heart).toHaveLength(3);
   });
 
-  it('новые данные того же типа заменяют старые', () => {
+  it('новый замер той же минуты заменяет старый, остальные минуты остаются', () => {
     const before = splitByDay({ ...empty, summary });
     const after = splitByDay({
       ...empty,
-      summary: [{ ts: ring('2026-09-20 04:00:00'), systolic: 120, diastolic: 80, stress: 30, glucose: 5, hrv: 70 }],
+      summary: [
+        { ts: ring('2026-09-20 03:30:00'), systolic: 121, diastolic: 79, stress: 25, glucose: 5.2, hrv: 77 },
+        { ts: ring('2026-09-20 04:00:00'), systolic: 120, diastolic: 80, stress: 30, glucose: 5, hrv: 70 },
+      ],
     });
-    expect(mergeRaw(before, after)['2026-09-20'].summary).toHaveLength(1);
+    const merged = mergeRaw(before, after)['2026-09-20'].summary;
+    expect(merged.map(([m, sys]) => [m, sys])).toEqual([
+      [180, 113],
+      [210, 121],
+      [240, 120],
+    ]);
+  });
+
+  it('неполный ответ кольца не укорачивает сохранённый ряд', () => {
+    const full = splitByDay({ ...empty, summary, heart, sleep: night });
+    // поток оборвался: пришёл один замер 0x55, один пульс и только утренняя часть ночи
+    const cut = splitByDay({
+      ...empty,
+      summary: summary.slice(0, 1),
+      heart: heart.slice(-1),
+      sleep: night.filter((s) => s.ts >= ring('2026-09-20 00:00:00')),
+    });
+    const merged = mergeRaw(full, cut)['2026-09-20'];
+    expect(merged.summary).toHaveLength(2);
+    expect(merged.heart).toHaveLength(3);
+    expect(merged.sleep).toHaveLength(night.length);
+  });
+
+  it('повтор одной минуты в ответе не удваивает шаги', () => {
+    const step = { ts: ring('2026-09-20 10:00:00'), value: 40 };
+    const merged = mergeRaw({}, splitByDay({ ...empty, steps: [step, step] }));
+    expect(merged['2026-09-20'].steps).toEqual([[600, 40]]);
   });
 
   it('автоочистка: держим не больше CACHE_DAYS дней', () => {

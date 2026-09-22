@@ -8,7 +8,9 @@ import {
   Calibration,
   Card,
   HeroRing,
+  Mascot,
   NutsBalance,
+  mascotHeightFor,
   Ring,
   Screen,
   Skeleton,
@@ -18,11 +20,16 @@ import {
 } from '../../ui';
 
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
+/** Высота фигуры маскота: не больше этого и не шире доли экрана, чтобы рядом поместилось число. */
+const MASCOT_MAX_HEIGHT = 230;
+const MASCOT_WIDTH_SHARE = 0.55;
 export default function TodayTab() {
   const { week, state, statusText, sync, dayView } = useVuelo();
   const { width } = useWindowDimensions();
   const { date: picked, banner, complete } = useTabDay();
   const day = findDay(state.days, picked);
+  // Сегодня вместо колец итога и трёх метрик — маскот и число дня; на прошлых датах всё как было.
+  const isToday = picked === dayView.today;
   // Рекомендации (совет, кофейное окно, «Скоро») — только за сегодня; на прошлом дне блока нет вовсе.
   const recs = recommendationsFor(state, picked);
   const chartWidth = width - spacing.md * 4;
@@ -39,23 +46,37 @@ export default function TodayTab() {
       accessory={<NutsBalance nuts={state.relay.nuts} />}
     >
       {!complete ? (
-        <Calibration today={picked === dayView.today} />
+        <Calibration today={isToday} />
       ) : (
       <>
-      <View style={styles.total}>
-        <HeroRing value={day?.total ?? null} size={Math.min(214, width - 140)} />
-      </View>
-
-      <View style={styles.components}>
-        {COMPONENTS.map((id) => (
-          <View key={id} style={styles.component}>
-            <Ring value={day?.scores[id] ?? null} size={78} thickness={6}>
-              <Text style={styles.componentValue}>{day?.scores[id] ?? '—'}</Text>
-            </Ring>
-            <Text style={styles.componentLabel}>{COMPONENT_LABEL[id]}</Text>
+      {isToday ? (
+        <View style={styles.hero}>
+          <Mascot height={Math.min(MASCOT_MAX_HEIGHT, mascotHeightFor(width * MASCOT_WIDTH_SHARE))} />
+          {/* Число дня — рядом с фигурой, не поверх: частицы остаются в рамке маскота. */}
+          <View style={styles.heroTotal}>
+            <Text style={styles.heroLabel}>Итог дня</Text>
+            <Text style={styles.totalValue}>{day?.total ?? '—'}</Text>
+            <Text style={styles.heroOf}>из 100</Text>
           </View>
-        ))}
-      </View>
+        </View>
+      ) : (
+        <>
+          <View style={styles.total}>
+            <HeroRing value={day?.total ?? null} size={Math.min(214, width - 140)} />
+          </View>
+
+          <View style={styles.components}>
+            {COMPONENTS.map((id) => (
+              <View key={id} style={styles.component}>
+                <Ring value={day?.scores[id] ?? null} size={78} thickness={6}>
+                  <Text style={styles.componentValue}>{day?.scores[id] ?? '—'}</Text>
+                </Ring>
+                <Text style={styles.componentLabel}>{COMPONENT_LABEL[id]}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
 
       <Card title="Дистанция и калории">
         {steps === null ? (
@@ -100,7 +121,18 @@ export default function TodayTab() {
 
 const styles = StyleSheet.create({
   total: { alignItems: 'center', marginTop: spacing.md, marginBottom: spacing.lg },
-  totalValue: { color: colors.text, fontSize: 76, fontWeight: '200', letterSpacing: -2 },
+  totalValue: { color: colors.text, fontSize: 76, fontWeight: '200', letterSpacing: -2, fontVariant: ['tabular-nums'] },
+  hero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  heroTotal: { flex: 1, alignItems: 'center' },
+  heroLabel: { color: colors.textMuted, fontSize: 15 },
+  heroOf: { color: colors.textFaint, fontSize: 13, marginTop: -4 },
   components: { flexDirection: 'row', justifyContent: 'space-around' },
   component: { alignItems: 'center', gap: spacing.xs },
   componentValue: { color: colors.text, fontSize: 24, fontWeight: '300' },

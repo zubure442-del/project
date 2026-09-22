@@ -22,4 +22,5 @@ export * from './Calibration';
 export * from './Assistant';
 export * from './Relay';
 export * from './Shop';
+export * from './Mascot';
 export * from './RewardIcons';

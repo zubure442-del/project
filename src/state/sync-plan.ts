@@ -14,7 +14,7 @@ import {
   toSyncResult,
   type VueloState,
 } from '../storage';
-import { DAY_START_HOUR, adviceMode, dayView, findDay, scoreOf, todayKey } from './day';
+import { DAY_START_HOUR, adviceMode, dayView, findDay, isCompleteDay, scoreOf, todayKey } from './day';
 
 /** Глубина выгрузки: кольцо хранит неделю. */
 export const TOTAL_DAYS = 7;
@@ -46,11 +46,25 @@ export const isFinalDay = (date: string, syncedAt: Readonly<Record<string, numbe
   syncedAt[date] !== undefined && syncedAt[date] >= finalFrom(date);
 
 /**
+ * «Новый пользователь»: удачная загрузка уже была, но ни одного полного дня (все три метрики)
+ * ещё не посчитано. Тогда кольцу нечего отдать за прошлую неделю, и повторные загрузки
+ * берут только сегодняшний день. Самая первая загрузка — неделя целиком, как обычно.
+ */
+export const newUserTodayOnly = (state: Pick<VueloState, 'lastSyncAt' | 'hadCompleteDay'>): boolean =>
+  state.lastSyncAt !== null && !state.hadCompleteDay;
+
+/**
  * Какие дни запросить у кольца. Сегодня — всегда; остальные — если их нет в кэше
  * или они ещё не финальные (например, вчера до полудня: сон мог прийти не весь).
+ * `todayOnly` — новый пользователь (см. `newUserTodayOnly`): только сегодня.
  * `note` — строка для отладочного лога: что запросили и почему.
  */
-export function planDays(syncedAt: Readonly<Record<string, number>>, now = new Date()): { days: number[]; note: string } {
+export function planDays(
+  syncedAt: Readonly<Record<string, number>>,
+  now = new Date(),
+  { todayOnly = false }: { todayOnly?: boolean } = {},
+): { days: number[]; note: string } {
+  if (todayOnly) return { days: [0], note: 'запрос дней: 0 сегодня; новый пользователь — полного дня ещё не было' };
   const today = todayKey(now);
   const days: number[] = [0];
   const asked: string[] = ['0 сегодня'];
@@ -93,7 +107,12 @@ export function rebuildDays(state: VueloState, now = new Date()): VueloState {
   const days = keepLastDays(
     buildSnapshots(toSyncResult(state.raw), profileAge(state.profile, now) ?? state.age, state.stepNorms, bodyOf(state.profile, now), now),
   );
-  return { ...state, days, stepNorms: collectStepNorms(state.stepNorms, days) };
+  return {
+    ...state,
+    days,
+    stepNorms: collectStepNorms(state.stepNorms, days),
+    hadCompleteDay: state.hadCompleteDay || days.some(isCompleteDay),
+  };
 }
 
 /**

@@ -94,6 +94,12 @@ export interface VueloState {
   batteryAt: number | null;
   /** Пользователь нажал «Начать» хотя бы раз: системный запрос Bluetooth уже показывали. */
   started: boolean;
+  /**
+   * Хотя бы у одного дня когда-либо были посчитаны все три метрики. Пока нет — «новый пользователь»:
+   * повторные загрузки берут у кольца только сегодняшний день. Флаг не сбрасывается, когда такой
+   * день уходит из недели; сбрасывает его только «Очистить данные».
+   */
+  hadCompleteDay: boolean;
   /** Состояние демо-режима: живёт только в памяти, `saveState` его не пишет. У настоящего поля нет. */
   demo?: true;
 }
@@ -128,7 +134,7 @@ export const isProfileComplete = (p: Profile): boolean =>
 
 export const EMPTY_STATE: VueloState = {
   days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
-  ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false,
+  ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false, hadCompleteDay: false,
 };
 /** Сколько дней показываем в недельном графике. */
 export const HISTORY_DAYS = 7;

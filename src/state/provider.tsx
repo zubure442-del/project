@@ -34,7 +34,7 @@ import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText,
 import { DEMO_STATUS_TEXT, demoState } from './demo';
 import { loadPlan, loadProgress, recordDurations, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withOnboarding } from './profile';
-import { applySyncResult, planDays, rebuildDays } from './sync-plan';
+import { applySyncResult, newUserTodayOnly, planDays, rebuildDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
 export const FRESH_MS = CACHE_FRESH_MS;
@@ -199,7 +199,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       setError(null);
       setLoadingMode(mode);
       // План дней известен сразу: от него зависят карточки и ожидаемая длительность частей загрузки.
-      const plan = planDays(latest.current.syncedAt);
+      // Новый пользователь (полного дня ещё не было) после первой загрузки берёт только сегодня.
+      const plan = planDays(latest.current.syncedAt, new Date(), { todayOnly: newUserTodayOnly(latest.current) });
       const slides = wantsSlides(latest.current.lastSyncAt === null, plan.days.length);
       const startedAt = Date.now();
       const measured: Partial<Record<SegmentKind, number[]>> = {};

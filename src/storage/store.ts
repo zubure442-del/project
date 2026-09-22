@@ -28,6 +28,8 @@ export async function loadState(): Promise<VueloState> {
       age: parsed.age ?? null,
       profile: { ...EMPTY_PROFILE, ...(parsed.profile ?? {}) },
       started: parsed.started ?? false,
+      // Старый кэш флага не знал: полный день в сохранённых сводках — значит, пользователь уже не новый.
+      hadCompleteDay: parsed.hadCompleteDay ?? (parsed.days ?? []).some((d) => d?.total !== null && d?.total !== undefined),
     };
   } catch {
     return EMPTY_STATE; // повреждённое хранилище не должно ломать запуск

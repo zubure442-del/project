@@ -101,3 +101,12 @@ export function weekCalories(values: readonly (number | null)[]): number | null 
   const known = values.filter((v): v is number => v !== null);
   return known.length ? known.reduce((a, b) => a + b, 0) : null;
 }
+
+/**
+ * Наглядная мера сожжённого: один кусок пиццы. Число круглое и намеренно грубое —
+ * это не пищевая ценность конкретной пиццы, а понятная единица «сколько это примерно».
+ */
+export const KCAL_PER_PIZZA_SLICE = 250;
+
+/** Сколько кусков пиццы «стоит» такой расход: дробно, для частично закрашенного куска. */
+export const pizzaSlices = (kcal: number): number => kcal / KCAL_PER_PIZZA_SLICE;

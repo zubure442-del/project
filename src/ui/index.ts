@@ -21,6 +21,8 @@ export * from './Onboarding';
 export * from './Calibration';
 export * from './Assistant';
 export * from './Relay';
+export * from './Pizza';
+export * from './CaloriesWeek';
 export * from './Mascot';
 export * from './MascotHero';
 export * from './RewardIcons';

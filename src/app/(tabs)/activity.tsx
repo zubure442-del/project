@@ -1,15 +1,23 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { STEPS_DEFAULT_NORM, TAB_INFO, busiestHour, tabInfoText, weekCalories } from '../../domain';
+import {
+  STEPS_DEFAULT_NORM,
+  TAB_INFO,
+  busiestHour,
+  distanceMeters,
+  formatCount,
+  formatDistance,
+  tabInfoText,
+} from '../../domain';
 import { findDay, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
   DayBanner,
+  CaloriesWeekCard,
   Card,
   DayActivityChart,
   HeroRing,
   Screen,
   Skeleton,
-  WeekBars,
   WeekChart,
   colors,
   spacing,
@@ -31,7 +39,10 @@ export default function ActivityTab() {
   // Шаги за день — после шумоподавления, норма — своя на день.
   const norm = day?.stepNorm?.value ?? STEPS_DEFAULT_NORM;
   const weekBars = week.map((w) => ({ date: w.date, value: w.day?.calories ?? null }));
-  const weekTotal = weekCalories(weekBars.map((b) => b.value));
+  // Дистанция — от шагов после шумоподавления и роста из профиля; нет роста — не показываем.
+  const distance = day?.steps != null && state.profile.heightCm !== null
+    ? formatDistance(distanceMeters(day.steps, state.profile.heightCm))
+    : null;
 
   return (
     <Screen
@@ -44,9 +55,13 @@ export default function ActivityTab() {
       <View style={styles.hero}>
         <HeroRing value={day?.scores.activity ?? null} />
         {day?.steps != null ? (
-          <Text style={styles.summary}>
-            {day.steps.toLocaleString('ru-RU')} шагов · {calories === null ? '—' : calories.toLocaleString('ru-RU')} ккал
-          </Text>
+          <>
+            {/* Сначала шаги и дистанция, чуть ниже — сожжённые калории. */}
+            <Text style={styles.summary}>
+              {formatCount(day.steps)} шагов{distance ? ` · ${distance}` : ''}
+            </Text>
+            <Text style={styles.burned}>Сожжено {calories === null ? '—' : formatCount(calories)} ккал</Text>
+          </>
         ) : null}
         {day?.steps != null ? (
           <View style={styles.norm}>
@@ -54,7 +69,7 @@ export default function ActivityTab() {
               <View style={[styles.fill, { width: `${Math.min(100, (day.steps / norm) * 100)}%` }]} />
             </View>
             <Text style={styles.normText}>
-              {Math.round((day.steps / norm) * 100)} % нормы · {norm.toLocaleString('ru-RU')}
+              {Math.round((day.steps / norm) * 100)} % нормы · {formatCount(norm)}
             </Text>
           </View>
         ) : null}
@@ -82,30 +97,23 @@ export default function ActivityTab() {
           <Skeleton height={130} />
         )}
         <View style={[ui.statRow, styles.stats]}>
-          <Stat label="Шаги" value={day?.steps != null ? day.steps.toLocaleString('ru-RU') : '—'} />
+          <Stat label="Шаги" value={day?.steps != null ? formatCount(day.steps) : '—'} />
           <Stat label="Самый активный час" value={best !== null ? `${best}:00` : '—'} />
         </View>
       </Card>
 
-      <Card title="Калории · неделя">
-        <Text style={styles.weekTotal}>
-          {weekTotal === null ? '—' : weekTotal.toLocaleString('ru-RU')}
-          <Text style={styles.weekUnit}> ккал</Text>
-        </Text>
-        <WeekBars days={weekBars} width={chartWidth} />
-      </Card>
+      <CaloriesWeekCard days={weekBars} width={chartWidth} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: spacing.md, gap: spacing.xs },
-  summary: { color: colors.textMuted, fontSize: 16 },
+  summary: { color: colors.text, fontSize: 17 },
+  burned: { color: colors.textMuted, fontSize: 15 },
   norm: { width: '70%', gap: 6, alignItems: 'center' },
   track: { alignSelf: 'stretch', height: 4, borderRadius: 2, backgroundColor: colors.track },
   fill: { height: 4, borderRadius: 2, backgroundColor: colors.accent },
   normText: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   stats: { marginTop: spacing.md },
-  weekTotal: { color: colors.text, fontSize: 38, fontWeight: '200', marginBottom: spacing.sm },
-  weekUnit: { color: colors.textMuted, fontSize: 15 },
 });

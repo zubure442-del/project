@@ -88,6 +88,11 @@ interface Vuelo {
   reloadProfile: () => void;
   /** Удаляет данные, историю, профиль и логи. Привязка к кольцу остаётся. */
   clearData: () => void;
+  /**
+   * Счётчик «открыть главный экран». Растёт при каждом входе в приложение и при каждой
+   * синхронизации; вкладки следят за ним и переключаются на центральную вкладку.
+   */
+  homeRequest: number;
   /** Демо-режим включён: экраны показывают синтетические показатели, посчитанные реальными формулами. */
   demo: boolean;
   /** Включить или выключить демо-режим (меню разработчика). Реальное состояние и хранилище не трогаются. */
@@ -140,6 +145,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
    */
   const [demo, setDemoSession] = useState<{ seed: number; at: number } | null>(null);
   const demoOn = useRef(false);
+  /** Просьба открыть центральную вкладку: вход в приложение и любая синхронизация. */
+  const [homeRequest, setHomeRequest] = useState(0);
+  const goHome = useCallback(() => setHomeRequest((n) => n + 1), []);
 
   const commit = useCallback((next: VueloState) => {
     latest.current = next;
@@ -185,6 +193,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
    */
   const sync = useCallback(
     (mode: SyncMode = 'launch') => {
+      // Любое обновление возвращает на главный экран, даже если к кольцу не пойдём.
+      goHome();
       if (running.current) return;
       // В демо к кольцу не идём: демо работает и без кольца, а настоящие данные ждут выключения.
       if (demoOn.current) return;
@@ -294,7 +304,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         }
       })();
     },
-    [commit, maybeLiveMeasure],
+    [commit, goHome, maybeLiveMeasure],
   );
 
   // Вход в приложение. Самый первый запуск ждёт имя; дальше — правило 10 минут.
@@ -326,6 +336,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       if (next !== 'active' || !fromBackground) return;
       setPicked(null);
       setClockDay(todayKey());
+      goHome();
       setDemoSession((prev) => prev && { ...prev, at: Date.now() });
       // Возврат из фона — тоже открытие: проверяем кэш на выполненные дни, даже если к кольцу не пойдём.
       if (!running.current) {
@@ -335,7 +346,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       if (latest.current.started) sync('resume');
     });
     return () => sub.remove();
-  }, [commit, sync]);
+  }, [commit, goHome, sync]);
 
   // Полночь, пока приложение открыто: дата «сегодня» сменится сама.
   useEffect(() => {
@@ -460,10 +471,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       saveProfile,
       reloadProfile,
       clearData,
+      homeRequest,
       demo: demo !== null,
       setDemo,
     };
-  }, [clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
+  }, [clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, homeRequest, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

@@ -1,4 +1,5 @@
-import { Tabs } from 'expo-router';
+import { Tabs, router } from 'expo-router';
+import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { profileAlerts, todayTabLabel, useVuelo } from '../../state';
 import { ActivityIcon, BodyIcon, ProfileIcon, SleepIcon, TabBar, colors } from '../../ui';
@@ -6,7 +7,12 @@ import { ActivityIcon, BodyIcon, ProfileIcon, SleepIcon, TabBar, colors } from '
 export const unstable_settings = { initialRouteName: 'index' };
 
 export default function TabsLayout() {
-  const { state, selectedDate, dayView } = useVuelo();
+  const { state, selectedDate, dayView, homeRequest } = useVuelo();
+  // Вход в приложение и любое обновление открывают центральную вкладку «Сегодня»:
+  // после загрузки человек всегда видит главный экран, а не ту вкладку, где закрыл приложение.
+  useEffect(() => {
+    router.replace('/');
+  }, [homeRequest]);
   // Точка на «Профиле» — только пока не заполнено хотя бы одно из пяти обязательных полей.
   // Раньше она горела и при заряде ≤ 20 %, поэтому не гасла после заполнения профиля.
   const { dot } = profileAlerts(state.profile);

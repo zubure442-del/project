@@ -276,7 +276,7 @@ export function LoadingScreen() {
           Данные хранятся только на телефоне
         </Text>
         <Text style={styles.note} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-          {NOT_MEDICAL_DEVICE} · показатели справочные
+          {NOT_MEDICAL_DEVICE}
         </Text>
       </View>
     </View>

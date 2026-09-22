@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { NOT_MEDICAL_DEVICE } from '../domain';
 import {
   STAGE_FADE_MS,
   canLeave,
@@ -275,7 +276,7 @@ export function LoadingScreen() {
           Данные хранятся только на телефоне
         </Text>
         <Text style={styles.note} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-          Не медицинский прибор · показатели справочные
+          {NOT_MEDICAL_DEVICE} · показатели справочные
         </Text>
       </View>
     </View>

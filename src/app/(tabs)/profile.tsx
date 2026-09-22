@@ -3,12 +3,13 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { NOT_MEDICAL_DEVICE } from '../../domain';
 import { BATTERY_STALE_MS, NAME_NOTE, parseProfileNumber, profileAlerts, useVuelo } from '../../state';
 import { profileAge, type Goal, type Profile, type Sex } from '../../storage';
 import { Card, colors, radius, spacing } from '../../ui';
 
 const DISCLAIMER =
-  'Не медицинский прибор. Показатели носят справочный характер и не заменяют врача. ' +
+  `${NOT_MEDICAL_DEVICE}. Показатели носят справочный характер и не заменяют врача. ` +
   'Давление и глюкоза — оценка кольца. Данные хранятся только на этом телефоне.';
 
 const SEX: { id: Sex; label: string }[] = [

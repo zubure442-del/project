@@ -1,5 +1,6 @@
 export * from './week';
 export * from './tab-info';
+export * from './texts';
 export * from './charts';
 export * from './heart';
 export * from './report';

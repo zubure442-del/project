@@ -1,8 +1,10 @@
+import { NOT_MEDICAL_DEVICE } from './texts';
+
 /**
  * Что показывает «i» в шапке вкладки: короткое описание метрик простыми словами.
  * Формул и чисел в интерфейсе нет — как у Oura и Whoop. Последняя строка — общая оговорка.
  */
-export const NOT_MEDICAL = 'Не медицинский показатель.';
+export const NOT_MEDICAL = NOT_MEDICAL_DEVICE;
 
 export const TAB_INFO = {
   sleep: {

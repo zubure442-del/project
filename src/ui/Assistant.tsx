@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 import { coffeeClock, type CoffeeWindow } from '../domain';
 import type { DaySnapshot } from '../storage';
@@ -97,7 +97,7 @@ function CoffeeBody({ coffee, night, nowMinute, width }: { coffee: CoffeeWindow;
   return <Text style={styles.text}>{coffee.text}</Text>;
 }
 
-interface Folded {
+interface Slide {
   key: string;
   title: string;
   glyph: Glyph;
@@ -105,7 +105,7 @@ interface Folded {
   soon?: string;
 }
 
-const FOLDED: Folded[] = [
+const SLIDES: Slide[] = [
   { key: 'coffee', title: 'Кофейное окно', glyph: 'coffee' },
   { key: 'food', title: 'Цикл питания', glyph: 'food', soon: 'Подскажет, когда удобнее есть в течение дня.' },
   { key: 'endurance', title: 'Пик выносливости', glyph: 'bolt', soon: 'Покажет время дня, когда тренировки даются легче.' },
@@ -114,7 +114,8 @@ const FOLDED: Folded[] = [
 
 /**
  * «AI Ассистент» на «Сегодня»: горизонтальная карусель с точками. Первая карточка — совет
- * из ReportGenerator, дальше свёрнутые карточки, разворачиваются по нажатию.
+ * из ReportGenerator, дальше карточки функций. Каждый слайд сразу показывает своё содержимое:
+ * отдельного нажатия «открыть» нет, единственный жест — свайп.
  */
 export function AssistantCarousel({
   advice,
@@ -131,9 +132,8 @@ export function AssistantCarousel({
 }) {
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
   const inner = width - spacing.md * 4;
-  const pages = 1 + FOLDED.length;
+  const pages = 1 + SLIDES.length;
 
   return (
     <View style={styles.root}>
@@ -163,33 +163,22 @@ export function AssistantCarousel({
             <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
           </View>
         </View>
-        {FOLDED.map((card) => {
-          const expanded = !!open[card.key];
-          return (
-            <View key={card.key} style={[styles.page, { width }]}>
-              <Pressable style={styles.card} onPress={() => setOpen((prev) => ({ ...prev, [card.key]: !expanded }))}>
-                <View style={styles.head}>
-                  <CardGlyph name={card.glyph} />
-                  <Text style={styles.title}>{card.title}</Text>
-                  {card.soon ? <Text style={styles.soon}>Скоро</Text> : null}
-                  <Text style={styles.chevron}>{expanded ? '−' : '+'}</Text>
-                </View>
-                {expanded ? (
-                  card.soon ? (
-                    <Text style={styles.text}>{card.soon}</Text>
-                  ) : (
-                    <CoffeeBody coffee={coffee} night={night} nowMinute={nowMinute} width={inner} />
-                  )
-                ) : (
-                  <View style={styles.folded}>
-                    <CardGlyph name={card.glyph} />
-                    <Text style={styles.small}>Нажмите, чтобы открыть</Text>
-                  </View>
-                )}
-              </Pressable>
+        {SLIDES.map((card) => (
+          <View key={card.key} style={[styles.page, { width }]}>
+            <View style={styles.card}>
+              <View style={styles.head}>
+                <CardGlyph name={card.glyph} />
+                <Text style={styles.title}>{card.title}</Text>
+                {card.soon ? <Text style={styles.soon}>Скоро</Text> : null}
+              </View>
+              {card.soon ? (
+                <Text style={styles.text}>{card.soon}</Text>
+              ) : (
+                <CoffeeBody coffee={coffee} night={night} nowMinute={nowMinute} width={inner} />
+              )}
             </View>
-          );
-        })}
+          </View>
+        ))}
       </ScrollView>
       <View style={styles.dots}>
         {Array.from({ length: pages }, (_, i) => (
@@ -215,8 +204,6 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     overflow: 'hidden',
   },
-  chevron: { color: colors.textFaint, fontSize: 20, width: 20, textAlign: 'center' },
-  folded: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
   advice: {
     backgroundColor: 'rgba(242, 169, 59, 0.10)',
     borderRadius: radius.card,

@@ -1,19 +1,17 @@
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { TREND_MAX_PERCENT, trendPhrase, type Trend } from '../domain';
-import { Card } from './Screen';
-import { colors, spacing, withAlpha } from './theme';
+import { colors, spacing } from './theme';
 
-export const TREND_TITLE = 'Динамика за неделю';
 /** Сравнивать нечего: мало дней с данными или слишком низкая база. */
-export const TREND_EMPTY_TEXT = 'Пока мало данных для сравнения';
+export const TREND_EMPTY_TEXT = 'Пока мало данных';
 
 /** Цвет роста и падения: единственное место, где в приложении есть зелёный и красный. */
 export const trendColor = (percent: number): string =>
   percent > 0 ? colors.positive : percent < 0 ? colors.negative : colors.textMuted;
 
 /** Стрелка направления: вверх — рост, вниз — падение, черта — без изменений. */
-function TrendArrow({ percent, size = 26 }: { percent: number; size?: number }) {
+export function TrendArrow({ percent, size = 20 }: { percent: number; size?: number }) {
   const p = {
     stroke: trendColor(percent),
     strokeWidth: 2.2,
@@ -35,44 +33,31 @@ function TrendArrow({ percent, size = 26 }: { percent: number; size?: number }) 
 }
 
 /**
- * «Динамика за неделю»: только процент и одна строка, на какой он базе. Чисел по дням нет —
- * они ничего не добавляют. Карточка видна всегда: пока второй недели нет, сравнение идёт
- * с личной нормой (`weekTrend`), а совсем без данных остаётся заголовок.
+ * Динамика рядом с главным показателем вкладки: стрелка, процент и одна короткая строка,
+ * с чем сравниваем («ниже вашей нормы», «выше прошлой недели»). Отдельной карточки внизу нет.
  */
-export function WeekTrendCard({ trend }: { trend: Trend }) {
+export function TrendInline({ trend }: { trend: Trend }) {
   const { percent, capped } = trend;
-  if (percent === null) {
-    return (
-      <Card title={TREND_TITLE}>
-        <Text style={styles.waitText}>{TREND_EMPTY_TEXT}</Text>
-      </Card>
-    );
-  }
+  if (percent === null) return <Text style={styles.empty}>{TREND_EMPTY_TEXT}</Text>;
   const color = trendColor(percent);
   const value = capped ? `более ${TREND_MAX_PERCENT} %` : `${percent > 0 ? '+' : ''}${percent} %`;
 
   return (
-    <Card title={TREND_TITLE}>
-      <View style={styles.head}>
-        <View style={[styles.badge, { backgroundColor: withAlpha(color, 0.14) }]}>
-          <TrendArrow percent={percent} />
-        </View>
-        <View style={styles.headText}>
-          <Text style={[styles.percent, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-            {value}
-          </Text>
-          <Text style={styles.phrase}>{trendPhrase(percent, trend.mode)}</Text>
-        </View>
+    <View>
+      <View style={styles.row}>
+        <TrendArrow percent={percent} />
+        <Text style={[styles.percent, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+          {value}
+        </Text>
       </View>
-    </Card>
+      <Text style={styles.phrase}>{trendPhrase(percent, trend.mode)}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  head: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  badge: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  headText: { flex: 1 },
-  percent: { fontSize: 40, fontWeight: '200', letterSpacing: -1, fontVariant: ['tabular-nums'] },
-  phrase: { color: colors.textMuted, fontSize: 14, marginTop: -2 },
-  waitText: { color: colors.textFaint, fontSize: 14 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  percent: { fontSize: 30, fontWeight: '200', letterSpacing: -0.5, fontVariant: ['tabular-nums'] },
+  phrase: { color: colors.textMuted, fontSize: 13, marginTop: -2 },
+  empty: { color: colors.textFaint, fontSize: 13 },
 });

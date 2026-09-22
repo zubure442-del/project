@@ -17,12 +17,15 @@ import {
   HeroRing,
   Screen,
   Skeleton,
-  WeekTrendCard,
+  TrendInline,
   colors,
   spacing,
   styles as ui,
   Stat,
 } from '../../ui';
+
+/** Кольцо в шапке меньше прежнего: справа от него стоит динамика. */
+const HERO_RING = 150;
 
 export default function ActivityTab() {
   const { week, state, statusText, sync } = useVuelo();
@@ -50,16 +53,19 @@ export default function ActivityTab() {
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
-        <HeroRing value={day?.scores.activity ?? null} />
-        {day?.steps != null ? (
-          <>
-            {/* Сначала шаги и дистанция, чуть ниже — сожжённые калории. */}
-            <Text style={styles.summary}>
-              {formatCount(day.steps)} шагов{distance ? ` · ${distance}` : ''}
-            </Text>
-            <Text style={styles.burned}>Сожжено {calories === null ? '—' : formatCount(calories)} ккал</Text>
-          </>
-        ) : null}
+        <HeroRing value={day?.scores.activity ?? null} size={HERO_RING} />
+        <View style={styles.heroSide}>
+          <TrendInline trend={trendFor(state, 'activity', picked)} />
+          {day?.steps != null ? (
+            <View>
+              {/* Сначала шаги и дистанция, чуть ниже — сожжённые калории. */}
+              <Text style={styles.summary}>
+                {formatCount(day.steps)} шагов{distance ? ` · ${distance}` : ''}
+              </Text>
+              <Text style={styles.burned}>Сожжено {calories === null ? '—' : formatCount(calories)} ккал</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
 
       <Card title="День">
@@ -80,15 +86,14 @@ export default function ActivityTab() {
         </View>
       </Card>
 
-      <WeekTrendCard trend={trendFor(state, 'activity', picked)} />
-
       <CaloriesWeekCard days={weekBars} width={chartWidth} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  hero: { alignItems: 'center', marginTop: spacing.md, gap: spacing.xs },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.md, marginTop: spacing.md },
+  heroSide: { flex: 1, gap: spacing.sm },
   summary: { color: colors.text, fontSize: 17 },
   burned: { color: colors.textMuted, fontSize: 15 },
   stats: { marginTop: spacing.md },

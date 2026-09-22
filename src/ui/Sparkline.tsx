@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { colors, radius, spacing, withAlpha } from './theme';
@@ -73,9 +74,23 @@ export function Sparkline({
   );
 }
 
+/** Коробка плитки: тот же фон и радиус и у сложенной, и у развёрнутой. */
+export function TileBox({ width, children }: { width: number; children: ReactNode }) {
+  return <View style={[styles.tile, { width }]}>{children}</View>;
+}
+
+/** Заголовок плитки. */
+export function TileTitle({ children }: { children: ReactNode }) {
+  return (
+    <Text style={styles.title} numberOfLines={1}>
+      {children}
+    </Text>
+  );
+}
+
 /**
  * Плитка «Организма»: название, миниатюрный график за день и текущее значение.
- * Плитки стоят по две в ряд — весь раздел виден одним экраном, без длинных графиков.
+ * Плитки стоят по две в ряд; нажатие разворачивает плитку в полный график с осями.
  */
 export function SparkTile({
   title,
@@ -93,16 +108,21 @@ export function SparkTile({
   width: number;
 }) {
   return (
-    <View style={[styles.tile, { width }]}>
-      <Text style={styles.title} numberOfLines={1}>
-        {title}
-      </Text>
+    <TileBox width={width}>
+      <TileTitle>{title}</TileTitle>
       <Sparkline points={points} second={second} width={width - spacing.md * 2} />
-      <Text style={styles.value} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-        {value}
-        {unit ? <Text style={styles.unit}> {unit}</Text> : null}
-      </Text>
-    </View>
+      <TileValue value={value} unit={unit} />
+    </TileBox>
+  );
+}
+
+/** Значение под графиком: крупно и с единицей. */
+export function TileValue({ value, unit }: { value: string; unit?: string }) {
+  return (
+    <Text style={styles.value} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+      {value}
+      {unit ? <Text style={styles.unit}> {unit}</Text> : null}
+    </Text>
   );
 }
 

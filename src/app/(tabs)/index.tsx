@@ -10,7 +10,6 @@ import {
   MascotHero,
   Ring,
   Screen,
-  WeekTrendCard,
   colors,
   spacing,
 } from '../../ui';
@@ -36,7 +35,7 @@ export default function TodayTab() {
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       {isToday && complete ? (
-        <MascotHero total={day?.total ?? null} relay={relay} width={width} />
+        <MascotHero total={day?.total ?? null} relay={relay} trend={trendFor(state, 'total', picked)} width={width} />
       ) : !complete ? (
         // Пока день неполный, на экране только объяснение: ни маскота, ни полоски эстафеты.
         <Calibration today={isToday} returning={state.hadCompleteDay} />
@@ -69,8 +68,6 @@ export default function TodayTab() {
               coffee={recs.coffee}
             />
           ) : null}
-
-          <WeekTrendCard trend={trendFor(state, 'total', picked)} />
         </>
       ) : null}
     </Screen>

@@ -1,9 +1,12 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { TAB_INFO, tabInfoText } from '../../domain';
 import { findDay, sleepHrFor, trendFor, useTabDay, useVuelo } from '../../state';
-import { DayBanner, Card, HeroRing, Screen, SleepWave, Skeleton, WeekTrendCard, colors, spacing, withAlpha } from '../../ui';
+import { DayBanner, Card, HeroRing, Screen, SleepWave, Skeleton, TrendInline, colors, spacing, withAlpha } from '../../ui';
 
 const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
+
+/** Кольцо в шапке меньше прежнего: справа от него стоит динамика. */
+const HERO_RING = 150;
 
 export default function SleepTab() {
   const { state, statusText, sync } = useVuelo();
@@ -26,8 +29,11 @@ export default function SleepTab() {
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
-        <HeroRing value={day?.scores.sleep ?? null} />
-        {sleep ? <Text style={styles.summary}>{hhmm(sleep.totalMin)}</Text> : null}
+        <HeroRing value={day?.scores.sleep ?? null} size={HERO_RING} />
+        <View style={styles.heroSide}>
+          <TrendInline trend={trendFor(state, 'sleep', picked)} />
+          {sleep ? <Text style={styles.summary}>{hhmm(sleep.totalMin)}</Text> : null}
+        </View>
       </View>
 
       {day?.sleepSegments.length ? (
@@ -62,8 +68,6 @@ export default function SleepTab() {
           <Text style={[styles.hrText, sleepHr.seeDoctor && styles.hrWarn]}>{sleepHr.text}</Text>
         </Card>
       ) : null}
-
-      <WeekTrendCard trend={trendFor(state, 'sleep', picked)} />
     </Screen>
   );
 }
@@ -77,8 +81,9 @@ const Legend = ({ color, label, value }: { color: string; label: string; value: 
 );
 
 const styles = StyleSheet.create({
-  hero: { alignItems: 'center', marginTop: spacing.md, gap: spacing.xs },
-  summary: { color: colors.textMuted, fontSize: 16 },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.md, marginTop: spacing.md },
+  heroSide: { flex: 1, gap: spacing.sm },
+  summary: { color: colors.text, fontSize: 17 },
   bar: { flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: colors.track },
   deep: { backgroundColor: colors.accent },
   light: { backgroundColor: withAlpha(colors.accent, 0.4) },

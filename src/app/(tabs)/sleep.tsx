@@ -30,8 +30,6 @@ export default function SleepTab() {
         {sleep ? <Text style={styles.summary}>{hhmm(sleep.totalMin)}</Text> : null}
       </View>
 
-      <WeekTrendCard trend={trendFor(state, 'sleep', picked)} />
-
       {day?.sleepSegments.length ? (
         <Card title="Ночь">
           <SleepWave segments={day.sleepSegments} width={chartWidth} />
@@ -64,6 +62,8 @@ export default function SleepTab() {
           <Text style={[styles.hrText, sleepHr.seeDoctor && styles.hrWarn]}>{sleepHr.text}</Text>
         </Card>
       ) : null}
+
+      <WeekTrendCard trend={trendFor(state, 'sleep', picked)} />
     </Screen>
   );
 }

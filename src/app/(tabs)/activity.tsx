@@ -62,8 +62,6 @@ export default function ActivityTab() {
         ) : null}
       </View>
 
-      <WeekTrendCard trend={trendFor(state, 'activity', picked)} />
-
       <Card title="День">
         {day ? (
           <DayActivityChart
@@ -81,6 +79,8 @@ export default function ActivityTab() {
           <Stat label="Самый активный час" value={best !== null ? `${best}:00` : '—'} />
         </View>
       </Card>
+
+      <WeekTrendCard trend={trendFor(state, 'activity', picked)} />
 
       <CaloriesWeekCard days={weekBars} width={chartWidth} />
     </Screen>

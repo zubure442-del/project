@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TREND_MIN_DAYS, TREND_WINDOW_DAYS, trendPhrase, weekTrend, type TrendPoint } from './trend';
+import { TREND_MAX_PERCENT, TREND_MIN_DAYS, TREND_WINDOW_DAYS, trendPhrase, weekTrend, type TrendPoint } from './trend';
 
 const ASOF = '2026-09-22';
 const dateAt = (back: number) => new Date(Date.parse(`${ASOF}T00:00:00Z`) - back * 86400000).toISOString().slice(0, 10);
@@ -45,22 +45,34 @@ describe('СИНТЕТИЧЕСКИЕ: динамика за неделю', () =>
   });
 });
 
-describe('СИНТЕТИЧЕСКИЕ: пока второй недели нет — свежий день к началу недели', () => {
-  it('мало дней в окне — сравниваем день с самым старым днём недели', () => {
-    const few = weekTrend(points([64, null, null, null, null, 80, null, 40, 40, 40, null, null, null, null]), ASOF);
+describe('СИНТЕТИЧЕСКИЕ: пока второй недели нет — свежий день к личной норме', () => {
+  it('мало дней в окне — сравниваем свежий день со средним по остальным дням недели', () => {
+    const few = weekTrend(points([66, null, null, null, null, 60, null, 40, 40, 40, null, null, null, null]), ASOF);
     expect(few.currentDays).toBeLessThan(TREND_MIN_DAYS);
-    expect(few.mode).toBe('days');
-    expect(few.current).toBe(64);
-    expect(few.previous).toBe(80);
-    expect(few.percent).toBe(-20);
-    expect(trendPhrase(few.percent as number, few.mode)).toBe('ниже, чем в начале недели');
+    expect(few.mode).toBe('norm');
+    expect(few.current).toBe(66);
+    expect(few.previous).toBe(60);
+    expect(few.percent).toBe(10);
+    expect(trendPhrase(few.percent as number, few.mode)).toBe('выше вашей нормы');
   });
 
   it('сегодняшний день тоже идёт в сравнение', () => {
-    const trend = weekTrend([{ date: ASOF, value: 90 }, ...points([null, null, null, null, null, 60])], ASOF);
-    expect(trend.mode).toBe('days');
-    expect(trend.currentDate).toBe(ASOF);
+    const trend = weekTrend([{ date: ASOF, value: 90 }, ...points([60, 60, 60])], ASOF);
+    expect(trend.mode).toBe('norm');
+    expect(trend.current).toBe(90);
     expect(trend.percent).toBe(50);
+  });
+
+  it('дикие проценты не показываем: слишком низкая база — процента нет', () => {
+    const wild = weekTrend([{ date: ASOF, value: 34 }, ...points([1, 1])], ASOF);
+    expect(wild.mode).toBe('norm');
+    expect(wild.percent).toBeNull();
+  });
+
+  it('очень большое изменение упирается в потолок', () => {
+    const big = weekTrend([{ date: ASOF, value: 95 }, ...points([25, 25])], ASOF);
+    expect(big.capped).toBe(true);
+    expect(big.percent).toBe(TREND_MAX_PERCENT);
   });
 
   it('один день с данными — сравнивать не с чем', () => {
@@ -73,8 +85,9 @@ describe('СИНТЕТИЧЕСКИЕ: пока второй недели нет 
     expect(weekTrend([], ASOF).mode).toBe('none');
   });
 
-  it('прошлая неделя по нулям — на ноль не делим', () => {
+  it('неделя к неделе с низкой базой — процента тоже нет', () => {
     const zero = weekTrend(points([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), ASOF);
+    expect(zero.mode).toBe('weeks');
     expect(zero.percent).toBeNull();
   });
 });

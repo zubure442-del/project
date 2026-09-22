@@ -4,9 +4,12 @@ import { TipGlyph } from './TipIcons';
 import { colors, spacing } from './theme';
 
 export const CALIBRATION_TITLE = 'Считаем вашу активность';
+/** Первые дни: кольцо ещё ни разу не дало полный день. */
 export const CALIBRATION_TEXT =
   'Чтобы показатели за сегодня были точными, нам нужно больше данных. Дайте кольцу привыкнуть — осталось буквально несколько часов!';
-/** Для прошлого дня обещать «несколько часов» нельзя: данных за него уже не прибавится. */
+/** Полные дни уже были: человеку важно знать, когда ждать сегодняшние. */
+export const CALIBRATION_RETURNING_TEXT = 'Данные за сегодня начнут появляться утром, после вашего сна.';
+/** Для прошлого дня обещать что-то нельзя: данных за него уже не прибавится. */
 export const CALIBRATION_PAST_TEXT = 'За этот день данных недостаточно.';
 
 /** Песочные часы: данные за сегодня ещё копятся. */
@@ -29,13 +32,15 @@ const GLYPH_SIZE = 64;
  * даже если что-то уже есть: неполная картина дня выглядела бы как оценка.
  * Сегодня — песочные часы (данные ещё придут). Прошлый день — знак «i» из набора подсказок:
  * данных за него уже не прибавится, и значок ожидания обещал бы лишнее.
+ * Маскота и его полоску на этом экране не показываем: пока считать нечего, там пусто.
  */
-export function Calibration({ today }: { today: boolean }) {
+export function Calibration({ today, returning = false }: { today: boolean; returning?: boolean }) {
+  const text = !today ? CALIBRATION_PAST_TEXT : returning ? CALIBRATION_RETURNING_TEXT : CALIBRATION_TEXT;
   return (
     <View style={styles.root}>
       {today ? <Hourglass size={GLYPH_SIZE} /> : <TipGlyph name="info" size={GLYPH_SIZE} />}
       {today ? <Text style={styles.title}>{CALIBRATION_TITLE}</Text> : null}
-      <Text style={styles.text}>{today ? CALIBRATION_TEXT : CALIBRATION_PAST_TEXT}</Text>
+      <Text style={styles.text}>{text}</Text>
     </View>
   );
 }

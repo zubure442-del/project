@@ -10,8 +10,8 @@ export const RELAY_TITLE = 'Эстафета от Лиса';
 export const SHOP_TITLE = 'Магазин';
 export const SHOP_EMPTY_TEXT = 'Скоро здесь появятся предметы';
 
-/** «Зелёный свет» — единственный зелёный на карточке, тот же, что у зелёной зоны кофейного окна. */
-export const GREEN_LIGHT = '#5DBB8C';
+/** «Зелёный свет» — тот же зелёный, что у роста в динамике и у зелёной зоны кофейного окна. */
+export const GREEN_LIGHT = colors.positive;
 
 const STEP_FORMS = ['шаг', 'шага', 'шагов'] as const;
 const NUT_FORMS = ['орех', 'ореха', 'орехов'] as const;

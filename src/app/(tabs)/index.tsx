@@ -35,14 +35,11 @@ export default function TodayTab() {
       onSync={() => sync('refresh')}
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
-      {isToday ? (
-        <>
-          {/* День ещё не полный: сначала объяснение, маскот с эстафетой остаётся доступен. */}
-          {complete ? null : <Calibration today />}
-          <MascotHero total={complete ? day?.total ?? null : null} relay={relay} width={width} />
-        </>
+      {isToday && complete ? (
+        <MascotHero total={day?.total ?? null} relay={relay} width={width} />
       ) : !complete ? (
-        <Calibration today={false} />
+        // Пока день неполный, на экране только объяснение: ни маскота, ни полоски эстафеты.
+        <Calibration today={isToday} returning={state.hadCompleteDay} />
       ) : (
         <>
           <View style={styles.total}>

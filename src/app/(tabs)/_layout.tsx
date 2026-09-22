@@ -1,18 +1,29 @@
-import { Tabs, router } from 'expo-router';
-import { useEffect } from 'react';
+import { Tabs, router, usePathname } from 'expo-router';
+import { useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { profileAlerts, todayTabLabel, useVuelo } from '../../state';
 import { ActivityIcon, BodyIcon, ProfileIcon, SleepIcon, TabBar, colors } from '../../ui';
 
 export const unstable_settings = { initialRouteName: 'index' };
 
+/** Маршрут центральной вкладки «Сегодня». */
+const HOME_PATH = '/';
+
 export default function TabsLayout() {
   const { state, selectedDate, dayView, homeRequest } = useVuelo();
-  // Вход в приложение и любое обновление открывают центральную вкладку «Сегодня»:
-  // после загрузки человек всегда видит главный экран, а не ту вкладку, где закрыл приложение.
+  const pathname = usePathname();
+  /**
+   * Вход в приложение и любое обновление открывают центральную вкладку «Сегодня».
+   * Переходим только на РОСТ счётчика и только если мы не на главной: `replace` при каждом
+   * монтировании пересоздавал вкладки, эффект срабатывал снова — и получалась бесконечная
+   * загрузка. `navigate` просто переключает вкладку, а ref гасит повтор при перемонтировании.
+   */
+  const handled = useRef(homeRequest);
   useEffect(() => {
-    router.replace('/');
-  }, [homeRequest]);
+    if (handled.current === homeRequest) return;
+    handled.current = homeRequest;
+    if (pathname !== HOME_PATH) router.navigate(HOME_PATH);
+  }, [homeRequest, pathname]);
   // Точка на «Профиле» — только пока не заполнено хотя бы одно из пяти обязательных полей.
   // Раньше она горела и при заряде ≤ 20 %, поэтому не гасла после заполнения профиля.
   const { dot } = profileAlerts(state.profile);

@@ -1,4 +1,3 @@
-export * from './week';
 export * from './tab-info';
 export * from './texts';
 export * from './charts';
@@ -13,3 +12,4 @@ export * from './step-noise';
 export * from './distance';
 export * from './coffee';
 export * from './relay';
+export * from './trend';

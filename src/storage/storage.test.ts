@@ -3,7 +3,7 @@ import type { Sample, SummaryRecord } from '../codec';
 import type { SyncResult } from '../ble/sync';
 import { buildSnapshots, keepLastDays } from './build';
 import { addReport, recentTemplateIds } from './store';
-import type { DaySnapshot, StoredReport } from './types';
+import { SNAPSHOT_DAYS, type DaySnapshot, type StoredReport } from './types';
 
 const ring = (s: string) => Date.parse(s.replace(' ', 'T') + 'Z') / 1000;
 
@@ -87,11 +87,11 @@ describe('кэш последней синхронизации', () => {
     estimates: { hrv: null, glucose: null, systolic: null, diastolic: null, stress: null },
   });
 
-  it('хранится не больше семи последних дней', () => {
-    const many = Array.from({ length: 12 }, (_, i) => snapshot(`2026-09-${String(i + 1).padStart(2, '0')}`, i));
+  it('хранится не больше двух последних недель: неделя на экране и неделя для сравнения', () => {
+    const many = Array.from({ length: 20 }, (_, i) => snapshot(`2026-09-${String(i + 1).padStart(2, '0')}`, i));
     const kept = keepLastDays(many);
-    expect(kept).toHaveLength(7);
-    expect(kept[0].date).toBe('2026-09-06');
+    expect(kept).toHaveLength(SNAPSHOT_DAYS);
+    expect(kept[0].date).toBe('2026-09-07');
   });
 
   it('дни идут по возрастанию даты', () => {

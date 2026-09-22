@@ -98,47 +98,6 @@ export function chartAxis(min: number, max: number, fixed?: { min?: number; max?
 /** Часы на оси X статичных графиков дня. */
 export const DAY_HOUR_TICKS = [0, 360, 720, 1080, 1440];
 
-/** Подпись значения над точкой недельного графика. */
-export interface PointLabel {
-  x: number;
-  /** Верх точки по вертикали. */
-  y: number;
-  text: string;
-  selected: boolean;
-}
-
-/** Размеры подписей: ширина цифры, высота строки, отступ от точки. */
-export const LABEL_CHAR_W = 7;
-export const LABEL_LINE_H = 13;
-export const LABEL_GAP = 7;
-
-/**
- * Куда поставить подписи, чтобы соседние не накладывались. Выбранная точка ставится первой
- * и всегда прямо над собой; остальные — над точкой, выше ещё на строку или под точкой.
- * Возвращает базовую линию текста для каждой подписи в исходном порядке.
- */
-export function placeLabels(labels: PointLabel[], bounds: { top: number; bottom: number }): number[] {
-  const width = (l: PointLabel) => l.text.length * LABEL_CHAR_W + 4;
-  const boxes: { l: number; r: number; t: number; b: number }[] = [];
-  const out = new Array<number>(labels.length);
-  const order = labels.map((_, i) => i).sort((a, b) => Number(labels[b].selected) - Number(labels[a].selected) || labels[a].x - labels[b].x);
-  for (const i of order) {
-    const l = labels[i];
-    const w = width(l);
-    const above = l.y - LABEL_GAP;
-    const candidates = l.selected ? [above] : [above, above - LABEL_LINE_H, l.y + LABEL_GAP + LABEL_LINE_H + 4];
-    const box = (base: number) => ({ l: l.x - w / 2, r: l.x + w / 2, t: base - LABEL_LINE_H + 2, b: base + 2 });
-    const free = (base: number) => {
-      const b = box(base);
-      return b.t >= bounds.top && b.b <= bounds.bottom && boxes.every((o) => b.r <= o.l || b.l >= o.r || b.b <= o.t || b.t >= o.b);
-    };
-    const base = candidates.find(free) ?? above;
-    boxes.push(box(base));
-    out[i] = base;
-  }
-  return out;
-}
-
 /** «7:05» из минут от полуночи; отрицательные минуты — это предыдущий вечер, 1440 — конец суток. */
 export function formatMinute(minuteOfDay: number): string {
   const rounded = Math.round(minuteOfDay);

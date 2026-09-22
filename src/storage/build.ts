@@ -22,7 +22,7 @@ import {
   stepsByHour,
   type StoredNorm,
 } from '../domain';
-import { CACHE_DAYS, HISTORY_DAYS, type DayPoint, type DaySnapshot } from './types';
+import { CACHE_DAYS, SNAPSHOT_DAYS, type DayPoint, type DaySnapshot } from './types';
 
 const minuteOfDay = (ts: number) => {
   const w = wallClock(ts);
@@ -185,9 +185,9 @@ export function buildSnapshots(
   return snapshots.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-/** Кэш хранит одну последнюю синхронизацию: оставляем её последние дни. */
+/** Кэш хранит две последние недели сводок: неделя на экране и неделя для сравнения. */
 export function keepLastDays(days: DaySnapshot[]): DaySnapshot[] {
-  return [...days].sort((a, b) => a.date.localeCompare(b.date)).slice(-HISTORY_DAYS);
+  return [...days].sort((a, b) => a.date.localeCompare(b.date)).slice(-SNAPSHOT_DAYS);
 }
 
 /** Нормы шагов из новых сводок поверх сохранённых. Храним не больше CACHE_DAYS дней. */

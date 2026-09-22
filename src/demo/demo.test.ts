@@ -9,7 +9,7 @@ import {
   wakeMinuteOf,
   WEIGHTS,
 } from '../domain';
-import { EMPTY_STATE, HISTORY_DAYS, loadState, profileAge, saveState, toSyncResult, type Profile, type VueloState } from '../storage';
+import { EMPTY_STATE, SNAPSHOT_DAYS, loadState, profileAge, saveState, toSyncResult, type Profile, type VueloState } from '../storage';
 import { DEMO_STATUS_TEXT, demoState } from '../state/demo';
 import { applySyncResult, rebuildDays } from '../state/sync-plan';
 import { DEMO, generateDemoRaw } from './generate';
@@ -84,8 +84,10 @@ describe('СИНТЕТИЧЕСКИЕ: демо — те же формулы, ч�
   const raw = generateDemoRaw(seed, NOON);
   const day = (date: string) => shown.days.find((d) => d.date === date)!;
 
-  it('неделя: семь дней, прошлые — полные (все три метрики и итог)', () => {
-    expect(shown.days.map((d) => d.date)).toEqual(Array.from({ length: HISTORY_DAYS }, (_, i) => shift(TODAY, i - 6)));
+  it('две недели сводок, прошлые дни — полные (все три метрики и итог)', () => {
+    expect(shown.days.map((d) => d.date)).toEqual(
+      Array.from({ length: SNAPSHOT_DAYS }, (_, i) => shift(TODAY, i - (SNAPSHOT_DAYS - 1))),
+    );
     for (const d of shown.days.filter((x) => x.date !== TODAY)) {
       expect(d.scores.sleep).not.toBeNull();
       expect(d.scores.activity).not.toBeNull();

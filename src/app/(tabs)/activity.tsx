@@ -8,7 +8,7 @@ import {
   formatDistance,
   tabInfoText,
 } from '../../domain';
-import { findDay, useTabDay, useVuelo } from '../../state';
+import { findDay, trendFor, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
   DayBanner,
@@ -18,7 +18,7 @@ import {
   HeroRing,
   Screen,
   Skeleton,
-  WeekChart,
+  WeekTrendCard,
   colors,
   spacing,
   styles as ui,
@@ -75,14 +75,7 @@ export default function ActivityTab() {
         ) : null}
       </View>
 
-      <Card title="Неделя">
-        <WeekChart
-          days={week}
-          value={(d) => d.scores.activity}
-          selected={picked}
-          width={chartWidth}
-        />
-      </Card>
+      <WeekTrendCard trend={trendFor(state, 'activity', picked)} />
 
       <Card title="День">
         {day ? (

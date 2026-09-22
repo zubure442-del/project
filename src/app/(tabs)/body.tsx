@@ -1,10 +1,10 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { TAB_INFO, tabInfoText, STRESS_ZONE_BOUNDS } from '../../domain';
-import { findDay, latestSpo2, useTabDay, useVuelo } from '../../state';
-import { DayBanner, Card, DayLineChart, HeroRing, PressureChart, Screen, WeekChart, colors, spacing } from '../../ui';
+import { findDay, latestSpo2, trendFor, useTabDay, useVuelo } from '../../state';
+import { DayBanner, Card, DayLineChart, HeroRing, PressureChart, Screen, WeekTrendCard, colors, spacing } from '../../ui';
 
 export default function BodyTab() {
-  const { week, state, statusText, sync } = useVuelo();
+  const { state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
   const { date: picked, banner } = useTabDay();
   const day = findDay(state.days, picked);
@@ -32,14 +32,7 @@ export default function BodyTab() {
         <HeroRing value={day?.scores.state ?? null} />
       </View>
 
-      <Card title="Неделя">
-        <WeekChart
-          days={week}
-          value={(d) => d.scores.state}
-          selected={picked}
-          width={chartWidth}
-        />
-      </Card>
+      <WeekTrendCard trend={trendFor(state, 'state', picked)} />
 
       {/* Пустые карточки не показываем вовсе: рамка без данных ничего не говорит. */}
       {stress.length ? (

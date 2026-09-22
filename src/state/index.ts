@@ -6,3 +6,4 @@ export * from './loading';
 export * from './profile';
 export * from './demo';
 export * from './relay';
+export * from './trend';

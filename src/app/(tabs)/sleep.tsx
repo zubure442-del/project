@@ -1,12 +1,12 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { TAB_INFO, tabInfoText } from '../../domain';
-import { findDay, useTabDay, useVuelo } from '../../state';
-import { DayBanner, Card, HeroRing, Screen, SleepWave, Skeleton, WeekChart, colors, spacing, withAlpha } from '../../ui';
+import { findDay, trendFor, useTabDay, useVuelo } from '../../state';
+import { DayBanner, Card, HeroRing, Screen, SleepWave, Skeleton, WeekTrendCard, colors, spacing, withAlpha } from '../../ui';
 
 const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
 
 export default function SleepTab() {
-  const { week, state, statusText, sync } = useVuelo();
+  const { state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
   const { date: picked, banner } = useTabDay();
   const day = findDay(state.days, picked);
@@ -28,14 +28,7 @@ export default function SleepTab() {
         {sleep ? <Text style={styles.summary}>{hhmm(sleep.totalMin)}</Text> : null}
       </View>
 
-      <Card title="Неделя">
-        <WeekChart
-          days={week}
-          value={(d) => d.scores.sleep}
-          selected={picked}
-          width={chartWidth}
-        />
-      </Card>
+      <WeekTrendCard trend={trendFor(state, 'sleep', picked)} />
 
       {day?.sleepSegments.length ? (
         <Card title="Ночь">

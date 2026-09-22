@@ -139,7 +139,12 @@ export const EMPTY_STATE: VueloState = {
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false, hadCompleteDay: false,
   relay: EMPTY_RELAY,
 };
-/** Сколько дней показываем в недельном графике. */
+/** Сколько дней показываем в неделе (полоса дней, календарь, карточки недели). */
 export const HISTORY_DAYS = 7;
+/**
+ * Сколько дней сводок держим в кэше. Две недели: динамика сравнивает свежую неделю
+ * с предыдущей, а из рядов (`raw`, до CACHE_DAYS дней) сводки пересобираются целиком.
+ */
+export const SNAPSHOT_DAYS = HISTORY_DAYS * 2;
 /** Сколько дней держим в кэше; лишнее удаляется при запуске. */
 export const CACHE_DAYS = 30;

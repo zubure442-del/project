@@ -1,17 +1,16 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import type { ComponentId } from '../../domain';
-import { adviceLabel, findDay, recommendationsFor, relayFor, useTabDay, useVuelo } from '../../state';
+import { adviceLabel, findDay, recommendationsFor, relayFor, trendFor, useTabDay, useVuelo } from '../../state';
 import {
   DayBanner,
   COMPONENT_LABEL,
   AssistantCarousel,
   Calibration,
-  Card,
   HeroRing,
   MascotHero,
   Ring,
   Screen,
-  WeekChart,
+  WeekTrendCard,
   colors,
   spacing,
 } from '../../ui';
@@ -19,7 +18,7 @@ import {
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 
 export default function TodayTab() {
-  const { week, state, statusText, sync, dayView } = useVuelo();
+  const { state, statusText, sync, dayView } = useVuelo();
   const { width } = useWindowDimensions();
   const { date: picked, banner, complete } = useTabDay();
   const day = findDay(state.days, picked);
@@ -28,7 +27,6 @@ export default function TodayTab() {
   // Рекомендации (совет, кофейное окно, «Скоро») — только за сегодня; на прошлом дне блока нет вовсе.
   const recs = recommendationsFor(state, picked);
   const relay = relayFor(state);
-  const chartWidth = width - spacing.md * 4;
 
   return (
     <Screen
@@ -75,9 +73,7 @@ export default function TodayTab() {
             />
           ) : null}
 
-          <Card title="Неделя">
-            <WeekChart days={week} value={(d) => d.total} selected={picked} width={chartWidth} />
-          </Card>
+          <WeekTrendCard trend={trendFor(state, 'total', picked)} />
         </>
       ) : null}
     </Screen>

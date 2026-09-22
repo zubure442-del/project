@@ -9,7 +9,7 @@ export * from './Sheet';
 export * from './SleepWave';
 export * from './TabIcons';
 export * from './theme';
-export * from './WeekChart';
+export * from './WeekTrend';
 export * from './FreshBadge';
 export * from './LoadingArt';
 export * from './LoadingScreen';

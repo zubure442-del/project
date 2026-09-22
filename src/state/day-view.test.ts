@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptySyncResult } from '../ble/sync';
 import { EMPTY_STATE, type DaySnapshot, type VueloState } from '../storage';
-import { adviceFor, adviceLabel, bannerKind, coffeeInput, dayPhrase, dayView, selectedDay, shortDate, tabAvailable, todayTabLabel } from './day';
+import { adviceFor, adviceLabel, bannerKind, coffeeInput, dayPhrase, dayView, recommendationsFor, selectedDay, shortDate, tabAvailable, todayTabLabel } from './day';
 import { applySyncResult } from './sync-plan';
 
 const NOON = new Date(2026, 8, 21, 13, 0);
@@ -119,20 +119,58 @@ describe('СИНТЕТИЧЕСКИЕ: календарь — один выбра
 });
 
 describe('СИНТЕТИЧЕСКИЕ: данные для «Кофейного окна»', () => {
-  const withNight = (date: string, from: number, to: number): DaySnapshot => ({
+  const withNight = (date: string, from: number, to: number, sleepScore: number | null = 80): DaySnapshot => ({
     ...day(date, true),
+    scores: { sleep: sleepScore, activity: 60, state: 90 },
     sleepSegments: [{ from, to: from + 60, stage: 'light' }, { from: from + 60, to, stage: 'deep' }],
   });
 
   it('ночь — сегодняшняя; отход ко сну — по прошлым ночам в минутах сегодняшнего дня', () => {
     const input = coffeeInput([withNight(YESTERDAY, -30, 400), withNight(TODAY, -60, 420)], NOON);
-    expect(input.wakeMinute).toBe(420);
-    expect(input.bedtimes).toEqual([1410, 1380]);
-    expect(input.nowMinute).toBe(13 * 60);
+    expect(input).toMatchObject({ wakeMinute: 420, sleepScore: 80, bedtimes: [1410, 1380], nowMinute: 13 * 60 });
   });
 
-  it('сна за сегодня ещё нет — последняя доступная ночь; сна нет вовсе — подъёма нет', () => {
-    expect(coffeeInput([withNight(YESTERDAY, -30, 400), day(TODAY, false)].map((d) => d.date === TODAY ? { ...d, sleep: null } : d), NOON).wakeMinute).toBe(400);
-    expect(coffeeInput([], NOON).wakeMinute).toBeNull();
+  it('оценки сна за сегодня нет — данных нет вовсе, вчерашняя ночь не подставляется', () => {
+    expect(coffeeInput([withNight(YESTERDAY, -30, 400), { ...day(TODAY, true), sleep: null }], NOON)).toBeNull();
+    expect(coffeeInput([withNight(YESTERDAY, -30, 400), withNight(TODAY, -60, 420, null)], NOON)).toBeNull();
+    expect(coffeeInput([], NOON)).toBeNull();
+  });
+
+  it('карточка на сегодня: скрыта без оценки сна, есть при низкой, средней и высокой — с верным N', () => {
+    const noSleep = recommendationsFor(state([withNight(TODAY, -60, 420, null)]), TODAY, NOON);
+    expect(noSleep?.coffee).toBeNull();
+    expect(noSleep?.slides).not.toContain('coffee');
+    for (const [score, n] of [[40, 1], [75, 2], [95, 3]] as const) {
+      const recs = recommendationsFor(state([withNight(TODAY, -60, 420, score)]), TODAY, NOON);
+      expect(recs?.slides).toContain('coffee');
+      expect(recs?.coffee).toMatchObject({ kind: 'window', cups: { n } });
+    }
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: на прошлых днях рекомендаций нет', () => {
+  const full = (date: string): DaySnapshot => ({
+    ...day(date, true),
+    sleepSegments: [{ from: -60, to: 420, stage: 'light' }],
+  });
+  const s = state([full('2026-09-18'), full(YESTERDAY), full(TODAY)]);
+
+  it('сегодня — совет, кофейное окно и карточки «Скоро»', () => {
+    const recs = recommendationsFor(s, TODAY, NOON);
+    expect(recs?.advice?.text).toBeTruthy();
+    expect(recs?.coffee).not.toBeNull();
+    expect(recs?.slides).toEqual(['advice', 'coffee', 'food', 'endurance', 'sleepmode']);
+  });
+
+  it('любой прошлый день — весь рекомендательный слой скрыт, хотя день полный и сон есть', () => {
+    for (const date of [YESTERDAY, '2026-09-18', '2026-09-15']) {
+      expect(recommendationsFor(s, date, NOON)).toBeNull();
+    }
+  });
+
+  it('данные прошлого дня при этом на месте: итог и три метрики', () => {
+    const past = s.days.find((d) => d.date === YESTERDAY);
+    expect(past?.total).not.toBeNull();
+    expect(past?.scores).toEqual({ sleep: 80, activity: 60, state: 90 });
   });
 });

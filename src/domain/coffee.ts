@@ -1,7 +1,8 @@
 /**
  * «Кофейное окно»: когда кофе меньше мешает сну. Не медицинская рекомендация:
  * окно открывается через полтора часа после подъёма и закрывается за восемь часов
- * до вашего обычного отхода ко сну.
+ * до вашего обычного отхода ко сну. Показывается только за сегодня и только когда
+ * оценка сна за сегодня посчитана — при любом её значении.
  */
 
 /** Отход ко сну по умолчанию, если истории нет: 22:00. */
@@ -10,18 +11,29 @@ export const DEFAULT_BEDTIME_MIN = 22 * 60;
 export const BEDTIME_HISTORY_DAYS = 7;
 export const COFFEE_START_DELAY_MIN = 90;
 export const COFFEE_CUTOFF_BUFFER_HOURS = 8;
-/** Короткий или неглубокий сон: оценка ниже этого или длительность меньше этого. */
-export const SLEEP_POOR_THRESHOLD = 50;
-export const SLEEP_POOR_DURATION_H = 5.5;
 /** До этого часа — ночь: окна нет. */
 export const COFFEE_NIGHT_UNTIL_MIN = 5 * 60;
+/** Число чашек по оценке сна: ниже первого порога — 1, ниже второго — 2, дальше — 3. */
+export const COFFEE_CUPS_TWO_FROM = 60;
+export const COFFEE_CUPS_THREE_FROM = 90;
 
 export const COFFEE_TEXT = {
-  noSleep: 'Кольцо ещё не записало сон',
-  poorSleep: 'Сон был коротким — сегодня, возможно, стоит сократить кофе.',
   noWindow: 'Сегодня лучше без кофе',
   closed: 'Сейчас не время для кофе. Следующее окно — после следующего пробуждения.',
 } as const;
+
+export type CoffeeCups = 1 | 2 | 3;
+
+/** Текст под таймлайном: сколько чашек, по оценке сна за сегодня. */
+export const COFFEE_CUPS_TEXT: Record<CoffeeCups, string> = {
+  1: 'На основе вашего сна рекомендуем не более 1 чашки сегодня, чтобы восстановить силы и не нарушить засыпание вечером.',
+  2: 'На основе вашего сна рекомендуем не более 2 чашек сегодня, чтобы восстановить силы и не нарушить засыпание вечером.',
+  3: 'На основе вашего сна рекомендуем не более 3 чашек сегодня, чтобы восстановить силы и не нарушить засыпание вечером.',
+};
+
+/** Сон < 60 → 1 чашка, 60–89 → 2, 90–100 → 3. */
+export const coffeeCups = (sleepScore: number): CoffeeCups =>
+  sleepScore < COFFEE_CUPS_TWO_FROM ? 1 : sleepScore < COFFEE_CUPS_THREE_FROM ? 2 : 3;
 
 const hhmm = (minute: number) => {
   const m = ((Math.round(minute) % 1440) + 1440) % 1440;
@@ -37,37 +49,42 @@ export function averageBedtime(bedtimes: readonly number[]): number {
   return recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : DEFAULT_BEDTIME_MIN;
 }
 
+/**
+ * Карточка «Кофейного окна»: статус над таймлайном и совет по числу чашек под ним.
+ * Старт позже отсечки — «Сегодня лучше без кофе», таймлайн целиком красный и совета по чашкам нет.
+ */
 export type CoffeeWindow =
-  | { kind: 'no-sleep'; text: string }
-  | { kind: 'poor-sleep'; text: string }
-  | { kind: 'no-window'; text: string; start: number; cutoff: number }
-  | { kind: 'window'; text: string; start: number; cutoff: number; phase: 'before' | 'open' | 'after' };
+  | { kind: 'no-window'; text: string; start: number; cutoff: number; cups: null }
+  | {
+      kind: 'window';
+      text: string;
+      start: number;
+      cutoff: number;
+      phase: 'before' | 'open' | 'after';
+      cups: { n: CoffeeCups; text: string };
+    };
 
 export interface CoffeeInput {
-  /** Подъём по последней ночи с данными (сегодняшней или последней доступной); null — сна нет вовсе. */
-  wakeMinute: number | null;
-  sleepScore: number | null;
-  sleepMinutes: number | null;
+  /** Подъём по сегодняшней ночи, минуты от полуночи. */
+  wakeMinute: number;
+  /** Оценка сна за сегодня (0–100). */
+  sleepScore: number;
   /** Отход ко сну за прошлые ночи, в минутах от полуночи дня пробуждения + 1440. */
   bedtimes: readonly number[];
   nowMinute: number;
 }
 
 export function coffeeWindow(input: CoffeeInput): CoffeeWindow {
-  if (input.wakeMinute === null) return { kind: 'no-sleep', text: COFFEE_TEXT.noSleep };
-  const poor =
-    (input.sleepScore !== null && input.sleepScore < SLEEP_POOR_THRESHOLD) ||
-    (input.sleepMinutes !== null && input.sleepMinutes < SLEEP_POOR_DURATION_H * 60);
-  if (poor) return { kind: 'poor-sleep', text: COFFEE_TEXT.poorSleep };
-
   const start = input.wakeMinute + COFFEE_START_DELAY_MIN;
   const cutoff = averageBedtime(input.bedtimes) - COFFEE_CUTOFF_BUFFER_HOURS * 60;
-  if (start >= cutoff) return { kind: 'no-window', text: COFFEE_TEXT.noWindow, start, cutoff };
+  if (start >= cutoff) return { kind: 'no-window', text: COFFEE_TEXT.noWindow, start, cutoff, cups: null };
 
+  const n = coffeeCups(input.sleepScore);
+  const base = { kind: 'window' as const, start, cutoff, cups: { n, text: COFFEE_CUPS_TEXT[n] } };
   const now = input.nowMinute;
-  if (now < COFFEE_NIGHT_UNTIL_MIN || now >= cutoff) return { kind: 'window', text: COFFEE_TEXT.closed, start, cutoff, phase: 'after' };
-  if (now < start) return { kind: 'window', text: `Окно откроется в ${hhmm(start)}`, start, cutoff, phase: 'before' };
-  return { kind: 'window', text: `Окно открыто до ${hhmm(cutoff)}`, start, cutoff, phase: 'open' };
+  if (now < COFFEE_NIGHT_UNTIL_MIN || now >= cutoff) return { ...base, text: COFFEE_TEXT.closed, phase: 'after' };
+  if (now < start) return { ...base, text: `Окно откроется в ${hhmm(start)}`, phase: 'before' };
+  return { ...base, text: `Окно открыто до ${hhmm(cutoff)}`, phase: 'open' };
 }
 
 export const coffeeClock = hhmm;

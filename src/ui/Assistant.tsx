@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 import { coffeeClock, type CoffeeWindow } from '../domain';
-import type { DaySnapshot } from '../storage';
-import { SleepWave } from './SleepWave';
+import type { AssistantSlide } from '../state/day';
 import { SparkIcon } from './TabIcons';
 import { colors, radius, spacing, withAlpha } from './theme';
 
@@ -11,7 +10,6 @@ import { colors, radius, spacing, withAlpha } from './theme';
 export const ASSISTANT_HEIGHT = 340;
 const ZONE_RED = withAlpha(colors.danger, 0.6);
 const ZONE_GREEN = '#5DBB8C';
-const HRV_COLOR = '#8FB8FF';
 
 type Glyph = 'coffee' | 'food' | 'bolt' | 'moon';
 
@@ -38,67 +36,56 @@ function CardGlyph({ name }: { name: Glyph }) {
   );
 }
 
-/** Таймлайн суток: красная зона до окна, зелёная — окно, красная — после; отметка «сейчас». */
+/**
+ * Таймлайн суток: красная зона до окна, зелёная — окно, красная — после; отметка «сейчас».
+ * Окна нет (старт позже отсечки) — полоса целиком красная, без подписей.
+ */
 function CoffeeTimeline({ start, cutoff, now, width }: { start: number; cutoff: number; now: number; width: number }) {
   const x = (m: number) => (Math.min(1440, Math.max(0, m)) / 1440) * width;
   const barY = 14;
+  const open = cutoff > start;
   return (
     <View pointerEvents="none">
       <Svg width={width} height={44}>
-        <Rect x={0} y={barY} width={x(start)} height={10} rx={5} fill={ZONE_RED} />
-        <Rect x={x(start)} y={barY} width={x(cutoff) - x(start)} height={10} fill={ZONE_GREEN} />
-        <Rect x={x(cutoff)} y={barY} width={width - x(cutoff)} height={10} rx={5} fill={ZONE_RED} />
+        {open ? (
+          <>
+            <Rect x={0} y={barY} width={x(start)} height={10} rx={5} fill={ZONE_RED} />
+            <Rect x={x(start)} y={barY} width={x(cutoff) - x(start)} height={10} fill={ZONE_GREEN} />
+            <Rect x={x(cutoff)} y={barY} width={width - x(cutoff)} height={10} rx={5} fill={ZONE_RED} />
+          </>
+        ) : (
+          <Rect x={0} y={barY} width={width} height={10} rx={5} fill={ZONE_RED} />
+        )}
         <Line x1={x(now)} x2={x(now)} y1={barY - 6} y2={barY + 16} stroke={colors.text} strokeWidth={2} strokeLinecap="round" />
         {/* Подписи — под границами окна. */}
-        <SvgText x={Math.max(18, x(start))} y={42} fill={colors.textFaint} fontSize={11} textAnchor="middle">
-          {coffeeClock(start)}
-        </SvgText>
-        <SvgText x={Math.min(width - 18, x(cutoff))} y={42} fill={colors.textFaint} fontSize={11} textAnchor="middle">
-          {coffeeClock(cutoff)}
-        </SvgText>
+        {open ? (
+          <>
+            <SvgText x={Math.max(18, x(start))} y={42} fill={colors.textFaint} fontSize={11} textAnchor="middle">
+              {coffeeClock(start)}
+            </SvgText>
+            <SvgText x={Math.min(width - 18, x(cutoff))} y={42} fill={colors.textFaint} fontSize={11} textAnchor="middle">
+              {coffeeClock(cutoff)}
+            </SvgText>
+          </>
+        ) : null}
       </Svg>
     </View>
   );
 }
 
-/** Разворот «Кофейного окна»: предупреждение с ночью или таймлайн, в зависимости от сна. */
-function CoffeeBody({ coffee, night, nowMinute, width }: { coffee: CoffeeWindow; night: DaySnapshot | null; nowMinute: number; width: number }) {
-  if (coffee.kind === 'poor-sleep' && night) {
-    const heart = night.heart.map((p) => ({ m: p.m, v: p.v }));
-    const hrv = night.summaryPoints.filter((p) => p.hrv !== null).map((p) => ({ m: p.m, v: p.hrv as number }));
-    return (
-      <View style={styles.bodyGap}>
-        <Text style={styles.text}>{coffee.text}</Text>
-        <SleepWave
-          segments={night.sleepSegments}
-          width={width}
-          overlays={[
-            { points: heart, color: colors.accent },
-            { points: hrv, color: HRV_COLOR },
-          ]}
-        />
-        <View style={styles.legend}>
-          <View style={[styles.swatch, { backgroundColor: colors.accent }]} />
-          <Text style={styles.small}>Пульс</Text>
-          <View style={[styles.swatch, { backgroundColor: HRV_COLOR }]} />
-          <Text style={styles.small}>Вариабельность</Text>
-        </View>
-      </View>
-    );
-  }
-  if (coffee.kind === 'window') {
-    return (
-      <View style={styles.bodyGap}>
-        <Text style={styles.text}>{coffee.text}</Text>
-        <CoffeeTimeline start={coffee.start} cutoff={coffee.cutoff} now={nowMinute} width={width} />
-      </View>
-    );
-  }
-  return <Text style={styles.text}>{coffee.text}</Text>;
+/** «Кофейное окно»: статус, таймлайн (при любой оценке сна) и под ним совет по числу чашек. */
+function CoffeeBody({ coffee, nowMinute, width }: { coffee: CoffeeWindow; nowMinute: number; width: number }) {
+  return (
+    <View style={styles.bodyGap}>
+      <Text style={styles.text}>{coffee.text}</Text>
+      <CoffeeTimeline start={coffee.start} cutoff={coffee.cutoff} now={nowMinute} width={width} />
+      {coffee.cups ? <Text style={styles.text}>{coffee.cups.text}</Text> : null}
+    </View>
+  );
 }
 
 interface Slide {
-  key: string;
+  key: Exclude<AssistantSlide, 'advice'>;
   title: string;
   glyph: Glyph;
   /** Заглушка «Скоро» с одной декоративной строкой. */
@@ -115,25 +102,25 @@ const SLIDES: Slide[] = [
 /**
  * «AI Ассистент» на «Сегодня»: горизонтальная карусель с точками. Первая карточка — совет
  * из ReportGenerator, дальше карточки функций. Каждый слайд сразу показывает своё содержимое:
- * отдельного нажатия «открыть» нет, единственный жест — свайп.
+ * отдельного нажатия «открыть» нет, единственный жест — свайп. Какие слайды есть, решает
+ * `recommendationsFor`: без оценки сна за сегодня «Кофейного окна» нет вовсе.
  */
 export function AssistantCarousel({
+  slides,
   advice,
   adviceLabel,
   coffee,
-  night,
-  nowMinute,
 }: {
+  slides: readonly AssistantSlide[];
   advice: string | null;
   adviceLabel: string;
-  coffee: CoffeeWindow;
-  night: DaySnapshot | null;
-  nowMinute: number;
+  coffee: (CoffeeWindow & { nowMinute: number }) | null;
 }) {
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
   const inner = width - spacing.md * 4;
-  const pages = 1 + SLIDES.length;
+  const shown = SLIDES.filter((card) => slides.includes(card.key) && (card.key !== 'coffee' || coffee));
+  const pages = 1 + shown.length;
 
   return (
     <View style={styles.root}>
@@ -163,7 +150,7 @@ export function AssistantCarousel({
             <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
           </View>
         </View>
-        {SLIDES.map((card) => (
+        {shown.map((card) => (
           <View key={card.key} style={[styles.page, { width }]}>
             <View style={styles.card}>
               <View style={styles.head}>
@@ -174,7 +161,7 @@ export function AssistantCarousel({
               {card.soon ? (
                 <Text style={styles.text}>{card.soon}</Text>
               ) : (
-                <CoffeeBody coffee={coffee} night={night} nowMinute={nowMinute} width={inner} />
+                coffee && <CoffeeBody coffee={coffee} nowMinute={coffee.nowMinute} width={inner} />
               )}
             </View>
           </View>
@@ -217,8 +204,6 @@ const styles = StyleSheet.create({
   poweredBy: { color: colors.textFaint, fontSize: 11, textAlign: 'right' },
   flex: { flex: 1 },
   bodyGap: { gap: spacing.sm },
-  legend: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  swatch: { width: 14, height: 2, borderRadius: 1 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.track },
   dotOn: { backgroundColor: colors.accent },

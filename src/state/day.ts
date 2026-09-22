@@ -1,5 +1,5 @@
 import { dateKey, nowRingTs } from '../codec';
-import { buildTemplateReport, formatMinute, type CoffeeInput, type Report, type ReportMode } from '../domain';
+import { buildTemplateReport, coffeeWindow, formatMinute, type CoffeeInput, type CoffeeWindow, type Report, type ReportMode } from '../domain';
 import { recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
 
 /** Если данные свежее десяти минут, к кольцу не идём. */
@@ -130,23 +130,52 @@ export function shortDate(date: string): string {
 export const todayTabLabel = (selected: string, today: string) => (selected === today ? 'Сегодня' : shortDate(selected));
 
 /**
- * Данные для «Кофейного окна»: ночь — сегодняшняя, а если её ещё нет — последняя доступная;
- * обычный отход ко сну — по последним ночам (в минутах от полуночи дня пробуждения + 1440).
+ * Данные для «Кофейного окна» — только по сегодняшней ночи. Оценки сна за сегодня нет —
+ * null: карточка не показывается вовсе, без заглушек и без «последней доступной ночи».
+ * Обычный отход ко сну — по последним ночам (в минутах от полуночи дня пробуждения + 1440).
  */
-export function coffeeInput(days: DaySnapshot[], now = new Date()): CoffeeInput & { night: DaySnapshot | null } {
+export function coffeeInput(days: DaySnapshot[], now = new Date()): CoffeeInput | null {
   const today = todayKey(now);
+  const night = findDay(days, today);
+  const sleepScore = night?.scores.sleep ?? null;
+  if (!night || sleepScore === null || !night.sleepSegments.length) return null;
   const withSleep = [...days]
     .filter((d) => d.date <= today && d.sleep !== null && d.sleepSegments.length > 0)
     .sort((a, b) => a.date.localeCompare(b.date));
-  const night = withSleep.find((d) => d.date === today) ?? withSleep[withSleep.length - 1] ?? null;
-  const segments = night?.sleepSegments ?? [];
   return {
-    night,
-    wakeMinute: segments.length ? segments[segments.length - 1].to : null,
-    sleepScore: night?.scores.sleep ?? null,
-    sleepMinutes: night?.sleep?.totalMin ?? null,
+    wakeMinute: night.sleepSegments[night.sleepSegments.length - 1].to,
+    sleepScore,
     bedtimes: withSleep.map((d) => d.sleepSegments[0].from + 1440),
     nowMinute: now.getHours() * 60 + now.getMinutes(),
+  };
+}
+
+/** Рекомендательные карточки «Сегодня» в карусели «AI Ассистент», по порядку. */
+export type AssistantSlide = 'advice' | 'coffee' | 'food' | 'endurance' | 'sleepmode';
+/** Карточки «Скоро»: показываются вместе с остальными рекомендациями. */
+export const SOON_SLIDES = ['food', 'endurance', 'sleepmode'] as const;
+
+/** Рекомендательный слой «Сегодня»: совет, кофейное окно и карточки «Скоро». */
+export interface Recommendations {
+  advice: Report | null;
+  /** null — оценки сна за сегодня нет, карточки нет. */
+  coffee: (CoffeeWindow & { nowMinute: number }) | null;
+  slides: AssistantSlide[];
+}
+
+/**
+ * Рекомендации осмысленны только для текущего дня. Для любого прошлого дня — null:
+ * скрываются все карточки-рекомендации целиком (совет, кофейное окно, «Скоро»),
+ * а данные и графики дня остаются.
+ */
+export function recommendationsFor(state: VueloState, date: string, now = new Date()): Recommendations | null {
+  if (date !== todayKey(now)) return null;
+  const input = coffeeInput(state.days, now);
+  const coffee = input ? { ...coffeeWindow(input), nowMinute: input.nowMinute } : null;
+  return {
+    advice: adviceFor(state, date, now),
+    coffee,
+    slides: ['advice', ...(coffee ? (['coffee'] as const) : []), ...SOON_SLIDES],
   };
 }
 

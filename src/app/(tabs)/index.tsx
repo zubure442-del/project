@@ -1,6 +1,6 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { coffeeWindow, distanceMeters, formatDistance, type ComponentId } from '../../domain';
-import { adviceFor, adviceLabel, coffeeInput, findDay, useTabDay, useVuelo } from '../../state';
+import { distanceMeters, formatDistance, type ComponentId } from '../../domain';
+import { adviceLabel, findDay, recommendationsFor, useTabDay, useVuelo } from '../../state';
 import {
   DayBanner,
   COMPONENT_LABEL,
@@ -22,9 +22,8 @@ export default function TodayTab() {
   const { width } = useWindowDimensions();
   const { date: picked, banner, complete } = useTabDay();
   const day = findDay(state.days, picked);
-  const advice = adviceFor(state, picked);
-  // «Кофейное окно» — всегда про сегодня: подъём по последней ночи и обычный отход ко сну.
-  const coffee = coffeeInput(state.days);
+  // Рекомендации (совет, кофейное окно, «Скоро») — только за сегодня; на прошлом дне блока нет вовсе.
+  const recs = recommendationsFor(state, picked);
   const chartWidth = width - spacing.md * 4;
   const steps = day?.steps ?? null;
   // Калории выбранного дня по нашей модели; нет биометрии — «—».
@@ -73,13 +72,14 @@ export default function TodayTab() {
         )}
       </Card>
 
-      <AssistantCarousel
-        advice={advice?.text ?? null}
-        adviceLabel={adviceLabel(picked)}
-        coffee={coffeeWindow(coffee)}
-        night={coffee.night}
-        nowMinute={coffee.nowMinute}
-      />
+      {recs ? (
+        <AssistantCarousel
+          slides={recs.slides}
+          advice={recs.advice?.text ?? null}
+          adviceLabel={adviceLabel(picked)}
+          coffee={recs.coffee}
+        />
+      ) : null}
 
       <Card title="Неделя">
         <WeekChart

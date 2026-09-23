@@ -29,13 +29,15 @@ const STEP_FORMS = ['шаг', 'шага', 'шагов'] as const;
 const NUT_FORMS = ['орех', 'ореха', 'орехов'] as const;
 const DAY_FORMS = ['день', 'дня', 'дней'] as const;
 
-/** Баланс орехов. Крупный — рядом с маскотом на «Сегодня», ещё крупнее — в листе. */
-export function NutsPill({ nuts, big = false }: { nuts: number; big?: boolean }) {
+/** Баланс орехов в «Магазине». Одна форма и размер со значком серии — строки смотрятся однородно. */
+export function NutsPill({ nuts }: { nuts: number }) {
   return (
-    <View style={[styles.pill, big && styles.pillBig]}>
-      <NutGlyph size={big ? 26 : 20} />
-      <Text style={[styles.pillText, big && styles.pillTextBig]}>{formatCount(nuts)}</Text>
-      {big ? <Text style={styles.pillUnit}>{pluralRu(nuts, NUT_FORMS)}</Text> : null}
+    <View style={styles.badge} accessibilityLabel={`Баланс: ${nuts} ${pluralRu(nuts, NUT_FORMS)}`}>
+      <NutGlyph size={16} />
+      <Text style={styles.badgeText}>
+        {formatCount(nuts)}
+        <Text style={styles.badgeUnit}> {pluralRu(nuts, NUT_FORMS)}</Text>
+      </Text>
     </View>
   );
 }
@@ -43,23 +45,11 @@ export function NutsPill({ nuts, big = false }: { nuts: number; big?: boolean })
 /** Огонёк с числом дней серии. В листе к числу добавляется единица («дней»), в полоске — нет. */
 export function StreakBadge({ streak, withUnit = false }: { streak: number; withUnit?: boolean }) {
   return (
-    <View style={styles.streak} accessibilityLabel={`Серия: ${streak} ${pluralRu(streak, DAY_FORMS)} подряд`}>
+    <View style={styles.badge} accessibilityLabel={`Серия: ${streak} ${pluralRu(streak, DAY_FORMS)} подряд`}>
       <FlameGlyph size={16} color={streak > 0 ? colors.accent : colors.textFaint} />
-      <Text style={[styles.streakText, streak === 0 && styles.faint]}>
+      <Text style={[styles.badgeText, streak === 0 && styles.faint]}>
         {streak}
-        {withUnit ? <Text style={styles.streakUnit}> {pluralRu(streak, DAY_FORMS)}</Text> : null}
-      </Text>
-    </View>
-  );
-}
-
-/** «Награда +5 орехов» — что именно даёт выполненная норма дня. Словами, а не одним значком. */
-export function RewardPill() {
-  return (
-    <View style={styles.reward}>
-      <NutGlyph size={13} />
-      <Text style={styles.rewardText}>
-        Награда +{RELAY_DAY_REWARD} {pluralRu(RELAY_DAY_REWARD, NUT_FORMS)}
+        {withUnit ? <Text style={styles.badgeUnit}> {pluralRu(streak, DAY_FORMS)}</Text> : null}
       </Text>
     </View>
   );
@@ -82,11 +72,7 @@ export function RelayBody({ relay }: { relay: RelayView }) {
         </View>
       ) : (
         <View style={styles.block}>
-          {/* Рядом с остатком шагов сразу видно, ради чего цель. */}
-          <View style={styles.headRow}>
-            <Text style={styles.label}>До нормы осталось</Text>
-            <RewardPill />
-          </View>
+          <Text style={styles.label}>До нормы осталось</Text>
           <Text style={styles.big}>
             {formatCount(relay.remaining)}
             <Text style={styles.unit}> {pluralRu(relay.remaining, STEP_FORMS)}</Text>
@@ -140,7 +126,7 @@ export function RelaySheet({ visible, relay, onClose }: { visible: boolean; rela
       {/* Баланс стоит там, где его будут тратить, — в «Магазине». */}
       <View style={styles.shopHead}>
         <Text style={styles.shopTitle}>{SHOP_TITLE}</Text>
-        <NutsPill nuts={relay.nuts} big />
+        <NutsPill nuts={relay.nuts} />
       </View>
       <View style={styles.shopEmpty}>
         <NutGlyph size={34} color={colors.textFaint} />
@@ -163,18 +149,7 @@ const styles = StyleSheet.create({
   barFill: { height: '100%', borderRadius: 3 },
   faintText: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   faint: { color: colors.textFaint },
-  headRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   streakRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginTop: spacing.md },
-  reward: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: withAlpha(colors.accent, 0.12),
-    borderRadius: radius.pill,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-  },
-  rewardText: { color: colors.accent, fontSize: 13, fontWeight: '600' },
   ladder: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.sm },
   rung: { alignItems: 'center', gap: 6, flex: 1 },
   circle: {
@@ -202,7 +177,7 @@ const styles = StyleSheet.create({
   amount: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   amountText: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   amountOn: { color: colors.accent },
-  streak: {
+  badge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -211,22 +186,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 3,
   },
-  streakText: { color: colors.accent, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  streakUnit: { color: colors.accent, fontSize: 13, fontWeight: '400' },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: withAlpha(colors.accent, 0.14),
-    borderRadius: radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  pillBig: { paddingHorizontal: 16, paddingVertical: 8 },
-  pillText: { color: colors.accent, fontSize: 20, fontWeight: '600', fontVariant: ['tabular-nums'] },
-  pillTextBig: { fontSize: 28, fontWeight: '500' },
-  pillUnit: { color: colors.textMuted, fontSize: 14, marginLeft: 2 },
+  badgeText: { color: colors.accent, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  badgeUnit: { color: colors.accent, fontSize: 13, fontWeight: '400' },
   divider: { height: 1, backgroundColor: colors.track, marginVertical: spacing.lg },
   shopHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   shopTitle: { color: colors.text, fontSize: 17, fontWeight: '500' },

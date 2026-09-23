@@ -102,9 +102,18 @@ describe('СИНТЕТИЧЕСКИЕ: карточка «Пульс во сне�
     expect(view?.factor).toBe(0.75);
   });
 
+  it('точка вместо заголовка: зелёная при спокойной ночи, красная при отклонении', () => {
+    expect(sleepHrCheck(night(50, 58), baseline)?.tone).toBe('good'); // всё в норме
+    expect(sleepHrCheck(night(44, 52), baseline)?.tone).toBe('good'); // глубокое расслабление
+    expect(sleepHrCheck(night(58, 66), baseline)?.tone).toBe('alert'); // повышенная нагрузка
+    expect(sleepHrCheck(night(44, 64), baseline)?.tone).toBe('alert'); // рваный ритм
+    expect(sleepHrCheck(night(50, 64), baseline)?.tone).toBe('alert'); // смешанная картина
+    expect(sleepHrCheck(night(50, 58), null)?.tone).toBe('unknown'); // нормы ещё нет
+  });
+
   it('нормы ещё нет — только числа, без выводов', () => {
     const view = sleepHrCheck(night(48, 63), null);
-    expect(view).toMatchObject({ deltaMin: null, deltaAvg: null, category: null, title: null, factor: 1 });
+    expect(view).toMatchObject({ deltaMin: null, deltaAvg: null, category: null, title: null, tone: 'unknown', factor: 1 });
     expect(view?.text).toBe(SLEEP_HR_NO_BASELINE_TEXT);
   });
 

@@ -5,7 +5,7 @@ import { DayBanner, Card, HeroRing, Screen, SleepWave, Skeleton, TrendInline, co
 
 const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
 
-/** Кольцо в шапке меньше прежнего: справа от него стоит динамика. */
+/** Кольцо в шапке: справа от него только динамика, поэтому высота шапки та же, что на «Организме». */
 const HERO_RING = 150;
 
 export default function SleepTab() {
@@ -32,12 +32,22 @@ export default function SleepTab() {
         <HeroRing value={day?.scores.sleep ?? null} size={HERO_RING} />
         <View style={styles.heroSide}>
           <TrendInline trend={trendFor(state, 'sleep', picked)} />
-          {sleep ? <Text style={styles.summary}>{hhmm(sleep.totalMin)}</Text> : null}
         </View>
       </View>
 
       {day?.sleepSegments.length ? (
-        <Card title="Ночь">
+        // Длительность стоит здесь, а не в шапке: шапка тогда одной высоты со всеми вкладками.
+        <Card
+          title="Ночь"
+          right={
+            sleep ? (
+              <View style={styles.duration}>
+                <Text style={styles.durationLabel}>Продолжительность сна</Text>
+                <Text style={styles.durationValue}>{hhmm(sleep.totalMin)}</Text>
+              </View>
+            ) : null
+          }
+        >
           <SleepWave segments={day.sleepSegments} width={chartWidth} />
         </Card>
       ) : null}
@@ -64,8 +74,17 @@ export default function SleepTab() {
           {/* Два числа ночи и отклонение каждого от своей нормы; ниже — вывод по категории. */}
           <HrRow label="Минимальный" value={sleepHr.night.min} delta={sleepHr.deltaMin} />
           <HrRow label="Средний" value={sleepHr.night.avg} delta={sleepHr.deltaAvg} />
-          {sleepHr.title ? <Text style={styles.hrTitle}>{sleepHr.title}</Text> : null}
-          <Text style={styles.hrText}>{sleepHr.text}</Text>
+          {/* Вывод читается по цвету точки: зелёная — ночь как обычно или лучше, красная — есть отклонение. */}
+          <View style={styles.hrVerdict}>
+            <View
+              style={[
+                styles.hrDot,
+                sleepHr.tone === 'good' && styles.hrDotGood,
+                sleepHr.tone === 'alert' && styles.hrDotAlert,
+              ]}
+            />
+            <Text style={styles.hrText}>{sleepHr.text}</Text>
+          </View>
         </Card>
       ) : null}
     </Screen>
@@ -94,7 +113,9 @@ const Legend = ({ color, label, value }: { color: string; label: string; value: 
 const styles = StyleSheet.create({
   hero: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.md, marginTop: spacing.md },
   heroSide: { flex: 1, gap: spacing.sm },
-  summary: { color: colors.text, fontSize: 17 },
+  duration: { alignItems: 'flex-end' },
+  durationLabel: { color: colors.textFaint, fontSize: 11 },
+  durationValue: { color: colors.text, fontSize: 17, fontVariant: ['tabular-nums'] },
   bar: { flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', backgroundColor: colors.track },
   deep: { backgroundColor: colors.accent },
   light: { backgroundColor: withAlpha(colors.accent, 0.4) },
@@ -107,6 +128,9 @@ const styles = StyleSheet.create({
   hrLabel: { color: colors.textMuted, fontSize: 15 },
   hrValue: { color: colors.text, fontSize: 28, fontWeight: '200', fontVariant: ['tabular-nums'] },
   hrDelta: { color: colors.textMuted, fontSize: 14, fontWeight: '400' },
-  hrTitle: { color: colors.text, fontSize: 16, fontWeight: '500', marginTop: spacing.sm },
-  hrText: { color: colors.textMuted, fontSize: 14, lineHeight: 20, marginTop: spacing.xs },
+  hrVerdict: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  hrDot: { width: 10, height: 10, borderRadius: 5, marginTop: 5, backgroundColor: colors.textFaint },
+  hrDotGood: { backgroundColor: colors.positive },
+  hrDotAlert: { backgroundColor: colors.negative },
+  hrText: { color: colors.textMuted, fontSize: 14, lineHeight: 20, flex: 1 },
 });

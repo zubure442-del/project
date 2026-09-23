@@ -32,14 +32,24 @@ export interface NightHr {
 
 export type SleepHrCategory = 'normal' | 'load' | 'deep' | 'uneven' | 'spike' | 'mixed';
 
-/** Названия, тексты и коэффициенты к оценке сна — справочная таблица категорий. */
-export const SLEEP_HR_CATEGORY: Record<SleepHrCategory, { title: string; text: string; factor: number }> = {
+/**
+ * Цвет точки рядом с текстом: good — ночь прошла как обычно или лучше, alert — есть отклонение,
+ * о котором стоит знать. Отдельного заголовка у карточки нет: вывод читается по точке и тексту.
+ */
+export type SleepHrTone = 'good' | 'alert' | 'unknown';
+
+/** Названия, тексты, цвет точки и коэффициенты к оценке сна — справочная таблица категорий. */
+export const SLEEP_HR_CATEGORY: Record<
+  SleepHrCategory,
+  { title: string; text: string; factor: number; tone: Exclude<SleepHrTone, 'unknown'> }
+> = {
   normal: {
     title: 'Всё в норме',
     text:
       'Показатели сердца в пределах вашего личного коридора. Организм восстанавливался в стабильном темпе. ' +
       'Накануне нервная система не подвергалась избыточному стрессу, а режим сна и питания был оптимальным.',
     factor: 1,
+    tone: 'good',
   },
   load: {
     title: 'Повышенная нагрузка',
@@ -47,6 +57,7 @@ export const SLEEP_HR_CATEGORY: Record<SleepHrCategory, { title: string; text: s
       'Пульс ночью был стабильно выше нормы. Сердце работало в усиленном режиме и не получило отдыха. ' +
       'Обычно такой скачок вызывают алкоголь, поздний ужин, тренировка менее чем за 3 часа до сна или начинающаяся простуда.',
     factor: 0.75,
+    tone: 'alert',
   },
   deep: {
     title: 'Режим глубокого расслабления',
@@ -54,6 +65,7 @@ export const SLEEP_HR_CATEGORY: Record<SleepHrCategory, { title: string; text: s
       'Сердце достигло глубокого уровня покоя. Пульс опустился ощутимо ниже привычных значений. ' +
       'Это происходит при идеальных условиях сна (прохлада, тишина) либо указывает на глубокое физическое истощение после затяжного стресса.',
     factor: 1.25,
+    tone: 'good',
   },
   uneven: {
     title: 'Неравномерный ночной ритм',
@@ -61,6 +73,7 @@ export const SLEEP_HR_CATEGORY: Record<SleepHrCategory, { title: string; text: s
       'Зафиксирован рваный ритм. Общая нагрузка на сердце за ночь оставалась высокой, а пульс резко упал только под утро. ' +
       'Организм первую половину ночи боролся со стрессом (переваривал позднюю пищу или алкоголь) и не успел отдохнуть целиком.',
     factor: 0.5,
+    tone: 'alert',
   },
   spike: {
     title: 'Резкое ускорение под утро',
@@ -68,6 +81,7 @@ export const SLEEP_HR_CATEGORY: Record<SleepHrCategory, { title: string; text: s
       'В целом ночь прошла спокойно, но ваш минимальный пульс оказался завышен. Это означает, что под утро произошел резкий всплеск активности сердца. ' +
       'Такой эффект дают яркие или тревожные сновидения, либо резкий подъем по будильнику.',
     factor: 1,
+    tone: 'alert',
   },
   // Запасной случай: минимум близок к норме, а среднее ушло далеко (или наоборот на границе).
   // Ни одна из пяти картин не подходит, поэтому вывода не делаем и оценку сна не трогаем.
@@ -77,6 +91,7 @@ export const SLEEP_HR_CATEGORY: Record<SleepHrCategory, { title: string; text: s
       'Минимальный и средний пульс разошлись с вашей нормой по-разному, и однозначной картины за эту ночь не складывается. ' +
       'Посмотрим на следующие ночи.',
     factor: 1,
+    tone: 'alert',
   },
 };
 
@@ -137,8 +152,10 @@ export interface SleepHrView {
   deltaMin: number | null;
   deltaAvg: number | null;
   category: SleepHrCategory | null;
-  /** Название категории; null — нормы ещё нет. */
+  /** Название категории; null — нормы ещё нет. На экране не показывается, нужно для отладки. */
   title: string | null;
+  /** Зелёная или красная точка рядом с текстом; unknown — нормы ещё нет. */
+  tone: SleepHrTone;
   text: string;
   /** Коэффициент к оценке сна. */
   factor: number;
@@ -148,11 +165,21 @@ export interface SleepHrView {
 export function sleepHrCheck(night: NightHr | null, baseline: NightHr | null): SleepHrView | null {
   if (night === null) return null;
   if (baseline === null) {
-    return { night, baseline: null, deltaMin: null, deltaAvg: null, category: null, title: null, text: SLEEP_HR_NO_BASELINE_TEXT, factor: 1 };
+    return {
+      night,
+      baseline: null,
+      deltaMin: null,
+      deltaAvg: null,
+      category: null,
+      title: null,
+      tone: 'unknown',
+      text: SLEEP_HR_NO_BASELINE_TEXT,
+      factor: 1,
+    };
   }
   const deltaMin = night.min - baseline.min;
   const deltaAvg = night.avg - baseline.avg;
   const category = sleepHrCategory(deltaMin, deltaAvg);
-  const { title, text, factor } = SLEEP_HR_CATEGORY[category];
-  return { night, baseline, deltaMin, deltaAvg, category, title, text, factor };
+  const { title, text, factor, tone } = SLEEP_HR_CATEGORY[category];
+  return { night, baseline, deltaMin, deltaAvg, category, title, tone, text, factor };
 }

@@ -8,11 +8,14 @@ import { colors, radius, spacing } from './theme';
 export function Sheet({
   visible,
   title,
+  info,
   onClose,
   children,
 }: {
   visible: boolean;
   title: string;
+  /** Необязательный «i» рядом с заголовком листа: короткое объяснение, что это за раздел. */
+  info?: { title: string; text: string };
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -24,6 +27,8 @@ export function Sheet({
         <View style={styles.grabber} />
         <View style={styles.head}>
           <Text style={styles.title}>{title}</Text>
+          {info ? <InfoButton title={info.title} text={info.text} /> : null}
+          <View style={styles.headSpacer} />
           <Pressable onPress={onClose} hitSlop={12}>
             <Text style={styles.close}>Закрыть</Text>
           </Pressable>
@@ -72,8 +77,9 @@ const styles = StyleSheet.create({
     maxHeight: '75%',
   },
   grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.track, alignSelf: 'center', marginTop: spacing.sm },
-  head: { flexDirection: 'row', alignItems: 'center', marginTop: spacing.md, marginBottom: spacing.sm },
-  title: { color: colors.text, fontSize: 20, fontWeight: '600', flex: 1 },
+  head: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md, marginBottom: spacing.sm },
+  title: { color: colors.text, fontSize: 20, fontWeight: '600', flexShrink: 1 },
+  headSpacer: { flex: 1 },
   close: { color: colors.accent, fontSize: 16 },
   body: { marginBottom: spacing.sm },
   text: { color: colors.textMuted, fontSize: 15, lineHeight: 22 },

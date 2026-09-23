@@ -10,6 +10,18 @@ export const RELAY_TITLE = 'Эстафета от Лиса';
 export const SHOP_TITLE = 'Магазин';
 export const SHOP_EMPTY_TEXT = 'Скоро здесь появятся предметы';
 
+/** Короткое объяснение игры: «i» рядом с заголовком листа. */
+export const RELAY_INFO = {
+  title: RELAY_TITLE,
+  text:
+    'Каждый день, когда вы доходите до своей нормы шагов, Лис приносит орехи — 5 за день. ' +
+    'Дни подряд с выполненной нормой складываются в серию, и за длинные серии он приносит ещё.\n\n' +
+    'Орехи копятся на балансе. В магазине их можно будет обменять на предметы для Лиса — наряды ' +
+    'и мелочи для его площадки. Магазин пока пустой: вещи появятся в следующих обновлениях, ' +
+    'а орехи до тех пор никуда не денутся.\n\n' +
+    'Пропущенный день ничего не отнимает: серия просто начинается заново.',
+} as const;
+
 /** «Зелёный свет» — тот же зелёный, что у роста в динамике и у зелёной зоны кофейного окна. */
 export const GREEN_LIGHT = colors.positive;
 
@@ -41,13 +53,13 @@ export function StreakBadge({ streak, withUnit = false }: { streak: number; with
   );
 }
 
-/** «+5 орехов» — награда за выполненную норму дня. */
+/** «Награда +5 орехов» — что именно даёт выполненная норма дня. Словами, а не одним значком. */
 export function RewardPill() {
   return (
     <View style={styles.reward}>
       <NutGlyph size={13} />
       <Text style={styles.rewardText}>
-        +{RELAY_DAY_REWARD} {pluralRu(RELAY_DAY_REWARD, NUT_FORMS)}
+        Награда +{RELAY_DAY_REWARD} {pluralRu(RELAY_DAY_REWARD, NUT_FORMS)}
       </Text>
     </View>
   );
@@ -65,7 +77,7 @@ export function RelayBody({ relay }: { relay: RelayView }) {
         <View style={styles.block}>
           <Text style={[styles.big, { color: GREEN_LIGHT }]}>Зелёный свет</Text>
           <Text style={styles.sub}>
-            Норма выполнена · +{RELAY_DAY_REWARD} {pluralRu(RELAY_DAY_REWARD, NUT_FORMS)} завтра
+            Норма выполнена · награда +{RELAY_DAY_REWARD} {pluralRu(RELAY_DAY_REWARD, NUT_FORMS)} завтра
           </Text>
         </View>
       ) : (
@@ -122,13 +134,14 @@ export function RelayBody({ relay }: { relay: RelayView }) {
  */
 export function RelaySheet({ visible, relay, onClose }: { visible: boolean; relay: RelayView; onClose: () => void }) {
   return (
-    <Sheet visible={visible} title={RELAY_TITLE} onClose={onClose}>
-      <View style={styles.sheetHead}>
-        <NutsPill nuts={relay.nuts} big />
-      </View>
+    <Sheet visible={visible} title={RELAY_TITLE} info={RELAY_INFO} onClose={onClose}>
       <RelayBody relay={relay} />
       <View style={styles.divider} />
-      <Text style={styles.shopTitle}>{SHOP_TITLE}</Text>
+      {/* Баланс стоит там, где его будут тратить, — в «Магазине». */}
+      <View style={styles.shopHead}>
+        <Text style={styles.shopTitle}>{SHOP_TITLE}</Text>
+        <NutsPill nuts={relay.nuts} big />
+      </View>
       <View style={styles.shopEmpty}>
         <NutGlyph size={34} color={colors.textFaint} />
         <Text style={styles.shopText}>{SHOP_EMPTY_TEXT}</Text>
@@ -214,8 +227,8 @@ const styles = StyleSheet.create({
   pillText: { color: colors.accent, fontSize: 20, fontWeight: '600', fontVariant: ['tabular-nums'] },
   pillTextBig: { fontSize: 28, fontWeight: '500' },
   pillUnit: { color: colors.textMuted, fontSize: 14, marginLeft: 2 },
-  sheetHead: { alignItems: 'center', paddingBottom: spacing.md },
   divider: { height: 1, backgroundColor: colors.track, marginVertical: spacing.lg },
+  shopHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   shopTitle: { color: colors.text, fontSize: 17, fontWeight: '500' },
   shopEmpty: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.lg },
   shopText: { color: colors.textMuted, fontSize: 15, textAlign: 'center' },

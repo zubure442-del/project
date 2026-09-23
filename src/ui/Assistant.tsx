@@ -1,14 +1,24 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 import { ADVICE_LABEL, AUTOPHAGY_INFO, coffeeClock, type CoffeeWindow, type FoodCycle } from '../domain';
 import type { AssistantSlide } from '../state/day';
 import { InfoButton } from './Sheet';
 import { SparkIcon } from './TabIcons';
+import { useReduceMotion } from './motion';
 import { colors, radius, spacing, withAlpha } from './theme';
 
-/** Карусель в несколько раз выше прежней карточки совета. */
-export const ASSISTANT_HEIGHT = 340;
+/**
+ * Высота карточки карусели. Подобрана так, чтобы на «Сегодня» она целиком помещалась
+ * на экране вместе с маскотом: заходишь в приложение — и листать вниз не нужно.
+ */
+export const ASSISTANT_HEIGHT = 300;
+/** Подпись-подсказка в правом нижнем углу карточки: дальше по свайпу — готовые подсказки. */
+export const LIFEHACKS_LABEL = 'Лайфхаки';
+/** Стрелка-подсказка качается туда-обратно. */
+const NUDGE_MS = 700;
+const NUDGE_PX = 4;
 const ZONE_RED = withAlpha(colors.danger, 0.6);
 const ZONE_GREEN = '#5DBB8C';
 
@@ -34,6 +44,45 @@ function CardGlyph({ name }: { name: Glyph }) {
         <Path {...p} d="M15.5 3.5a8.5 8.5 0 1 0 5 12.7A7 7 0 0 1 15.5 3.5z" />
       )}
     </Svg>
+  );
+}
+
+/**
+ * «Лайфхаки ›» в правом нижнем углу первой карточки: подсказка, что карусель листается.
+ * Стрелка мягко качается вправо; при системном «Уменьшении движения» стоит на месте.
+ */
+function SwipeHint() {
+  const reduce = useReduceMotion();
+  const shift = useSharedValue(0);
+  useEffect(() => {
+    if (reduce) {
+      shift.value = 0;
+      return;
+    }
+    shift.value = withRepeat(
+      withSequence(withTiming(NUDGE_PX, { duration: NUDGE_MS }), withTiming(0, { duration: NUDGE_MS })),
+      -1,
+      false,
+    );
+  }, [reduce, shift]);
+  const style = useAnimatedStyle(() => ({ transform: [{ translateX: shift.value }] }));
+
+  return (
+    <View style={styles.hint}>
+      <Text style={styles.hintText}>{LIFEHACKS_LABEL}</Text>
+      <Animated.View style={style}>
+        <Svg width={16} height={16} viewBox="0 0 24 24">
+          <Path
+            d="M9 5l7 7-7 7"
+            stroke={colors.accent}
+            strokeWidth={2.2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+          />
+        </Svg>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -157,7 +206,10 @@ const SLIDES: Slide[] = [
 ];
 
 /**
- * «AI Ассистент» на «Сегодня»: горизонтальная карусель с точками. Первая карточка — совет
+ * «AI Ассистент» на «Сегодня»: горизонтальная карусель с точками. Открытая карточка живёт
+ * в состоянии компонента, поэтому «Сегодня» пересоздаёт карусель по `key` (см. index.tsx):
+ * после загрузки новых данных она снова начинается с первой карточки, а не с последней открытой.
+ * Первая карточка — совет
  * из ReportGenerator, дальше карточки функций. Каждый слайд сразу показывает своё содержимое:
  * отдельного нажатия «открыть» нет, единственный жест — свайп. Какие слайды есть, решает
  * `recommendationsFor`: без оценки сна за сегодня «Кофейного окна» нет вовсе.
@@ -209,7 +261,11 @@ export function AssistantCarousel({
               <Text style={styles.text}>{ADVICE_LABEL} появится, когда день будет полным</Text>
             )}
             <View style={styles.flex} />
-            <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
+            {/* Слева — подпись модели, справа — подсказка про свайп. */}
+            <View style={styles.footer}>
+              <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
+              <SwipeHint />
+            </View>
           </View>
         </View>
         {shown.map((card) => (
@@ -231,12 +287,10 @@ export function AssistantCarousel({
           </View>
         ))}
       </ScrollView>
-      {/* Под карточкой — точки и шеврон: пока есть куда листать, видно, что карусель свайпается. */}
       <View style={styles.dots}>
         {Array.from({ length: pages }, (_, i) => (
           <View key={i} style={[styles.dot, i === page && styles.dotOn]} />
         ))}
-        <Text style={[styles.swipe, page >= pages - 1 && styles.swipeOff]}>›</Text>
       </View>
     </View>
   );
@@ -267,7 +321,10 @@ const styles = StyleSheet.create({
   adviceText: { color: colors.text, fontSize: 18, lineHeight: 27 },
   text: { color: colors.textMuted, fontSize: 15, lineHeight: 22 },
   small: { color: colors.textFaint, fontSize: 12 },
-  poweredBy: { color: colors.textFaint, fontSize: 11, textAlign: 'right' },
+  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  poweredBy: { color: colors.textFaint, fontSize: 11 },
+  hint: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  hintText: { color: colors.accent, fontSize: 13, fontWeight: '500' },
   flex: { flex: 1 },
   bodyGap: { gap: spacing.sm },
   mode: { color: colors.accent, fontSize: 16, fontWeight: '500' },
@@ -280,6 +337,4 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.track },
   dotOn: { backgroundColor: colors.accent },
-  swipe: { color: colors.textFaint, fontSize: 18, lineHeight: 18, marginLeft: 2, marginTop: -6 },
-  swipeOff: { opacity: 0 },
 });

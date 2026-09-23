@@ -17,7 +17,7 @@ import {
 const COMPONENTS: ComponentId[] = ['sleep', 'activity', 'state'];
 
 export default function TodayTab() {
-  const { state, statusText, sync, dayView } = useVuelo();
+  const { state, statusText, sync, dayView, homeRequest } = useVuelo();
   const { width } = useWindowDimensions();
   const { date: picked, banner, complete } = useTabDay();
   const day = findDay(state.days, picked);
@@ -62,6 +62,8 @@ export default function TodayTab() {
         <>
           {recs ? (
             <AssistantCarousel
+              // Новые данные — карусель начинается заново, с карточки «AI Ассистент».
+              key={homeRequest}
               slides={recs.slides}
               advice={recs.advice?.text ?? null}
               adviceLabel={adviceLabel(picked)}

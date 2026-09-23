@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   Linking,
   Pressable,
   StyleSheet,
@@ -23,6 +22,7 @@ import {
   type ShownSlide,
 } from '../state';
 import { StageArt } from './LoadingArt';
+import { useReduceMotion } from './motion';
 import { Onboarding } from './Onboarding';
 import { ProgressArc } from './ProgressArc';
 import { TipGlyph, type TipIcon } from './TipIcons';
@@ -97,16 +97,6 @@ const PROBLEMS = {
 const TICK_MS = 100;
 /** Блик по дуге — не чаще четырёх раз в секунду. */
 const FLASH_MS = 250;
-
-function useReduceMotion() {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReduce);
-    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduce);
-    return () => sub.remove();
-  }, []);
-  return reduce;
-}
 
 interface CardProps {
   slide: number;

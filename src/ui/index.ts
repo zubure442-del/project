@@ -27,3 +27,4 @@ export * from './CaloriesWeek';
 export * from './Mascot';
 export * from './MascotHero';
 export * from './RewardIcons';
+export * from './motion';

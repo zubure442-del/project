@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NOT_MEDICAL_DEVICE } from '../domain';
+import { NOT_MEDICAL_DEVICE, RING_NOT_FOUND_ADVICE, RING_NOT_FOUND_TITLE } from '../domain';
 import {
   STAGE_FADE_MS,
   canLeave,
@@ -81,12 +81,8 @@ export const LOADING_TIPS: { title: string; lines: { icon: TipIcon; text: string
 
 /** Три разные беды — три разных текста. В заголовке суть, в тексте только что делать. */
 const PROBLEMS = {
-  'not-found': {
-    title: 'Кольцо не найдено',
-    text:
-      'Наденьте кольцо и поднесите ближе к телефону. Если оно уже подключено к этому iPhone или к другому ' +
-      'телефону, откройте Настройки → Bluetooth, нажмите ⓘ рядом с кольцом и выберите «Забыть это устройство».',
-  },
+  // Две попытки по 10 секунд уже позади (src/ble/connect.ts): дальше — что проверить руками.
+  'not-found': { title: RING_NOT_FOUND_TITLE, text: RING_NOT_FOUND_ADVICE },
   lost: {
     title: 'Связь оборвалась',
     text: 'Кольцо пропало на середине загрузки. Поднесите его ближе к телефону и попробуйте снова.',

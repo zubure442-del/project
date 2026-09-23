@@ -1,15 +1,15 @@
 import { BleError, BleErrorCode, BleManager, State, type Device, type Subscription } from 'react-native-ble-plx';
 import { PACKET_LENGTH } from '../codec';
+import { RING_NOT_FOUND_MESSAGE } from '../domain/texts';
 import { base64ToBytes, bytesToBase64 } from './base64';
-import { logPacket } from './log';
+import { CONNECT_ATTEMPT_MS, RECONNECT_ATTEMPT_MS, connectWithRetry } from './connect';
+import { logNote, logPacket } from './log';
 import { resetLightThrottle } from './sync';
 import { sleep, type Transport } from './transport';
 
 export const RING_NAME = 'Vuelo Ring';
 const NOTIFY_UUID = '000033f4-0000-1000-8000-00805f9b34fb';
 const WRITE_UUID = '000033f3-0000-1000-8000-00805f9b34fb';
-const SCAN_TIMEOUT_MS = 15000;
-const CONNECT_TIMEOUT_MS = 12000;
 const BLUETOOTH_WAIT_MS = 10000;
 const WRITE_GAP_MS = 80;
 const WRITE_RETRIES = 2;
@@ -119,8 +119,8 @@ export class RingBle implements Transport {
     return device ?? null;
   }
 
-  /** 3) Поиск по имени — только для первого знакомства. */
-  private fromScan(): Promise<Device> {
+  /** 3) Поиск по имени: для первого знакомства и для второй попытки после ручной отвязки. */
+  private fromScan(timeoutMs: number): Promise<Device> {
     this.setStatus('scanning');
     return new Promise((resolve, reject) => {
       const stop = () => {
@@ -129,8 +129,8 @@ export class RingBle implements Transport {
       };
       const timer = setTimeout(() => {
         stop();
-        reject(new Error('Кольцо не найдено. Наденьте его, проверьте заряд и что оно не подключено к другому приложению.'));
-      }, SCAN_TIMEOUT_MS);
+        reject(new Error(RING_NOT_FOUND_MESSAGE));
+      }, timeoutMs);
       void this.manager.startDeviceScan(null, null, (error, device) => {
         if (error) {
           stop();
@@ -224,30 +224,33 @@ export class RingBle implements Transport {
     }
     this.setStatus('idle');
     await this.waitPoweredOn();
-
-    const target = (await this.fromSystem()) ?? (await this.fromKnownId());
-    if (target) {
-      try {
-        await this.withTimeout(this.attach(target), CONNECT_TIMEOUT_MS);
-        return;
-      } catch {
-        // Кольцо могло смениться или уйти из зоны: пробуем найти заново.
-        this.known = null;
-      }
-    }
-    await this.attach(await this.fromScan());
+    // Две попытки по 10 секунд: обычная и «как к новому кольцу» (см. connect.ts).
+    await connectWithRetry({
+      known: () => this.attemptKnown(),
+      fresh: () => this.attemptFresh(),
+      onRetry: () => logNote('соединение не установилось — пробуем как с новым кольцом'),
+    });
   }
 
-  private async withTimeout<T>(task: Promise<T>, ms: number): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const limit = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('Кольцо не отвечает.')), ms);
-    });
-    try {
-      return await Promise.race([task, limit]);
-    } finally {
-      clearTimeout(timer);
+  /** Первая попытка: системное подключение, сохранённый идентификатор, иначе поиск по имени. */
+  private async attemptKnown(): Promise<void> {
+    const target = (await this.fromSystem()) ?? (await this.fromKnownId());
+    if (target) {
+      await this.attach(target);
+      return;
     }
+    await this.attach(await this.fromScan(CONNECT_ATTEMPT_MS));
+  }
+
+  /**
+   * Вторая попытка: кольцо могли отвязать вручную в настройках Bluetooth, поэтому забываем
+   * привязку и ищем его в эфире заново — как при первом знакомстве.
+   */
+  private async attemptFresh(): Promise<void> {
+    this.known = null;
+    this.device = null;
+    void this.manager.stopDeviceScan();
+    await this.attach(await this.fromScan(RECONNECT_ATTEMPT_MS));
   }
 
   private clearSubscriptions() {

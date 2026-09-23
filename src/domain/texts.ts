@@ -20,3 +20,14 @@ export function pluralRu(n: number, forms: readonly [one: string, few: string, m
 /** Число с разрядами через неразрывный пробел: 12 500. */
 export const formatCount = (n: number): string =>
   String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
+/**
+ * Кольцо не нашлось ни с первой попытки, ни со второй (по 10 секунд каждая, см. src/ble/connect.ts).
+ * Заголовок и совет разделены: на экране ошибки заголовок стоит отдельной строкой.
+ */
+export const RING_NOT_FOUND_TITLE = 'Кольцо не найдено';
+export const RING_NOT_FOUND_ADVICE =
+  'Возможно, села зарядка или произошла ошибка Bluetooth-соединения. ' +
+  'Попробуйте забыть устройство в настройках Bluetooth и подключиться заново.';
+/** Тем же текстом отвечает BLE-слой: по нему экран загрузки узнаёт беду «кольцо не найдено». */
+export const RING_NOT_FOUND_MESSAGE = `${RING_NOT_FOUND_TITLE}. ${RING_NOT_FOUND_ADVICE}`;

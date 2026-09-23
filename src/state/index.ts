@@ -9,3 +9,4 @@ export * from './relay';
 export * from './trend';
 export * from './sleep-hr';
 export * from './food';
+export * from './refresh';

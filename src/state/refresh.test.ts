@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { Phase } from './provider';
-import { refreshIndicatorVisible } from './refresh';
+import { refreshControlKey, refreshIndicatorVisible } from './refresh';
 
 /**
  * Все фазы разом: Record<Phase, …> не даст забыть новую — тип не сойдётся.
- * Спиннер виден только во время самой загрузки.
+ * Ключ «loading» только во время самой загрузки: на любом её конце он другой,
+ * то есть нативный контрол пересоздаётся и растянутым остаться не может.
  */
-const EXPECTED: Record<Phase, boolean> = {
-  idle: false,
-  loading: true,
-  done: false,
-  failed: false,
-  fresh: false,
+const EXPECTED: Record<Phase, 'loading' | 'idle'> = {
+  idle: 'idle',
+  loading: 'loading',
+  done: 'idle',
+  failed: 'idle',
+  fresh: 'idle',
 };
 
 /** Пути, которыми загрузка заканчивается на самом деле (см. sync в provider.tsx). */
@@ -23,27 +24,27 @@ const PATHS: Record<string, Phase[]> = {
   'обрыв без единого дня в кэше': ['idle', 'loading', 'failed', 'idle'],
 };
 
-describe('СИНТЕТИЧЕСКИЕ: индикатор обновления гаснет на всех путях завершения', () => {
-  it('виден только во время загрузки', () => {
-    for (const [phase, visible] of Object.entries(EXPECTED) as [Phase, boolean][]) {
-      expect(refreshIndicatorVisible(phase)).toBe(visible);
+describe('СИНТЕТИЧЕСКИЕ: индикатор обновления не залипает ни на одном пути завершения', () => {
+  it('спиннер поверх содержимого не показываем: прогресс живёт на экране загрузки', () => {
+    expect(refreshIndicatorVisible()).toBe(false);
+  });
+
+  it('ключ контрола — «loading» только во время загрузки', () => {
+    for (const [phase, key] of Object.entries(EXPECTED) as [Phase, 'loading' | 'idle'][]) {
+      expect(refreshControlKey(phase)).toBe(key);
     }
   });
 
   for (const [name, path] of Object.entries(PATHS)) {
-    it(`${name}: в конце спиннера нет`, () => {
-      const seen = path.map(refreshIndicatorVisible);
-      expect(seen[seen.length - 1]).toBe(false);
-      // И на каждом шаге после загрузки он уже погашен, не дожидаясь прокрутки экрана.
+    it(`${name}: к концу контрол пересоздан и спиннера нет`, () => {
+      const keys = path.map(refreshControlKey);
+      expect(keys[keys.length - 1]).toBe('idle');
+      // На каждом шаге после загрузки ключ уже сменился — не дожидаясь прокрутки экрана.
       path.forEach((phase, i) => {
-        if (phase !== 'loading') expect(seen[i]).toBe(false);
+        if (phase !== 'loading') expect(keys[i]).toBe('idle');
       });
+      // Загрузка была — значит ключ менялся, и нативный контрол собран заново.
+      if (path.includes('loading')) expect(new Set(keys).size).toBe(2);
     });
   }
-
-  it('после загрузки индикатор гаснет раньше, чем закроется экран загрузки', () => {
-    // Экран загрузки висит и в фазе done/failed — спиннер под ним уже снят.
-    expect(refreshIndicatorVisible('done')).toBe(false);
-    expect(refreshIndicatorVisible('failed')).toBe(false);
-  });
 });

@@ -154,26 +154,32 @@ function CoffeeBody({ coffee, nowMinute, width }: { coffee: CoffeeWindow; nowMin
   );
 }
 
+/** Заголовок над колбой. */
+export const METABOLISM_LABEL = 'Текущий метаболизм';
+
 /**
- * «Цикл питания»: режим дня, слева — во сколько сегодня есть, справа — колба.
- * Таймлайна и счётчика часов на карточке нет: уровень воды показывает то же самое нагляднее,
- * а объяснение живёт в «i» в шапке карточки.
+ * «Цикл питания». Сверху — режим и приёмы пищи в строку, ниже «Текущий метаболизм» и колба
+ * с выносками к подписям слоёв. Порядок сверху вниз: что за день → когда есть → что сейчас
+ * с обменом веществ; глазу не нужно прыгать по карточке.
  */
 function FoodBody({ food }: { food: FoodCycle }) {
   return (
     <View style={styles.foodBody}>
       <Text style={styles.mode}>{food.title}</Text>
-      <View style={styles.foodRow}>
-        <View style={styles.meals}>
-          {food.meals.map((meal) => (
-            <View key={meal.title} style={styles.meal}>
-              <Text style={styles.mealTitle}>{meal.title}</Text>
-              <Text style={styles.mealTime}>{coffeeClock(meal.minute)}</Text>
-            </View>
-          ))}
-        </View>
-        {food.flask ? <Flask fill={food.flask.fill} stage={food.flask.stage} /> : null}
+      <View style={styles.meals}>
+        {food.meals.map((meal) => (
+          <View key={meal.title} style={styles.meal}>
+            <Text style={styles.mealTitle}>{meal.title}</Text>
+            <Text style={styles.mealTime}>{coffeeClock(meal.minute)}</Text>
+          </View>
+        ))}
       </View>
+      {food.flask ? (
+        <>
+          <Text style={styles.sectionLabel}>{METABOLISM_LABEL}</Text>
+          <Flask fill={food.flask.fill} stage={food.flask.stage} />
+        </>
+      ) : null}
     </View>
   );
 }
@@ -320,13 +326,13 @@ const styles = StyleSheet.create({
   chevron: { marginLeft: -3 },
   flex: { flex: 1 },
   bodyGap: { gap: spacing.sm },
-  foodBody: { flex: 1, gap: spacing.md },
+  foodBody: { flex: 1, gap: spacing.sm },
   mode: { color: colors.accent, fontSize: 16, fontWeight: '500' },
-  foodRow: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  meals: { gap: spacing.md },
+  meals: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   meal: { gap: 1 },
   mealTitle: { color: colors.textFaint, fontSize: 12 },
-  mealTime: { color: colors.text, fontSize: 22, fontWeight: '300', fontVariant: ['tabular-nums'] },
+  mealTime: { color: colors.text, fontSize: 20, fontWeight: '300', fontVariant: ['tabular-nums'] },
+  sectionLabel: { color: colors.textMuted, fontSize: 13, marginTop: spacing.xs },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.track },
   dotOn: { backgroundColor: colors.accent },

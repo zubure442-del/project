@@ -6,20 +6,24 @@ import { FLASK_LAYER, FLASK_STAGE_TEXT, type FlaskStage } from '../domain';
 import { useReduceMotion } from './motion';
 import { colors, withAlpha } from './theme';
 
-/** Размер колбы на карточке «Цикла питания». */
-export const FLASK_WIDTH = 62;
-export const FLASK_HEIGHT = 156;
+/** Размер колбы: небольшая, чтобы блок читался как один рисунок под заголовком. */
+export const FLASK_WIDTH = 44;
+export const FLASK_HEIGHT = 108;
 /** Высота волны на поверхности воды. */
-const WAVE_HEIGHT = 10;
+const WAVE_HEIGHT = 8;
 /** Полный проход волны и лёгкое покачивание уровня. */
 const WAVE_MS = 3400;
 const BOB_MS = 2200;
-const BOB_PX = 2;
+const BOB_PX = 1.5;
 /** Уровень воды подтягивается к новому значению плавно. */
 const LEVEL_MS = 900;
 
 const WATER = withAlpha(colors.accent, 0.55);
 const WATER_EDGE = withAlpha(colors.accent, 0.75);
+const GLASS_LINE = withAlpha(colors.accent, 0.35);
+
+/** Слои сверху вниз — в том же порядке, в каком стоят подписи справа. */
+const STAGES: FlaskStage[] = ['autophagy', 'fat', 'processing'];
 
 /** Синусоида в две волны шириной 2×W: при сдвиге на W картинка повторяется без стыка. */
 function wavePath(w: number, h: number): string {
@@ -27,12 +31,8 @@ function wavePath(w: number, h: number): string {
   return `M0 ${h / 2} q ${half / 2} -${h / 2} ${half} 0 t ${half} 0 t ${half} 0 t ${half} 0 V ${h + 2} H 0 Z`;
 }
 
-/**
- * Колба с водой: три слоя снизу вверх — «Переработка», «Жиросжигание», «Аутофагия».
- * Уровень зависит от того, сколько прошло с последней еды и как держится сахар.
- * Вода аккуратно покачивается; при системном «Уменьшении движения» стоит ровно.
- */
-export function Flask({ fill, stage }: { fill: number; stage: FlaskStage }) {
+/** Стекло с водой: уровень 0–100 % высоты и насечки между слоями. */
+function Glass({ fill }: { fill: number }) {
   const reduce = useReduceMotion();
   const level = useSharedValue(0);
   const shift = useSharedValue(0);
@@ -58,40 +58,57 @@ export function Flask({ fill, stage }: { fill: number; stage: FlaskStage }) {
   const waveStyle = useAnimatedStyle(() => ({ transform: [{ translateX: shift.value }] }));
 
   return (
-    <View style={styles.root} pointerEvents="none">
-      <View style={styles.glass}>
-        <Animated.View style={[styles.water, waterStyle]}>
-          <Animated.View style={[styles.wave, waveStyle]}>
-            <Svg width={FLASK_WIDTH * 2} height={WAVE_HEIGHT + 2}>
-              <Path d={wavePath(FLASK_WIDTH, WAVE_HEIGHT)} fill={WATER_EDGE} />
-            </Svg>
-          </Animated.View>
+    <View style={styles.glass}>
+      <Animated.View style={[styles.water, waterStyle]}>
+        <Animated.View style={[styles.wave, waveStyle]}>
+          <Svg width={FLASK_WIDTH * 2} height={WAVE_HEIGHT + 2}>
+            <Path d={wavePath(FLASK_WIDTH, WAVE_HEIGHT)} fill={WATER_EDGE} />
+          </Svg>
         </Animated.View>
-        {/* Границы слоёв: тонкие насечки на стекле. */}
-        <View style={[styles.tick, { bottom: (FLASK_HEIGHT * FLASK_LAYER) / 100 }]} />
-        <View style={[styles.tick, { bottom: (FLASK_HEIGHT * FLASK_LAYER * 2) / 100 }]} />
-      </View>
+      </Animated.View>
+      {/* Границы слоёв — тонкие насечки на стекле. */}
+      <View style={[styles.tick, { bottom: (FLASK_HEIGHT * FLASK_LAYER) / 100 }]} />
+      <View style={[styles.tick, { bottom: (FLASK_HEIGHT * FLASK_LAYER * 2) / 100 }]} />
+    </View>
+  );
+}
 
-      {/* Подписи справа, снизу вверх: текущий слой — акцентом. */}
-      <View style={styles.labels}>
-        {(['autophagy', 'fat', 'processing'] as FlaskStage[]).map((name) => (
-          <View key={name} style={styles.labelRow}>
-            <Text style={[styles.label, stage === name && styles.labelOn]}>{FLASK_STAGE_TEXT[name]}</Text>
-          </View>
-        ))}
+/**
+ * Колба «Текущего метаболизма»: слева стекло с водой, справа три подписи слоёв.
+ * От каждого слоя к своей подписи идёт выноска — видно, какой уровень что означает.
+ * Текущий слой подсвечен акцентом. Вода аккуратно покачивается; при системном
+ * «Уменьшении движения» стоит ровно.
+ */
+export function Flask({ fill, stage }: { fill: number; stage: FlaskStage }) {
+  return (
+    <View style={styles.root} pointerEvents="none">
+      <Glass fill={fill} />
+      <View style={styles.rows}>
+        {STAGES.map((name) => {
+          const on = stage === name;
+          return (
+            <View key={name} style={styles.row}>
+              <View style={[styles.leader, on && styles.leaderOn]} />
+              <View style={[styles.dot, on && styles.dotOn]} />
+              <Text style={[styles.label, on && styles.labelOn]} numberOfLines={1}>
+                {FLASK_STAGE_TEXT[name]}
+              </Text>
+            </View>
+          );
+        })}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  root: { flexDirection: 'row', alignItems: 'center' },
   glass: {
     width: FLASK_WIDTH,
     height: FLASK_HEIGHT,
     borderRadius: FLASK_WIDTH / 2,
     borderWidth: 1.5,
-    borderColor: withAlpha(colors.accent, 0.35),
+    borderColor: GLASS_LINE,
     backgroundColor: withAlpha(colors.accent, 0.07),
     overflow: 'hidden',
     justifyContent: 'flex-end',
@@ -99,8 +116,13 @@ const styles = StyleSheet.create({
   water: { backgroundColor: WATER },
   wave: { position: 'absolute', left: 0, top: -WAVE_HEIGHT },
   tick: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: withAlpha(colors.accent, 0.22) },
-  labels: { height: FLASK_HEIGHT, justifyContent: 'space-around' },
-  labelRow: { justifyContent: 'center' },
-  label: { color: colors.textFaint, fontSize: 13 },
+
+  rows: { height: FLASK_HEIGHT, flex: 1 },
+  row: { flex: 1, flexDirection: 'row', alignItems: 'center' },
+  leader: { flex: 1, height: 1, backgroundColor: withAlpha(colors.accent, 0.18) },
+  leaderOn: { backgroundColor: withAlpha(colors.accent, 0.5) },
+  dot: { width: 4, height: 4, borderRadius: 2, backgroundColor: withAlpha(colors.accent, 0.3), marginRight: 6 },
+  dotOn: { backgroundColor: colors.accent },
+  label: { color: colors.textFaint, fontSize: 13, width: 108, textAlign: 'right' },
   labelOn: { color: colors.accent, fontWeight: '600' },
 });

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { refreshIndicatorVisible, useVuelo } from '../state';
+import { refreshControlKey, refreshIndicatorVisible, useVuelo } from '../state';
 import { CalendarButton } from './Calendar';
 import { InfoButton } from './Sheet';
 import { colors, radius, spacing } from './theme';
@@ -32,9 +32,8 @@ export interface ScreenProps {
 
 export function Screen({ title, info, statusText, onSync, banner, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
-  // Спиннер гаснет на любом конце загрузки: см. refreshIndicatorVisible.
+  // Контрол пересоздаётся на каждом конце загрузки и не залипает: см. src/state/refresh.ts.
   const { phase } = useVuelo();
-  const refreshing = refreshIndicatorVisible(phase);
 
   return (
     <View style={styles.root}>
@@ -57,7 +56,14 @@ export function Screen({ title, info, statusText, onSync, banner, children }: Sc
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: spacing.xl }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onSync} tintColor={colors.textMuted} />}
+        refreshControl={
+          <RefreshControl
+            key={refreshControlKey(phase)}
+            refreshing={refreshIndicatorVisible()}
+            onRefresh={onSync}
+            tintColor={colors.textMuted}
+          />
+        }
       >
         {children}
       </ScrollView>

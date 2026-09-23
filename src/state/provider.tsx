@@ -89,8 +89,10 @@ interface Vuelo {
   /** Удаляет данные, историю, профиль и логи. Привязка к кольцу остаётся. */
   clearData: () => void;
   /**
-   * Счётчик «открыть главный экран». Растёт при каждом входе в приложение и при каждой
-   * синхронизации; вкладки следят за ним и переключаются на центральную вкладку.
+   * Счётчик «открыть главный экран». Растёт, только когда к кольцу сходили и применили новые
+   * данные; вкладки следят за ним и переключаются на центральную. Короткое сворачивание
+   * приложения и свежий кэш вкладку не меняют. «Сегодня» по этому же счётчику пересоздаёт
+   * карусель ассистента, чтобы она открылась на первой карточке.
    */
   homeRequest: number;
   /** Демо-режим включён: экраны показывают синтетические показатели, посчитанные реальными формулами. */
@@ -145,7 +147,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
    */
   const [demo, setDemoSession] = useState<{ seed: number; at: number } | null>(null);
   const demoOn = useRef(false);
-  /** Просьба открыть центральную вкладку: вход в приложение и любая синхронизация. */
+  /** Просьба открыть центральную вкладку: только после удачно применённой выгрузки. */
   const [homeRequest, setHomeRequest] = useState(0);
   const goHome = useCallback(() => setHomeRequest((n) => n + 1), []);
 
@@ -193,8 +195,6 @@ export function VueloProvider({ children }: { children: ReactNode }) {
    */
   const sync = useCallback(
     (mode: SyncMode = 'launch') => {
-      // Любое обновление возвращает на главный экран, даже если к кольцу не пойдём.
-      goHome();
       if (running.current) return;
       // В демо к кольцу не идём: демо работает и без кольца, а настоящие данные ждут выключения.
       if (demoOn.current) return;
@@ -291,6 +291,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           await saveState(next);
           latest.current = next;
           setState(next);
+          // Новые данные пришли — возвращаемся на «Сегодня» и открываем карусель заново.
+          // Короткое сворачивание приложения без выгрузки вкладку больше не сбрасывает.
+          goHome();
           loadProgress.set({ finished: true, finishedAt: Date.now() });
           if (result.error) {
             setError('lost');
@@ -326,7 +329,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     });
   }, [sync]);
 
-  // Возврат из фона: при каждом входе открывается сегодняшняя дата, дальше — правило 10 минут.
+  // Возврат из фона: сверяем дату по часам и, если кэш устарел, идём к кольцу (правило 10 минут).
+  // Вкладку и выбранный день не трогаем: на «Сегодня» перекидывает только приход новых данных
+  // (см. goHome в sync), а выбор из календаря всё равно сбрасывается ключом синхронизации.
   // «active» после шторки или системного окна — не возврат.
   useEffect(() => {
     let previous: AppStateStatus = AppState.currentState;
@@ -334,9 +339,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       const fromBackground = previous === 'background';
       previous = next;
       if (next !== 'active' || !fromBackground) return;
-      setPicked(null);
       setClockDay(todayKey());
-      goHome();
       setDemoSession((prev) => prev && { ...prev, at: Date.now() });
       // Возврат из фона — тоже открытие: проверяем кэш на выполненные дни, даже если к кольцу не пойдём.
       if (!running.current) {
@@ -346,7 +349,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       if (latest.current.started) sync('resume');
     });
     return () => sub.remove();
-  }, [commit, goHome, sync]);
+  }, [commit, sync]);
 
   // Полночь, пока приложение открыто: дата «сегодня» сменится сама.
   useEffect(() => {

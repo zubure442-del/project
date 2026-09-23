@@ -66,6 +66,7 @@ export default function TodayTab() {
               advice={recs.advice?.text ?? null}
               adviceLabel={adviceLabel(picked)}
               coffee={recs.coffee}
+              food={recs.food}
             />
           ) : null}
         </>

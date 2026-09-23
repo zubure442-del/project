@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { ADVICE_LABEL, coffeeClock, type CoffeeWindow } from '../domain';
+import { ADVICE_LABEL, AUTOPHAGY_INFO, coffeeClock, type CoffeeWindow, type FoodCycle } from '../domain';
 import type { AssistantSlide } from '../state/day';
+import { InfoButton } from './Sheet';
 import { SparkIcon } from './TabIcons';
 import { colors, radius, spacing, withAlpha } from './theme';
 
@@ -84,6 +85,61 @@ function CoffeeBody({ coffee, nowMinute, width }: { coffee: CoffeeWindow; nowMin
   );
 }
 
+/**
+ * Таймлайн суток «Цикла питания»: серая полоса дня, на ней акцентом выделен отрезок
+ * от точки отсчёта голодания до первого приёма пищи, метки приёмов и отметка «сейчас».
+ * Точка отсчёта бывает вчерашней (отрицательные минуты) — тогда ось начинается с неё.
+ */
+function FoodTimeline({ food, width }: { food: FoodCycle; width: number }) {
+  const from = Math.min(0, food.fastingStart);
+  const span = 1440 - from;
+  const x = (m: number) => ((Math.min(1440, Math.max(from, m)) - from) / span) * width;
+  const barY = 14;
+  const fastingTo = Math.max(food.fastingStart, Math.min(food.firstMeal, 1440));
+  return (
+    <View pointerEvents="none">
+      <Svg width={width} height={46}>
+        <Rect x={0} y={barY} width={width} height={10} rx={5} fill={colors.track} />
+        {/* Голодание: от точки отсчёта до первого приёма. */}
+        <Rect x={x(food.fastingStart)} y={barY} width={Math.max(2, x(fastingTo) - x(food.fastingStart))} height={10} rx={5} fill={ZONE_GREEN} />
+        {food.meals.map((meal) => (
+          <Circle key={meal.title} cx={x(meal.minute)} cy={barY + 5} r={4.5} fill={colors.accent} />
+        ))}
+        <Line x1={x(food.nowMinute)} x2={x(food.nowMinute)} y1={barY - 6} y2={barY + 16} stroke={colors.text} strokeWidth={2} strokeLinecap="round" />
+        <SvgText x={Math.max(18, x(food.fastingStart))} y={44} fill={colors.textFaint} fontSize={11} textAnchor="middle">
+          {coffeeClock(food.fastingStart)}
+        </SvgText>
+        <SvgText x={Math.min(width - 18, x(fastingTo))} y={44} fill={colors.textFaint} fontSize={11} textAnchor="middle">
+          {coffeeClock(fastingTo)}
+        </SvgText>
+      </Svg>
+    </View>
+  );
+}
+
+/** «Цикл питания»: режим дня, отрезок голодания на таймлайне, приёмы пищи и счётчик аутофагии. */
+function FoodBody({ food, width }: { food: FoodCycle; width: number }) {
+  return (
+    <View style={styles.bodyGap}>
+      <Text style={styles.mode}>{food.title}</Text>
+      <Text style={styles.text}>{food.text}</Text>
+      <FoodTimeline food={food} width={width} />
+      <View style={styles.meals}>
+        {food.meals.map((meal) => (
+          <View key={meal.title} style={styles.meal}>
+            <Text style={styles.mealTime}>{coffeeClock(meal.minute)}</Text>
+            <Text style={styles.mealTitle}>{meal.title}</Text>
+          </View>
+        ))}
+      </View>
+      <View style={styles.autophagy}>
+        <Text style={styles.autophagyText}>{food.autophagyText}</Text>
+        <InfoButton title={AUTOPHAGY_INFO.title} text={AUTOPHAGY_INFO.text} />
+      </View>
+    </View>
+  );
+}
+
 interface Slide {
   key: Exclude<AssistantSlide, 'advice'>;
   title: string;
@@ -93,8 +149,9 @@ interface Slide {
 }
 
 const SLIDES: Slide[] = [
+  // «Цикл питания» стоит раньше кофейного окна.
+  { key: 'food', title: 'Цикл питания', glyph: 'food' },
   { key: 'coffee', title: 'Кофейное окно', glyph: 'coffee' },
-  { key: 'food', title: 'Цикл питания', glyph: 'food', soon: 'Подскажет, когда удобнее есть в течение дня.' },
   { key: 'endurance', title: 'Пик выносливости', glyph: 'bolt', soon: 'Покажет время дня, когда тренировки даются легче.' },
   { key: 'sleepmode', title: 'Режим сна', glyph: 'moon', soon: 'Поможет держать ровное время отхода ко сну.' },
 ];
@@ -111,16 +168,20 @@ export function AssistantCarousel({
   advice,
   adviceLabel,
   coffee,
+  food,
 }: {
   slides: readonly AssistantSlide[];
   advice: string | null;
   adviceLabel: string;
   coffee: (CoffeeWindow & { nowMinute: number }) | null;
+  food: FoodCycle | null;
 }) {
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
   const inner = width - spacing.md * 4;
-  const shown = SLIDES.filter((card) => slides.includes(card.key) && (card.key !== 'coffee' || coffee));
+  const shown = SLIDES.filter(
+    (card) => slides.includes(card.key) && (card.key !== 'coffee' || coffee) && (card.key !== 'food' || food),
+  );
   const pages = 1 + shown.length;
 
   return (
@@ -161,6 +222,8 @@ export function AssistantCarousel({
               </View>
               {card.soon ? (
                 <Text style={styles.text}>{card.soon}</Text>
+              ) : card.key === 'food' ? (
+                food && <FoodBody food={food} width={inner} />
               ) : (
                 coffee && <CoffeeBody coffee={coffee} nowMinute={coffee.nowMinute} width={inner} />
               )}
@@ -207,6 +270,13 @@ const styles = StyleSheet.create({
   poweredBy: { color: colors.textFaint, fontSize: 11, textAlign: 'right' },
   flex: { flex: 1 },
   bodyGap: { gap: spacing.sm },
+  mode: { color: colors.accent, fontSize: 16, fontWeight: '500' },
+  meals: { flexDirection: 'row', gap: spacing.lg },
+  meal: { gap: 1 },
+  mealTime: { color: colors.text, fontSize: 17, fontVariant: ['tabular-nums'] },
+  mealTitle: { color: colors.textFaint, fontSize: 12 },
+  autophagy: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
+  autophagyText: { color: colors.textMuted, fontSize: 14, lineHeight: 20, flexShrink: 1 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.track },
   dotOn: { backgroundColor: colors.accent },

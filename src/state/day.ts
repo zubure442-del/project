@@ -3,13 +3,16 @@ import {
   ADVICE_LABEL,
   buildTemplateReport,
   coffeeWindow,
+  foodCycle,
   formatMinute,
   type CoffeeInput,
   type CoffeeWindow,
+  type FoodCycle,
   type Report,
   type ReportMode,
 } from '../domain';
 import { recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
+import { foodInput } from './food';
 
 /** Если данные свежее десяти минут, к кольцу не идём. */
 export const CACHE_FRESH_MS = 10 * 60 * 1000;
@@ -160,15 +163,17 @@ export function coffeeInput(days: DaySnapshot[], now = new Date()): CoffeeInput 
 }
 
 /** Рекомендательные карточки «Сегодня» в карусели «AI Ассистент», по порядку. */
-export type AssistantSlide = 'advice' | 'coffee' | 'food' | 'endurance' | 'sleepmode';
+export type AssistantSlide = 'advice' | 'food' | 'coffee' | 'endurance' | 'sleepmode';
 /** Карточки «Скоро»: показываются вместе с остальными рекомендациями. */
-export const SOON_SLIDES = ['food', 'endurance', 'sleepmode'] as const;
+export const SOON_SLIDES = ['endurance', 'sleepmode'] as const;
 
-/** Рекомендательный слой «Сегодня»: совет, кофейное окно и карточки «Скоро». */
+/** Рекомендательный слой «Сегодня»: совет, цикл питания, кофейное окно и карточки «Скоро». */
 export interface Recommendations {
   advice: Report | null;
   /** null — оценки сна за сегодня нет, карточки нет. */
   coffee: (CoffeeWindow & { nowMinute: number }) | null;
+  /** «Цикл питания» стоит раньше кофейного окна; null — оценки сна за сегодня нет. */
+  food: FoodCycle | null;
   slides: AssistantSlide[];
 }
 
@@ -181,10 +186,18 @@ export function recommendationsFor(state: VueloState, date: string, now = new Da
   if (date !== todayKey(now)) return null;
   const input = coffeeInput(state.days, now);
   const coffee = input ? { ...coffeeWindow(input), nowMinute: input.nowMinute } : null;
+  const meals = foodInput(state, now);
+  const food = meals ? foodCycle(meals) : null;
   return {
     advice: adviceFor(state, date, now),
     coffee,
-    slides: ['advice', ...(coffee ? (['coffee'] as const) : []), ...SOON_SLIDES],
+    food,
+    slides: [
+      'advice',
+      ...(food ? (['food'] as const) : []),
+      ...(coffee ? (['coffee'] as const) : []),
+      ...SOON_SLIDES,
+    ],
   };
 }
 

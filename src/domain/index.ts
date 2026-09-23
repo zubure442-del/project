@@ -11,6 +11,7 @@ export * from './organism';
 export * from './step-noise';
 export * from './distance';
 export * from './coffee';
+export * from './food';
 export * from './relay';
 export * from './trend';
 export * from './sleep-hr';

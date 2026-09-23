@@ -37,20 +37,11 @@ export const FOOD_SCHEDULE = {
 
 export type FoodMode = 'base' | 'recovery' | 'hyper';
 
-/** Названия режимов и короткая строка под названием. */
-export const FOOD_MODE: Record<FoodMode, { title: string; text: string }> = {
-  base: {
-    title: 'Базовый режим',
-    text: 'Ночная глюкоза в вашем обычном коридоре, сон восстановил силы. Два приёма пищи с равным перерывом.',
-  },
-  recovery: {
-    title: 'Режим восстановления',
-    text: 'Сон или ночная глюкоза ниже обычного. Три приёма пищи, первый — вскоре после подъёма.',
-  },
-  hyper: {
-    title: 'Подозрение на гипергликемию',
-    text: 'Ночная глюкоза заметно выше вашей обычной при хорошем сне. Два приёма с длинным перерывом.',
-  },
+/** Названия режимов. Длинного объяснения на карточке нет: место дороже. */
+export const FOOD_MODE: Record<FoodMode, { title: string }> = {
+  base: { title: 'Базовый режим' },
+  recovery: { title: 'Режим восстановления' },
+  hyper: { title: 'Подозрение на гипергликемию' },
 };
 
 /** Фиксированный текст кнопки «i» рядом со счётчиком аутофагии. Про пользу, без формул и чисел. */
@@ -164,19 +155,20 @@ export function autophagyMinutes(input: { fastingStart: number; firstMeal: numbe
 const HOUR_FORMS = ['час', 'часа', 'часов'] as const;
 const MINUTE_FORMS = ['минута', 'минуты', 'минут'] as const;
 
-/** Хвост счётчика: одинаковый и при нуле, и при трёх часах сорока минутах. */
-export const AUTOPHAGY_SUFFIX = 'аутофагии по итогам ночного отдыха';
+/** Мелкая подпись под крупным числом часов. */
+export const AUTOPHAGY_CAPTION = 'аутофагии за ночь';
 
-/** «3 часа 40 минут аутофагии по итогам ночного отдыха» либо «0 часов аутофагии по итогам ночного отдыха». */
-export function autophagyText(minutes: number): string {
-  if (minutes <= 0) return `0 ${pluralRu(0, HOUR_FORMS)} ${AUTOPHAGY_SUFFIX}`;
+/** Крупное значение счётчика: «3 часа 40 минут», «41 минута», «0 часов». */
+export function autophagyValue(minutes: number): string {
+  if (minutes <= 0) return `0 ${pluralRu(0, HOUR_FORMS)}`;
   const h = Math.floor(minutes / 60);
   const m = Math.round(minutes % 60);
-  const parts = [
+  return [
     h > 0 ? `${h} ${pluralRu(h, HOUR_FORMS)}` : null,
     m > 0 ? `${m} ${pluralRu(m, MINUTE_FORMS)}` : null,
-  ].filter(Boolean);
-  return `${parts.join(' ')} ${AUTOPHAGY_SUFFIX}`;
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 export interface FoodInput {
@@ -198,7 +190,6 @@ export interface FoodInput {
 export interface FoodCycle {
   mode: FoodMode;
   title: string;
-  text: string;
   meals: FoodMeal[];
   /** Отрезок голодания для таймлайна. */
   fastingStart: number;
@@ -206,7 +197,8 @@ export interface FoodCycle {
   glucose: number | null;
   baseline: number | null;
   autophagy: number;
-  autophagyText: string;
+  /** «3 часа 40 минут» — крупной строкой; подпись под ней — AUTOPHAGY_CAPTION. */
+  autophagyValue: string;
   nowMinute: number;
 }
 
@@ -219,14 +211,13 @@ export function foodCycle(input: FoodInput): FoodCycle {
   return {
     mode,
     title: FOOD_MODE[mode].title,
-    text: FOOD_MODE[mode].text,
     meals,
     fastingStart: input.fastingStart,
     firstMeal,
     glucose: input.glucose,
     baseline: input.baseline,
     autophagy,
-    autophagyText: autophagyText(autophagy),
+    autophagyValue: autophagyValue(autophagy),
     nowMinute: input.nowMinute,
   };
 }

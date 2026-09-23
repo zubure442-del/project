@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   AUTOPHAGY_AFTER_HOURS,
+  AUTOPHAGY_CAPTION,
   FASTING_LOOKBACK_HOURS,
   FOOD_MODE,
   FOOD_SCHEDULE,
   FOOD_SLEEP_OK,
   autophagyMinutes,
-  autophagyText,
+  autophagyValue,
   fastingStart,
   foodCycle,
   foodMeals,
@@ -125,15 +126,15 @@ describe('СИНТЕТИЧЕСКИЕ: точка отсчёта голодани
 
   it('меньше двенадцати часов без еды — ноль часов', () => {
     expect(autophagyMinutes({ fastingStart: 0, firstMeal: 600, nowMinute: 300 })).toBe(0);
-    // Хвост одинаковый при любом значении, в том числе при нуле.
-    expect(autophagyText(0)).toBe('0 часов аутофагии по итогам ночного отдыха');
-    expect(autophagyText(-30)).toBe('0 часов аутофагии по итогам ночного отдыха');
+    expect(autophagyValue(0)).toBe('0 часов');
+    expect(autophagyValue(-30)).toBe('0 часов');
   });
 
-  it('формат счётчика', () => {
-    expect(autophagyText(220)).toBe('3 часа 40 минут аутофагии по итогам ночного отдыха');
-    expect(autophagyText(60)).toBe('1 час аутофагии по итогам ночного отдыха');
-    expect(autophagyText(41)).toBe('41 минута аутофагии по итогам ночного отдыха');
+  it('формат крупного значения: под ним отдельной строкой «аутофагии за ночь»', () => {
+    expect(autophagyValue(220)).toBe('3 часа 40 минут');
+    expect(autophagyValue(60)).toBe('1 час');
+    expect(autophagyValue(41)).toBe('41 минута');
+    expect(AUTOPHAGY_CAPTION).toBe('аутофагии за ночь');
   });
 });
 
@@ -154,6 +155,6 @@ describe('СИНТЕТИЧЕСКИЕ: карточка целиком', () => {
     expect(card.meals).toHaveLength(2);
     // 11:00 − (−2:00) = 13 часов без еды: час аутофагии.
     expect(card.autophagy).toBe(60);
-    expect(card.autophagyText).toContain('аутофагии');
+    expect(card.autophagyValue).toBe('1 час');
   });
 });

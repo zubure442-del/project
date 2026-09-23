@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { ADVICE_LABEL, AUTOPHAGY_INFO, coffeeClock, type CoffeeWindow, type FoodCycle } from '../domain';
+import { ADVICE_LABEL, AUTOPHAGY_CAPTION, AUTOPHAGY_INFO, coffeeClock, type CoffeeWindow, type FoodCycle } from '../domain';
 import type { AssistantSlide } from '../state/day';
 import { InfoButton } from './Sheet';
 import { SparkIcon } from './TabIcons';
@@ -19,6 +19,8 @@ export const LIFEHACKS_LABEL = 'Лайфхаки';
 /** Стрелка-подсказка качается туда-обратно. */
 const NUDGE_MS = 700;
 const NUDGE_PX = 4;
+/** Отступ подписи приёма пищи от края шкалы, чтобы текст не срезался. */
+const LABEL_EDGE = 22;
 const ZONE_RED = withAlpha(colors.danger, 0.6);
 const ZONE_GREEN = '#5DBB8C';
 
@@ -135,55 +137,64 @@ function CoffeeBody({ coffee, nowMinute, width }: { coffee: CoffeeWindow; nowMin
 }
 
 /**
- * Таймлайн суток «Цикла питания»: серая полоса дня, на ней акцентом выделен отрезок
- * от точки отсчёта голодания до первого приёма пищи, метки приёмов и отметка «сейчас».
- * Точка отсчёта бывает вчерашней (отрицательные минуты) — тогда ось начинается с неё.
+ * Запас слева от первого приёма: шкала начинается чуть раньше завтрака, а не от точки отсчёта
+ * голодания. Само начало не подписано — это просто зелёный «хвост» паузы, которая уже идёт.
+ */
+const FOOD_LEAD_MIN = 90;
+
+/**
+ * Таймлайн «Цикла питания»: серая полоса дня, зелёным — пауза до первого приёма,
+ * точками — приёмы пищи, над каждой точкой мелко название и время. Отметки «сейчас» нет:
+ * карточка про план дня, а не про текущую минуту.
  */
 function FoodTimeline({ food, width }: { food: FoodCycle; width: number }) {
-  const from = Math.min(0, food.fastingStart);
-  const span = 1440 - from;
-  const x = (m: number) => ((Math.min(1440, Math.max(from, m)) - from) / span) * width;
-  const barY = 14;
-  const fastingTo = Math.max(food.fastingStart, Math.min(food.firstMeal, 1440));
+  const last = food.meals[food.meals.length - 1].minute;
+  const from = food.firstMeal - FOOD_LEAD_MIN;
+  const to = Math.max(1440, last + FOOD_LEAD_MIN);
+  const x = (m: number) => ((Math.min(to, Math.max(from, m)) - from) / (to - from)) * width;
+  // Подписи не должны уезжать за края карточки.
+  const label = (m: number) => Math.min(width - LABEL_EDGE, Math.max(LABEL_EDGE, x(m)));
+  const barY = 44;
+
   return (
     <View pointerEvents="none">
-      <Svg width={width} height={46}>
+      <Svg width={width} height={barY + 14}>
         <Rect x={0} y={barY} width={width} height={10} rx={5} fill={colors.track} />
-        {/* Голодание: от точки отсчёта до первого приёма. */}
-        <Rect x={x(food.fastingStart)} y={barY} width={Math.max(2, x(fastingTo) - x(food.fastingStart))} height={10} rx={5} fill={ZONE_GREEN} />
+        {/* Пауза без еды: от начала шкалы до первого приёма. */}
+        <Rect x={0} y={barY} width={x(food.firstMeal)} height={10} rx={5} fill={ZONE_GREEN} />
         {food.meals.map((meal) => (
-          <Circle key={meal.title} cx={x(meal.minute)} cy={barY + 5} r={4.5} fill={colors.accent} />
+          <SvgText key={`n-${meal.title}`} x={label(meal.minute)} y={14} fill={colors.textFaint} fontSize={10} textAnchor="middle">
+            {meal.title}
+          </SvgText>
         ))}
-        <Line x1={x(food.nowMinute)} x2={x(food.nowMinute)} y1={barY - 6} y2={barY + 16} stroke={colors.text} strokeWidth={2} strokeLinecap="round" />
-        <SvgText x={Math.max(18, x(food.fastingStart))} y={44} fill={colors.textFaint} fontSize={11} textAnchor="middle">
-          {coffeeClock(food.fastingStart)}
-        </SvgText>
-        <SvgText x={Math.min(width - 18, x(fastingTo))} y={44} fill={colors.textFaint} fontSize={11} textAnchor="middle">
-          {coffeeClock(fastingTo)}
-        </SvgText>
+        {food.meals.map((meal) => (
+          <SvgText key={`t-${meal.title}`} x={label(meal.minute)} y={31} fill={colors.text} fontSize={13} textAnchor="middle">
+            {coffeeClock(meal.minute)}
+          </SvgText>
+        ))}
+        {food.meals.map((meal) => (
+          <Circle key={`d-${meal.title}`} cx={x(meal.minute)} cy={barY + 5} r={5} fill={colors.accent} />
+        ))}
       </Svg>
     </View>
   );
 }
 
-/** «Цикл питания»: режим дня, отрезок голодания на таймлайне, приёмы пищи и счётчик аутофагии. */
+/**
+ * «Цикл питания»: режим дня, таймлайн приёмов пищи и крупный счётчик паузы без еды.
+ * Длинных объяснений на карточке нет — они в «i» рядом со счётчиком.
+ */
 function FoodBody({ food, width }: { food: FoodCycle; width: number }) {
   return (
-    <View style={styles.bodyGap}>
+    <View style={styles.foodBody}>
       <Text style={styles.mode}>{food.title}</Text>
-      <Text style={styles.text}>{food.text}</Text>
       <FoodTimeline food={food} width={width} />
-      <View style={styles.meals}>
-        {food.meals.map((meal) => (
-          <View key={meal.title} style={styles.meal}>
-            <Text style={styles.mealTime}>{coffeeClock(meal.minute)}</Text>
-            <Text style={styles.mealTitle}>{meal.title}</Text>
-          </View>
-        ))}
-      </View>
       <View style={styles.autophagy}>
-        <Text style={styles.autophagyText}>{food.autophagyText}</Text>
-        <InfoButton title={AUTOPHAGY_INFO.title} text={AUTOPHAGY_INFO.text} />
+        <Text style={styles.autophagyValue}>{food.autophagyValue}</Text>
+        <View style={styles.autophagyRow}>
+          <Text style={styles.autophagyCaption}>{AUTOPHAGY_CAPTION}</Text>
+          <InfoButton title={AUTOPHAGY_INFO.title} text={AUTOPHAGY_INFO.text} />
+        </View>
       </View>
     </View>
   );
@@ -327,13 +338,12 @@ const styles = StyleSheet.create({
   hintText: { color: colors.accent, fontSize: 13, fontWeight: '500' },
   flex: { flex: 1 },
   bodyGap: { gap: spacing.sm },
+  foodBody: { flex: 1, justifyContent: 'space-between', paddingBottom: spacing.sm },
   mode: { color: colors.accent, fontSize: 16, fontWeight: '500' },
-  meals: { flexDirection: 'row', gap: spacing.lg },
-  meal: { gap: 1 },
-  mealTime: { color: colors.text, fontSize: 17, fontVariant: ['tabular-nums'] },
-  mealTitle: { color: colors.textFaint, fontSize: 12 },
-  autophagy: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
-  autophagyText: { color: colors.textMuted, fontSize: 14, lineHeight: 20, flexShrink: 1 },
+  autophagy: { alignItems: 'center', gap: 2 },
+  autophagyValue: { color: colors.text, fontSize: 26, fontWeight: '300', letterSpacing: -0.5 },
+  autophagyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  autophagyCaption: { color: colors.textFaint, fontSize: 12 },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.track },
   dotOn: { backgroundColor: colors.accent },

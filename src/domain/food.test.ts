@@ -125,8 +125,9 @@ describe('СИНТЕТИЧЕСКИЕ: точка отсчёта голодани
 
   it('меньше двенадцати часов без еды — ноль часов', () => {
     expect(autophagyMinutes({ fastingStart: 0, firstMeal: 600, nowMinute: 300 })).toBe(0);
-    expect(autophagyText(0)).toBe('0 часов');
-    expect(autophagyText(-30)).toBe('0 часов');
+    // Хвост одинаковый при любом значении, в том числе при нуле.
+    expect(autophagyText(0)).toBe('0 часов аутофагии по итогам ночного отдыха');
+    expect(autophagyText(-30)).toBe('0 часов аутофагии по итогам ночного отдыха');
   });
 
   it('формат счётчика', () => {

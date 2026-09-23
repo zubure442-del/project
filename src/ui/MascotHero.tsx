@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { formatCount, type RelayView } from '../domain';
+import { DAY_PROGRESS_LABEL, formatCount, type RelayView } from '../domain';
 import { Mascot, mascotHeightFor } from './Mascot';
 import { RELAY_TITLE, RelaySheet, StreakBadge } from './Relay';
 import { colors, radius, spacing } from './theme';
@@ -45,7 +45,7 @@ export function MascotHero({
           <View style={styles.side}>
             {total !== null ? (
               <>
-                <Text style={styles.label}>Итог дня</Text>
+                <Text style={styles.label}>{DAY_PROGRESS_LABEL}</Text>
                 <Text style={styles.total}>{total}</Text>
                 <Text style={styles.of}>из 100</Text>
               </>

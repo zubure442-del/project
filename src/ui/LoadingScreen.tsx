@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { NOT_MEDICAL_DEVICE, RING_NOT_FOUND_ADVICE, RING_NOT_FOUND_TITLE } from '../domain';
+import { DAY_PROGRESS_LABEL, NOT_MEDICAL_DEVICE, RING_NOT_FOUND_ADVICE, RING_NOT_FOUND_TITLE } from '../domain';
 import {
   STAGE_FADE_MS,
   canLeave,
@@ -72,7 +72,7 @@ export const LOADING_TIPS: { title: string; lines: { icon: TipIcon; text: string
     // Рисунок: кольцо с AI-чипом собирает данные в итог.
     title: 'Персональный совет',
     lines: [
-      { icon: 'total', text: 'Итог дня складывается из всех трёх показателей' },
+      { icon: 'total', text: `${DAY_PROGRESS_LABEL} складывается из всех трёх показателей` },
       { icon: 'spark', text: 'Совет — о том, что сегодня проседает сильнее всего' },
       { icon: 'phone', text: 'Всё считается на телефоне, данные никуда не уходят' },
     ],

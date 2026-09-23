@@ -7,7 +7,7 @@ import {
   formatDistance,
   tabInfoText,
 } from '../../domain';
-import { findDay, trendFor, useTabDay, useVuelo } from '../../state';
+import { findDay, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
 import {
   DayBanner,
@@ -17,14 +17,13 @@ import {
   HeroRing,
   Screen,
   Skeleton,
-  TrendInline,
   colors,
   spacing,
   styles as ui,
   Stat,
 } from '../../ui';
 
-/** Кольцо в шапке меньше прежнего: справа от него стоит динамика. */
+/** Кольцо в шапке: справа от него шаги, дистанция и калории — сравнения с неделей здесь нет. */
 const HERO_RING = 150;
 
 export default function ActivityTab() {
@@ -55,7 +54,6 @@ export default function ActivityTab() {
       <View style={styles.hero}>
         <HeroRing value={day?.scores.activity ?? null} size={HERO_RING} />
         <View style={styles.heroSide}>
-          <TrendInline trend={trendFor(state, 'activity', picked)} />
           {day?.steps != null ? (
             <View>
               {/* Сначала шаги и дистанция, чуть ниже — сожжённые калории. */}

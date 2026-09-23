@@ -1,10 +1,9 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { formatCount, type RelayView, type Trend } from '../domain';
+import { formatCount, type RelayView } from '../domain';
 import { Mascot, mascotHeightFor } from './Mascot';
 import { RELAY_TITLE, RelaySheet, StreakBadge } from './Relay';
-import { TrendInline } from './WeekTrend';
 import { colors, radius, spacing } from './theme';
 
 /** Высота фигуры: не больше этого и не шире доли экрана, чтобы рядом поместилось число. */
@@ -12,7 +11,8 @@ const MASCOT_MAX_HEIGHT = 230;
 const MASCOT_WIDTH_SHARE = 0.55;
 
 /**
- * Блок маскота на «Сегодня»: фигура и итог дня рядом (не поверх). Под ними узкая полоска:
+ * Блок маскота на «Сегодня»: фигура и прогресс дня рядом (не поверх). Сравнения с неделей
+ * здесь нет — только само число. Под ними узкая полоска:
  * огонёк серии и шаги к норме — коротко, без лишних надписей. Вся область — от ушей до ног
  * вместе с числом и полоской — нажимается и открывает «Эстафету от Лиса»: там баланс орехов,
  * прогресс дня, лестница серии и магазин.
@@ -20,12 +20,10 @@ const MASCOT_WIDTH_SHARE = 0.55;
 export function MascotHero({
   total,
   relay,
-  trend,
   width,
 }: {
   total: number | null;
   relay: RelayView;
-  trend: Trend;
   width: number;
 }) {
   const [open, setOpen] = useState(false);
@@ -50,9 +48,6 @@ export function MascotHero({
                 <Text style={styles.label}>Итог дня</Text>
                 <Text style={styles.total}>{total}</Text>
                 <Text style={styles.of}>из 100</Text>
-                <View style={styles.trend}>
-                  <TrendInline trend={trend} />
-                </View>
               </>
             ) : null}
           </View>
@@ -79,7 +74,6 @@ const styles = StyleSheet.create({
   label: { color: colors.textMuted, fontSize: 15 },
   total: { color: colors.text, fontSize: 76, fontWeight: '200', letterSpacing: -2, fontVariant: ['tabular-nums'] },
   of: { color: colors.textFaint, fontSize: 13, marginTop: -4 },
-  trend: { marginTop: spacing.sm, alignItems: 'center' },
   strip: {
     flexDirection: 'row',
     alignItems: 'center',

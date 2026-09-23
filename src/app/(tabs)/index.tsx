@@ -1,6 +1,6 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import type { ComponentId } from '../../domain';
-import { adviceLabel, findDay, recommendationsFor, relayFor, trendFor, useTabDay, useVuelo } from '../../state';
+import { adviceLabel, findDay, recommendationsFor, relayFor, useTabDay, useVuelo } from '../../state';
 import {
   DayBanner,
   COMPONENT_LABEL,
@@ -35,7 +35,7 @@ export default function TodayTab() {
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       {isToday && complete ? (
-        <MascotHero total={day?.total ?? null} relay={relay} trend={trendFor(state, 'total', picked)} width={width} />
+        <MascotHero total={day?.total ?? null} relay={relay} width={width} />
       ) : !complete ? (
         // Пока день неполный, на экране только объяснение: ни маскота, ни полоски эстафеты.
         <Calibration today={isToday} returning={state.hadCompleteDay} />

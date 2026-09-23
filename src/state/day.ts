@@ -1,5 +1,14 @@
 import { dateKey, nowRingTs } from '../codec';
-import { buildTemplateReport, coffeeWindow, formatMinute, type CoffeeInput, type CoffeeWindow, type Report, type ReportMode } from '../domain';
+import {
+  ADVICE_LABEL,
+  buildTemplateReport,
+  coffeeWindow,
+  formatMinute,
+  type CoffeeInput,
+  type CoffeeWindow,
+  type Report,
+  type ReportMode,
+} from '../domain';
 import { recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
 
 /** Если данные свежее десяти минут, к кольцу не идём. */
@@ -224,11 +233,11 @@ export function adviceFor(state: VueloState, date: string, now = new Date()): Re
   return buildTemplateReport({ mode, score: scoreOf(day), recentTemplateIds: recentTemplateIds(state.reports) });
 }
 
-/** Подпись над советом: «Совет», «Совет · вчера», «Совет · 18 сентября». */
+/** Подпись над советом: «Мнение Лиса», «Мнение Лиса · вчера», «Мнение Лиса · 18 сентября». */
 export function adviceLabel(date: string, now = new Date()): string {
   const view = { yesterday: shiftDate(todayKey(now), -1) };
-  if (date === todayKey(now)) return 'Совет';
-  return date === view.yesterday ? 'Совет · вчера' : `Совет · ${dayPhrase(date, view)}`;
+  if (date === todayKey(now)) return ADVICE_LABEL;
+  return date === view.yesterday ? `${ADVICE_LABEL} · вчера` : `${ADVICE_LABEL} · ${dayPhrase(date, view)}`;
 }
 
 const clock = (ms: number) => {

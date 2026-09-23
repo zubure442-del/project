@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { coffeeClock, type CoffeeWindow } from '../domain';
+import { ADVICE_LABEL, coffeeClock, type CoffeeWindow } from '../domain';
 import type { AssistantSlide } from '../state/day';
 import { SparkIcon } from './TabIcons';
 import { colors, radius, spacing, withAlpha } from './theme';
@@ -145,7 +145,7 @@ export function AssistantCarousel({
                 </View>
               </>
             ) : (
-              <Text style={styles.text}>Совет появится, когда день будет полным</Text>
+              <Text style={styles.text}>{ADVICE_LABEL} появится, когда день будет полным</Text>
             )}
             <View style={styles.flex} />
             <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
@@ -168,10 +168,12 @@ export function AssistantCarousel({
           </View>
         ))}
       </ScrollView>
+      {/* Под карточкой — точки и шеврон: пока есть куда листать, видно, что карусель свайпается. */}
       <View style={styles.dots}>
         {Array.from({ length: pages }, (_, i) => (
           <View key={i} style={[styles.dot, i === page && styles.dotOn]} />
         ))}
+        <Text style={[styles.swipe, page >= pages - 1 && styles.swipeOff]}>›</Text>
       </View>
     </View>
   );
@@ -208,4 +210,6 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.track },
   dotOn: { backgroundColor: colors.accent },
+  swipe: { color: colors.textFaint, fontSize: 18, lineHeight: 18, marginLeft: 2, marginTop: -6 },
+  swipeOff: { opacity: 0 },
 });

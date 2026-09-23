@@ -75,16 +75,16 @@ describe('СИНТЕТИЧЕСКИЕ: совет только для полно�
     expect(adviceFor(state([day(TODAY, false)]), TODAY, NOON)).toBeNull();
   });
 
-  it('пока сегодня неполный, совет за вчера сохраняется и подписан «Совет · вчера»', () => {
+  it('пока сегодня неполный, совет за вчера сохраняется и подписан «Мнение Лиса · вчера»', () => {
     const next = applySyncResult(state([]), emptySyncResult(), null, NOON);
     // Пустая выгрузка: полных дней нет — и советов нет.
     expect(next.reports).toEqual([]);
     const withDays = { ...state([day(YESTERDAY, true), day(TODAY, false)]) };
     const advice = adviceFor(withDays, YESTERDAY, NOON);
     expect(advice?.text).toBeTruthy();
-    expect(adviceLabel(YESTERDAY, NOON)).toBe('Совет · вчера');
-    expect(adviceLabel(TODAY, NOON)).toBe('Совет');
-    expect(adviceLabel('2026-09-18', NOON)).toBe('Совет · 18 сентября');
+    expect(adviceLabel(YESTERDAY, NOON)).toBe('Мнение Лиса · вчера');
+    expect(adviceLabel(TODAY, NOON)).toBe('Мнение Лиса');
+    expect(adviceLabel('2026-09-18', NOON)).toBe('Мнение Лиса · 18 сентября');
   });
 
   it('выданный совет берётся из истории: текст не меняется при перезапуске', () => {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 import { ADVICE_LABEL, AUTOPHAGY_INFO, coffeeClock, type CoffeeWindow, type FoodCycle } from '../domain';
 import type { AssistantSlide } from '../state/day';
@@ -17,9 +17,10 @@ import { colors, radius, spacing, withAlpha } from './theme';
 export const ASSISTANT_HEIGHT = 300;
 /** Подпись-подсказка в правом нижнем углу карточки: дальше по свайпу — готовые подсказки. */
 export const LIFEHACKS_LABEL = 'Лайфхаки';
-/** Стрелка-подсказка качается туда-обратно. */
-const NUDGE_MS = 700;
-const NUDGE_PX = 4;
+/** Один проход волны по шевронам. */
+const SWIPE_MS = 1600;
+/** Насколько шеврон уезжает вправо на своём такте. */
+const SWIPE_PX = 3;
 const ZONE_RED = withAlpha(colors.danger, 0.6);
 const ZONE_GREEN = '#5DBB8C';
 
@@ -49,40 +50,58 @@ function CardGlyph({ name }: { name: Glyph }) {
 }
 
 /**
- * «Лайфхаки ›» в правом нижнем углу первой карточки: подсказка, что карусель листается.
- * Стрелка мягко качается вправо; при системном «Уменьшении движения» стоит на месте.
+ * Подсказка «Лайфхаки» в правом нижнем углу первой карточки.
+ *
+ * Нарочно не выглядит кнопкой: тот же приглушённый цвет и кегль, что у подписи модели слева,
+ * без акцента, фона и рамки, и не принимает нажатия. Движение — два тонких шеврона, которые
+ * по очереди светлеют и уезжают вправо: так читается жест свайпа, а не «нажми сюда».
+ * При системном «Уменьшении движения» шевроны просто стоят.
  */
 function SwipeHint() {
   const reduce = useReduceMotion();
-  const shift = useSharedValue(0);
+  const phase = useSharedValue(0);
+
   useEffect(() => {
     if (reduce) {
-      shift.value = 0;
+      phase.value = 0;
       return;
     }
-    shift.value = withRepeat(
-      withSequence(withTiming(NUDGE_PX, { duration: NUDGE_MS }), withTiming(0, { duration: NUDGE_MS })),
-      -1,
-      false,
-    );
-  }, [reduce, shift]);
-  const style = useAnimatedStyle(() => ({ transform: [{ translateX: shift.value }] }));
+    phase.value = 0;
+    phase.value = withRepeat(withTiming(1, { duration: SWIPE_MS, easing: Easing.linear }), -1, false);
+  }, [phase, reduce]);
+
+  /** Волна по шевронам: каждый светлеет со своим сдвигом. */
+  const wave = (value: number, shift: number) => {
+    'worklet';
+    const d = (value - shift + 1) % 1;
+    return Math.max(0, 1 - Math.abs(d - 0.2) / 0.25);
+  };
+  const first = useAnimatedStyle(() => {
+    const k = wave(phase.value, 0);
+    return { opacity: 0.35 + 0.65 * k, transform: [{ translateX: k * SWIPE_PX }] };
+  });
+  const second = useAnimatedStyle(() => {
+    const k = wave(phase.value, 0.18);
+    return { opacity: 0.35 + 0.65 * k, transform: [{ translateX: k * SWIPE_PX }] };
+  });
 
   return (
-    <View style={styles.hint}>
+    <View style={styles.hint} pointerEvents="none">
       <Text style={styles.hintText}>{LIFEHACKS_LABEL}</Text>
-      <Animated.View style={style}>
-        <Svg width={16} height={16} viewBox="0 0 24 24">
-          <Path
-            d="M9 5l7 7-7 7"
-            stroke={colors.accent}
-            strokeWidth={2.2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            fill="none"
-          />
-        </Svg>
-      </Animated.View>
+      {[first, second].map((style, i) => (
+        <Animated.View key={i} style={[styles.chevron, style]}>
+          <Svg width={10} height={12} viewBox="0 0 10 12">
+            <Path
+              d="M2.5 1.5L7 6l-4.5 4.5"
+              stroke={colors.textFaint}
+              strokeWidth={1.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+          </Svg>
+        </Animated.View>
+      ))}
     </View>
   );
 }
@@ -296,8 +315,9 @@ const styles = StyleSheet.create({
   small: { color: colors.textFaint, fontSize: 12 },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   poweredBy: { color: colors.textFaint, fontSize: 11 },
-  hint: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  hintText: { color: colors.accent, fontSize: 13, fontWeight: '500' },
+  hint: { flexDirection: 'row', alignItems: 'center' },
+  hintText: { color: colors.textFaint, fontSize: 11, marginRight: 3 },
+  chevron: { marginLeft: -3 },
   flex: { flex: 1 },
   bodyGap: { gap: spacing.sm },
   foodBody: { flex: 1, gap: spacing.md },

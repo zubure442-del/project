@@ -1,13 +1,28 @@
 import Svg, { Path } from 'react-native-svg';
 import { colors } from './theme';
 
-/** Орех (жёлудь): валюта «Эстафеты». Линии 24×24 в акцентном цвете, как остальные значки. */
+/**
+ * Орех (жёлудь): валюта «Эстафеты». Плотная шляпка с черенком сверху и заострённое книзу
+ * ядро — прежний контурный кружок рядом с числом читался как вторая цифра «0».
+ */
 export function NutGlyph({ size = 16, color = colors.accent }: { size?: number; color?: string }) {
-  const p = { stroke: color, strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  const p = { stroke: color, strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Path {...p} fill={color} fillOpacity={0.25} d="M4.5 10.5C4.5 7 7.8 4.8 12 4.8s7.5 2.2 7.5 5.7z" />
-      <Path {...p} fill="none" d="M12 4.8V2.6M6.3 10.5c0 5 2.6 8.6 5.7 10.4 3.1-1.8 5.7-5.4 5.7-10.4" />
+      {/* Черенок и шляпка — сплошные: по ним жёлудь узнаётся даже в 11 px. */}
+      <Path {...p} fill="none" d="M12 4.4V2.2" />
+      <Path
+        {...p}
+        fill={color}
+        d="M5.4 8.9c0-2.6 2.9-4.5 6.6-4.5s6.6 1.9 6.6 4.5c0 .6-.5 1.1-1.1 1.1H6.5c-.6 0-1.1-.5-1.1-1.1z"
+      />
+      {/* Ядро: книзу сходится в носик — силуэт несимметричный, на ноль не похож. */}
+      <Path
+        {...p}
+        fill={color}
+        fillOpacity={0.3}
+        d="M6.9 11.5h10.2c0 4.3-1.7 7.7-4.2 9.9a1.4 1.4 0 0 1-1.8 0c-2.5-2.2-4.2-5.6-4.2-9.9z"
+      />
     </Svg>
   );
 }

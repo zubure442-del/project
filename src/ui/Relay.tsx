@@ -28,12 +28,27 @@ export function NutsPill({ nuts, big = false }: { nuts: number; big?: boolean })
   );
 }
 
-/** Огонёк с числом дней серии. */
-export function StreakBadge({ streak }: { streak: number }) {
+/** Огонёк с числом дней серии. В листе к числу добавляется единица («дней»), в полоске — нет. */
+export function StreakBadge({ streak, withUnit = false }: { streak: number; withUnit?: boolean }) {
   return (
     <View style={styles.streak} accessibilityLabel={`Серия: ${streak} ${pluralRu(streak, DAY_FORMS)} подряд`}>
       <FlameGlyph size={16} color={streak > 0 ? colors.accent : colors.textFaint} />
-      <Text style={[styles.streakText, streak === 0 && styles.faint]}>{streak}</Text>
+      <Text style={[styles.streakText, streak === 0 && styles.faint]}>
+        {streak}
+        {withUnit ? <Text style={styles.streakUnit}> {pluralRu(streak, DAY_FORMS)}</Text> : null}
+      </Text>
+    </View>
+  );
+}
+
+/** «+5 орехов» — награда за выполненную норму дня. */
+export function RewardPill() {
+  return (
+    <View style={styles.reward}>
+      <NutGlyph size={13} />
+      <Text style={styles.rewardText}>
+        +{RELAY_DAY_REWARD} {pluralRu(RELAY_DAY_REWARD, NUT_FORMS)}
+      </Text>
     </View>
   );
 }
@@ -55,7 +70,11 @@ export function RelayBody({ relay }: { relay: RelayView }) {
         </View>
       ) : (
         <View style={styles.block}>
-          <Text style={styles.label}>До нормы осталось</Text>
+          {/* Рядом с остатком шагов сразу видно, ради чего цель. */}
+          <View style={styles.headRow}>
+            <Text style={styles.label}>До нормы осталось</Text>
+            <RewardPill />
+          </View>
           <Text style={styles.big}>
             {formatCount(relay.remaining)}
             <Text style={styles.unit}> {pluralRu(relay.remaining, STEP_FORMS)}</Text>
@@ -70,12 +89,10 @@ export function RelayBody({ relay }: { relay: RelayView }) {
         {formatCount(relay.steps)} из {formatCount(relay.norm)}
       </Text>
 
+      {/* Серия — одной строкой: подпись, огонёк и число. Прежний текст «N дней подряд» повторял значок. */}
       <View style={styles.streakRow}>
         <Text style={styles.label}>Серия</Text>
-        <Text style={styles.streakDays}>
-          {relay.streak} {pluralRu(relay.streak, DAY_FORMS)} подряд
-        </Text>
-        <StreakBadge streak={relay.streak} />
+        <StreakBadge streak={relay.streak} withUnit />
       </View>
       <View style={styles.ladder}>
         {relay.ladder.map((rung) => (
@@ -133,8 +150,18 @@ const styles = StyleSheet.create({
   barFill: { height: '100%', borderRadius: 3 },
   faintText: { color: colors.textFaint, fontSize: 12, fontVariant: ['tabular-nums'] },
   faint: { color: colors.textFaint },
-  streakRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
-  streakDays: { color: colors.text, fontSize: 15, flex: 1 },
+  headRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  streakRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginTop: spacing.md },
+  reward: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: withAlpha(colors.accent, 0.12),
+    borderRadius: radius.pill,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+  },
+  rewardText: { color: colors.accent, fontSize: 13, fontWeight: '600' },
   ladder: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.sm },
   rung: { alignItems: 'center', gap: 6, flex: 1 },
   circle: {
@@ -172,6 +199,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   streakText: { color: colors.accent, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  streakUnit: { color: colors.accent, fontSize: 13, fontWeight: '400' },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',

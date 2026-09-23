@@ -1,77 +1,158 @@
 /**
- * Пульс во сне: сначала своя норма, потом возраст.
+ * Пульс во сне: минимальный и средний за ночь против строго своей нормы.
  *
- * Главное — как сегодняшняя ночь выглядит на фоне ваших обычных ночей (среднее за всё,
- * что есть в кэше). Возрастные границы — вторая проверка, на случай стабильно высокого
- * или низкого пульса. Тексты короткие: «Пульс в норме» либо предложение проконсультироваться.
- * Диагнозов приложение не ставит.
+ * Норма — по последним семи дням из кэша (тот же принцип, что у личного ориентира «Организма»:
+ * окно семь дней, нужно не меньше пяти ночей с данными). Возрастные границы больше не
+ * используются: у каждого свой ночной коридор, и сравнивать честнее с ним.
+ *
+ * По двум отклонениям — минимума и среднего — ночь попадает в одну из категорий, а у каждой
+ * категории свой коэффициент к оценке сна. Диагнозов приложение не ставит.
  */
 
-/** Возрастные границы пульса во сне, уд/мин: `from` — с какого возраста действует.
- * Взяты от общепринятого пульса покоя 60–100 с поправкой на ночное снижение (10–15 %);
- * у подростков пульс выше, чем у взрослых. */
-export const SLEEP_HR_BANDS = [
-  { from: 0, min: 50, max: 95 },
-  { from: 14, min: 48, max: 90 },
-  { from: 18, min: 45, max: 85 },
-] as const;
-
-/** Сколько ночей нужно, чтобы считать своей нормой. */
+/** Окно своей нормы: последние семь дней. */
+export const SLEEP_HR_BASELINE_DAYS = 7;
+/** Меньше стольких ночей с данными — нормы нет и сравнивать не с чем. */
 export const SLEEP_HR_BASELINE_MIN_NIGHTS = 5;
-/** Насколько нужно отойти от своей нормы, чтобы сказать об этом, уд/мин. */
-export const SLEEP_HR_PERSONAL_DEVIATION = 10;
+/** Меньше стольких замеров за ночь — ночь в расчёт не берём. */
+export const SLEEP_HR_MIN_SAMPLES = 3;
 
-export const SLEEP_HR_TEXT = {
-  normal: 'Пульс в норме',
-  above: 'Выше обычного — стоит проконсультироваться с врачом',
-  below: 'Ниже обычного — стоит проконсультироваться с врачом',
-  unknown: 'Наберётся несколько ночей — сравним с вашей нормой',
-} as const;
+/** Отклонение в пределах этого — «как обычно», уд/мин. */
+export const NORMAL_RANGE = 3;
+/** С этого отклонения говорим о заметном сдвиге, уд/мин. */
+export const SIGNIFICANT_THRESHOLD = 4;
 
-export const sleepHrBand = (age: number): { min: number; max: number } => {
-  const band = [...SLEEP_HR_BANDS].reverse().find((b) => age >= b.from) ?? SLEEP_HR_BANDS[0];
-  return { min: band.min, max: band.max };
+/** Оценка сна не может выйти за 100 очков, какой бы ни был коэффициент. */
+export const SLEEP_SCORE_MAX = 100;
+
+/** Пульс за одну ночь: минимальный и средний, уд/мин. */
+export interface NightHr {
+  min: number;
+  avg: number;
+}
+
+export type SleepHrCategory = 'normal' | 'load' | 'deep' | 'uneven' | 'spike' | 'mixed';
+
+/** Названия, тексты и коэффициенты к оценке сна — справочная таблица категорий. */
+export const SLEEP_HR_CATEGORY: Record<SleepHrCategory, { title: string; text: string; factor: number }> = {
+  normal: {
+    title: 'Всё в норме',
+    text:
+      'Показатели сердца в пределах вашего личного коридора. Организм восстанавливался в стабильном темпе. ' +
+      'Накануне нервная система не подвергалась избыточному стрессу, а режим сна и питания был оптимальным.',
+    factor: 1,
+  },
+  load: {
+    title: 'Повышенная нагрузка',
+    text:
+      'Пульс ночью был стабильно выше нормы. Сердце работало в усиленном режиме и не получило отдыха. ' +
+      'Обычно такой скачок вызывают алкоголь, поздний ужин, тренировка менее чем за 3 часа до сна или начинающаяся простуда.',
+    factor: 0.75,
+  },
+  deep: {
+    title: 'Режим глубокого расслабления',
+    text:
+      'Сердце достигло глубокого уровня покоя. Пульс опустился ощутимо ниже привычных значений. ' +
+      'Это происходит при идеальных условиях сна (прохлада, тишина) либо указывает на глубокое физическое истощение после затяжного стресса.',
+    factor: 1.25,
+  },
+  uneven: {
+    title: 'Неравномерный ночной ритм',
+    text:
+      'Зафиксирован рваный ритм. Общая нагрузка на сердце за ночь оставалась высокой, а пульс резко упал только под утро. ' +
+      'Организм первую половину ночи боролся со стрессом (переваривал позднюю пищу или алкоголь) и не успел отдохнуть целиком.',
+    factor: 0.5,
+  },
+  spike: {
+    title: 'Резкое ускорение под утро',
+    text:
+      'В целом ночь прошла спокойно, но ваш минимальный пульс оказался завышен. Это означает, что под утро произошел резкий всплеск активности сердца. ' +
+      'Такой эффект дают яркие или тревожные сновидения, либо резкий подъем по будильнику.',
+    factor: 1,
+  },
+  // Запасной случай: минимум близок к норме, а среднее ушло далеко (или наоборот на границе).
+  // Ни одна из пяти картин не подходит, поэтому вывода не делаем и оценку сна не трогаем.
+  mixed: {
+    title: 'Смешанная картина',
+    text:
+      'Минимальный и средний пульс разошлись с вашей нормой по-разному, и однозначной картины за эту ночь не складывается. ' +
+      'Посмотрим на следующие ночи.',
+    factor: 1,
+  },
 };
 
-/** Своя норма — среднее по всем ночам в кэше; ночей мало — нормы нет. */
-export function sleepHrBaseline(nights: readonly number[]): number | null {
-  if (nights.length < SLEEP_HR_BASELINE_MIN_NIGHTS) return null;
-  return Math.round(nights.reduce((a, b) => a + b, 0) / nights.length);
-}
-
-export type SleepHrVerdict = 'normal' | 'above' | 'below' | 'unknown';
-
-export interface SleepHrView {
-  value: number;
-  /** Возрастные границы; null — год рождения не заполнен. */
-  band: { min: number; max: number } | null;
-  /** Своя норма по прошлым ночам; null — ночей пока мало. */
-  baseline: number | null;
-  verdict: SleepHrVerdict;
-  text: string;
-  /** Стоит проконсультироваться с врачом: заметное отклонение. */
-  seeDoctor: boolean;
-}
+/** Текст, пока своей нормы ещё нет. */
+export const SLEEP_HR_NO_BASELINE_TEXT = 'Наберётся несколько ночей — сравним с вашей нормой';
 
 /**
- * Вывод по пульсу во сне. Сначала сравнение со своей нормой, потом — с возрастными границами.
- * Нет ни нормы, ни года рождения — сравнивать не с чем, вывода не делаем.
+ * Своя норма: среднее минимумов и среднее средних по ночам последних семи дней.
+ * Ночей меньше минимума — нормы нет.
  */
-export function sleepHrCheck(value: number | null, age: number | null, baseline: number | null): SleepHrView | null {
-  if (value === null) return null;
-  const band = age === null ? null : sleepHrBand(age);
-  const base = { value, band, baseline };
-  const verdictOf = (): SleepHrVerdict => {
-    if (baseline !== null) {
-      if (value - baseline >= SLEEP_HR_PERSONAL_DEVIATION) return 'above';
-      if (baseline - value >= SLEEP_HR_PERSONAL_DEVIATION) return 'below';
-    }
-    if (band) {
-      if (value > band.max) return 'above';
-      if (value < band.min) return 'below';
-    }
-    return baseline === null && band === null ? 'unknown' : 'normal';
+export function sleepHrBaseline(nights: readonly NightHr[]): NightHr | null {
+  const recent = nights.slice(-SLEEP_HR_BASELINE_DAYS);
+  if (recent.length < SLEEP_HR_BASELINE_MIN_NIGHTS) return null;
+  const mean = (values: number[]) => Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+  return { min: mean(recent.map((n) => n.min)), avg: mean(recent.map((n) => n.avg)) };
+}
+
+/** Пульс за ночь по замерам: минимум и среднее. Замеров мало — ночи нет. */
+export function nightHrOf(values: readonly number[]): NightHr | null {
+  if (values.length < SLEEP_HR_MIN_SAMPLES) return null;
+  return {
+    min: Math.round(Math.min(...values)),
+    avg: Math.round(values.reduce((a, b) => a + b, 0) / values.length),
   };
-  const verdict = verdictOf();
-  return { ...base, verdict, text: SLEEP_HR_TEXT[verdict], seeDoctor: verdict === 'above' || verdict === 'below' };
+}
+
+const within = (delta: number) => Math.abs(delta) <= NORMAL_RANGE;
+const above = (delta: number) => delta >= SIGNIFICANT_THRESHOLD;
+const below = (delta: number) => delta <= -SIGNIFICANT_THRESHOLD;
+
+/** Категория ночи по отклонениям минимума и среднего от своей нормы. Порядок проверок важен. */
+export function sleepHrCategory(deltaMin: number, deltaAvg: number): SleepHrCategory {
+  if (within(deltaMin) && within(deltaAvg)) return 'normal';
+  if (above(deltaMin) && above(deltaAvg)) return 'load';
+  if (below(deltaMin) && (below(deltaAvg) || within(deltaAvg))) return 'deep';
+  if (below(deltaMin) && above(deltaAvg)) return 'uneven';
+  if (above(deltaMin) && (below(deltaAvg) || within(deltaAvg))) return 'spike';
+  return 'mixed';
+}
+
+/** Коэффициент к оценке сна: нормы нет — единица, оценку не трогаем. */
+export const sleepHrFactor = (category: SleepHrCategory | null): number =>
+  category === null ? 1 : SLEEP_HR_CATEGORY[category].factor;
+
+/** Оценка сна с коэффициентом: сверху всегда не больше 100 очков. */
+export const applySleepHrFactor = (base: number, factor: number): number =>
+  Math.min(SLEEP_SCORE_MAX, Math.max(0, base * factor));
+
+/** «-2 от вашей нормы», «+5 от вашей нормы», «как обычно». */
+export const sleepHrDeltaText = (delta: number): string =>
+  delta === 0 ? 'как обычно' : `${delta > 0 ? '+' : '-'}${Math.abs(delta)} от вашей нормы`;
+
+export interface SleepHrView {
+  night: NightHr;
+  /** Своя норма по последним семи дням; null — ночей пока мало. */
+  baseline: NightHr | null;
+  /** Отклонения от нормы, уд/мин; null — нормы нет. */
+  deltaMin: number | null;
+  deltaAvg: number | null;
+  category: SleepHrCategory | null;
+  /** Название категории; null — нормы ещё нет. */
+  title: string | null;
+  text: string;
+  /** Коэффициент к оценке сна. */
+  factor: number;
+}
+
+/** Что показать на карточке «Пульс во сне» и какой коэффициент применить к оценке сна. */
+export function sleepHrCheck(night: NightHr | null, baseline: NightHr | null): SleepHrView | null {
+  if (night === null) return null;
+  if (baseline === null) {
+    return { night, baseline: null, deltaMin: null, deltaAvg: null, category: null, title: null, text: SLEEP_HR_NO_BASELINE_TEXT, factor: 1 };
+  }
+  const deltaMin = night.min - baseline.min;
+  const deltaAvg = night.avg - baseline.avg;
+  const category = sleepHrCategory(deltaMin, deltaAvg);
+  const { title, text, factor } = SLEEP_HR_CATEGORY[category];
+  return { night, baseline, deltaMin, deltaAvg, category, title, text, factor };
 }

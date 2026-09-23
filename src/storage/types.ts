@@ -21,6 +21,8 @@ export interface DaySnapshot {
   restingHr: number | null;
   /** Откуда взят пульс: ночь (пульс покоя) или минимум за день. */
   restingHrSource: 'night' | 'day' | null;
+  /** Пульс за ночь: минимальный и средний. null — замеров за ночь мало. У старых сводок поля нет. */
+  nightHr?: { min: number; avg: number } | null;
   /** Какие входы «организма» посчитаны — для объяснения в интерфейсе. */
   stateInputs: { hrv: boolean; restingHr: boolean; spo2: boolean };
   heart: DayPoint[];

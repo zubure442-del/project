@@ -1,6 +1,7 @@
 import { STEPS_DEFAULT_NORM } from './steps-norm';
 import type { Sample } from '../codec/types';
 import { smoothHeart } from './heart';
+import { applySleepHrFactor } from './sleep-hr';
 import type { SleepSession } from './sleep';
 import { sleepMinutes } from './sleep';
 
@@ -140,6 +141,8 @@ export interface SleepContext {
   previousWakes?: number[];
   /** Оценка активности вчера. */
   yesterdayActivity?: number | null;
+  /** Коэффициент по ночному пульсу (см. sleep-hr.ts). Своей нормы нет — 1. */
+  nightHrFactor?: number;
 }
 
 /** Минута пробуждения — конец ночи по «настенному» времени кольца. */
@@ -148,14 +151,18 @@ export const wakeMinuteOf = (night: SleepSession) => {
   return minute < 0 ? minute + 1440 : minute;
 };
 
-/** Оценка сна = clamp(0.45 × длительность + 0.25 × глубина + 0.20 × пробуждение + бонус, 0, 100). */
+/**
+ * Оценка сна = clamp(0.45 × длительность + 0.25 × глубина + 0.20 × пробуждение + бонус, 0, 100),
+ * а сверху — коэффициент по ночному пульсу (sleep-hr.ts). Итог всё равно не больше 100 очков.
+ */
 export function sleepScore(night: SleepSession | null, context: SleepContext = {}): number | null {
   if (!night || sleepMinutes(night) === 0) return null;
   const weighted =
     SLEEP_WEIGHTS.duration * sleepDurationScore(night) +
     SLEEP_WEIGHTS.depth * sleepDepthScore(night) +
     SLEEP_WEIGHTS.wake * wakeComponent(wakeMinuteOf(night), context.previousWakes);
-  return clampScore(weighted + activitySleepBonus(context.yesterdayActivity));
+  const base = clampScore(weighted + activitySleepBonus(context.yesterdayActivity));
+  return applySleepHrFactor(base, context.nightHrFactor ?? 1);
 }
 
 export function cardioPoints(heart: Sample[], age: number | null): number | null {

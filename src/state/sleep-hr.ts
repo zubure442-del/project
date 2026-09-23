@@ -1,16 +1,19 @@
-import { sleepHrBaseline, sleepHrCheck, type SleepHrView } from '../domain';
-import { profileAge, type VueloState } from '../storage';
+import { SLEEP_HR_BASELINE_DAYS, sleepHrBaseline, sleepHrCheck, type NightHr, type SleepHrView } from '../domain';
+import type { VueloState } from '../storage';
 import { findDay } from './day';
 
+const shiftDate = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+
 /**
- * Пульс во сне за выбранный день и что про него написать: своя норма по всем ночам
- * в кэше, а во вторую очередь — возрастные границы (возраст из профиля).
+ * Пульс во сне за выбранный день: минимальный и средний против своей нормы.
+ * Норма — по ночам семи предыдущих дней из кэша, ровно как при пересчёте сводок (build.ts),
+ * поэтому карточка и коэффициент оценки сна всегда говорят об одном и том же.
  */
-export function sleepHrFor(state: VueloState, date: string, now = new Date()): SleepHrView | null {
-  const day = findDay(state.days, date);
-  const value = day?.restingHrSource === 'night' ? day.restingHr : null;
-  const nights = state.days
-    .filter((d) => d.date < date && d.restingHrSource === 'night' && d.restingHr !== null)
-    .map((d) => d.restingHr as number);
-  return sleepHrCheck(value, profileAge(state.profile, now), sleepHrBaseline(nights));
+export function sleepHrFor(state: VueloState, date: string): SleepHrView | null {
+  const night = findDay(state.days, date)?.nightHr ?? null;
+  const nights = Array.from({ length: SLEEP_HR_BASELINE_DAYS }, (_, i) =>
+    findDay(state.days, shiftDate(date, -(SLEEP_HR_BASELINE_DAYS - i)))?.nightHr ?? null,
+  ).filter((v): v is NightHr => v !== null);
+  return sleepHrCheck(night, sleepHrBaseline(nights));
 }

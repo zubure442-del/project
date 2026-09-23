@@ -14,6 +14,12 @@ import {
   buildSleepSessions,
   cleanHeart,
   computeDayScore,
+  nightHrOf,
+  sleepHrBaseline,
+  sleepHrCategory,
+  sleepHrFactor,
+  type NightHr,
+  SLEEP_HR_BASELINE_DAYS,
   hypnogramSegments,
   nightForDate,
   resolveStepNorm,
@@ -105,9 +111,15 @@ export function buildSnapshots(
   const today = dateKey(nowTs);
   const nowMinute = minuteOfDay(nowTs);
 
-  // Дни — по порядку: сну нужны подъёмы прошлых дней и вчерашняя оценка активности.
+  // Дни — по порядку: сну нужны подъёмы прошлых дней, вчерашняя оценка активности
+  // и своя норма ночного пульса по семи предыдущим дням.
   const wakeByDate = new Map<string, number>();
   const activityByDate = new Map<string, number | null>();
+  const nightHrByDate = new Map<string, NightHr>();
+  /** Ночи семи предыдущих дней — из них считается своя норма ночного пульса. */
+  const nightsBefore = (date: string): NightHr[] =>
+    Array.from({ length: SLEEP_HR_BASELINE_DAYS }, (_, i) => nightHrByDate.get(shiftDate(date, -(SLEEP_HR_BASELINE_DAYS - i))))
+      .filter((v): v is NightHr => v !== undefined);
 
   const snapshots: DaySnapshot[] = [];
   for (const date of [...dates].sort()) {
@@ -127,14 +139,23 @@ export function buildSnapshots(
       toPoints(spo2),
     );
     const organism = dayOrganism(samples, baselineFor(date), date === today ? nowMinute : 1440);
+    // Пульс во сне: минимум и среднее по замерам внутри ночи, дальше — сравнение со своей нормой.
+    const nightHr = night
+      ? nightHrOf(heart.filter((s) => s.ts >= night.start && s.ts <= night.end).map((s) => s.value))
+      : null;
+    const baselineHr = sleepHrBaseline(nightsBefore(date));
+    const category =
+      nightHr && baselineHr ? sleepHrCategory(nightHr.min - baselineHr.min, nightHr.avg - baselineHr.avg) : null;
     const sleepContext = {
       previousWakes: Array.from({ length: CONSISTENCY_WINDOW_DAYS }, (_, i) => wakeByDate.get(shiftDate(date, -(i + 1))))
         .filter((v): v is number => v !== undefined),
       yesterdayActivity: activityByDate.get(shiftDate(date, -1)) ?? null,
+      nightHrFactor: sleepHrFactor(category),
     };
     const stepNorm = resolveStepNorm(norms[date], historyBefore(date), sleepScore(night, sleepContext));
     const score = computeDayScore({ night, steps, heart, age, organism: organism.score, stepGoal: stepNorm.value, sleepContext });
     if (night) wakeByDate.set(date, wakeMinuteOf(night));
+    if (nightHr) nightHrByDate.set(date, nightHr);
     activityByDate.set(date, score.activity.score);
 
     snapshots.push({
@@ -145,6 +166,7 @@ export function buildSnapshots(
       sleep: night ? { totalMin: sleepMinutes(night), deepMin: night.deepMin, lightMin: night.lightMin } : null,
       restingHr: score.restingHr?.value ?? null,
       restingHrSource: score.restingHr?.source ?? null,
+      nightHr,
       stateInputs: {
         hrv: samples.some((x) => x.hrv !== null),
         restingHr: samples.some((x) => x.pulse !== null),

@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { ADVICE_LABEL, AUTOPHAGY_CAPTION, AUTOPHAGY_INFO, coffeeClock, type CoffeeWindow, type FoodCycle } from '../domain';
+import { ADVICE_LABEL, AUTOPHAGY_INFO, coffeeClock, type CoffeeWindow, type FoodCycle } from '../domain';
 import type { AssistantSlide } from '../state/day';
+import { Flask } from './Flask';
 import { InfoButton } from './Sheet';
 import { SparkIcon } from './TabIcons';
 import { useReduceMotion } from './motion';
@@ -19,8 +20,6 @@ export const LIFEHACKS_LABEL = 'Лайфхаки';
 /** Стрелка-подсказка качается туда-обратно. */
 const NUDGE_MS = 700;
 const NUDGE_PX = 4;
-/** Отступ подписи приёма пищи от края шкалы, чтобы текст не срезался. */
-const LABEL_EDGE = 22;
 const ZONE_RED = withAlpha(colors.danger, 0.6);
 const ZONE_GREEN = '#5DBB8C';
 
@@ -137,64 +136,24 @@ function CoffeeBody({ coffee, nowMinute, width }: { coffee: CoffeeWindow; nowMin
 }
 
 /**
- * Запас слева от первого приёма: шкала начинается чуть раньше завтрака, а не от точки отсчёта
- * голодания. Само начало не подписано — это просто зелёный «хвост» паузы, которая уже идёт.
+ * «Цикл питания»: режим дня, слева — во сколько сегодня есть, справа — колба.
+ * Таймлайна и счётчика часов на карточке нет: уровень воды показывает то же самое нагляднее,
+ * а объяснение живёт в «i» в шапке карточки.
  */
-const FOOD_LEAD_MIN = 90;
-
-/**
- * Таймлайн «Цикла питания»: серая полоса дня, зелёным — пауза до первого приёма,
- * точками — приёмы пищи, над каждой точкой мелко название и время. Отметки «сейчас» нет:
- * карточка про план дня, а не про текущую минуту.
- */
-function FoodTimeline({ food, width }: { food: FoodCycle; width: number }) {
-  const last = food.meals[food.meals.length - 1].minute;
-  const from = food.firstMeal - FOOD_LEAD_MIN;
-  const to = Math.max(1440, last + FOOD_LEAD_MIN);
-  const x = (m: number) => ((Math.min(to, Math.max(from, m)) - from) / (to - from)) * width;
-  // Подписи не должны уезжать за края карточки.
-  const label = (m: number) => Math.min(width - LABEL_EDGE, Math.max(LABEL_EDGE, x(m)));
-  const barY = 44;
-
-  return (
-    <View pointerEvents="none">
-      <Svg width={width} height={barY + 14}>
-        <Rect x={0} y={barY} width={width} height={10} rx={5} fill={colors.track} />
-        {/* Пауза без еды: от начала шкалы до первого приёма. */}
-        <Rect x={0} y={barY} width={x(food.firstMeal)} height={10} rx={5} fill={ZONE_GREEN} />
-        {food.meals.map((meal) => (
-          <SvgText key={`n-${meal.title}`} x={label(meal.minute)} y={14} fill={colors.textFaint} fontSize={10} textAnchor="middle">
-            {meal.title}
-          </SvgText>
-        ))}
-        {food.meals.map((meal) => (
-          <SvgText key={`t-${meal.title}`} x={label(meal.minute)} y={31} fill={colors.text} fontSize={13} textAnchor="middle">
-            {coffeeClock(meal.minute)}
-          </SvgText>
-        ))}
-        {food.meals.map((meal) => (
-          <Circle key={`d-${meal.title}`} cx={x(meal.minute)} cy={barY + 5} r={5} fill={colors.accent} />
-        ))}
-      </Svg>
-    </View>
-  );
-}
-
-/**
- * «Цикл питания»: режим дня, таймлайн приёмов пищи и крупный счётчик паузы без еды.
- * Длинных объяснений на карточке нет — они в «i» рядом со счётчиком.
- */
-function FoodBody({ food, width }: { food: FoodCycle; width: number }) {
+function FoodBody({ food }: { food: FoodCycle }) {
   return (
     <View style={styles.foodBody}>
       <Text style={styles.mode}>{food.title}</Text>
-      <FoodTimeline food={food} width={width} />
-      <View style={styles.autophagy}>
-        <Text style={styles.autophagyValue}>{food.autophagyValue}</Text>
-        <View style={styles.autophagyRow}>
-          <Text style={styles.autophagyCaption}>{AUTOPHAGY_CAPTION}</Text>
-          <InfoButton title={AUTOPHAGY_INFO.title} text={AUTOPHAGY_INFO.text} />
+      <View style={styles.foodRow}>
+        <View style={styles.meals}>
+          {food.meals.map((meal) => (
+            <View key={meal.title} style={styles.meal}>
+              <Text style={styles.mealTitle}>{meal.title}</Text>
+              <Text style={styles.mealTime}>{coffeeClock(meal.minute)}</Text>
+            </View>
+          ))}
         </View>
+        {food.flask ? <Flask fill={food.flask.fill} stage={food.flask.stage} /> : null}
       </View>
     </View>
   );
@@ -204,13 +163,15 @@ interface Slide {
   key: Exclude<AssistantSlide, 'advice'>;
   title: string;
   glyph: Glyph;
+  /** «i» в шапке карточки: объяснение простыми словами. */
+  info?: { title: string; text: string };
   /** Заглушка «Скоро» с одной декоративной строкой. */
   soon?: string;
 }
 
 const SLIDES: Slide[] = [
   // «Цикл питания» стоит раньше кофейного окна.
-  { key: 'food', title: 'Цикл питания', glyph: 'food' },
+  { key: 'food', title: 'Цикл питания', glyph: 'food', info: AUTOPHAGY_INFO },
   { key: 'coffee', title: 'Кофейное окно', glyph: 'coffee' },
   { key: 'endurance', title: 'Пик выносливости', glyph: 'bolt', soon: 'Покажет время дня, когда тренировки даются легче.' },
   { key: 'sleepmode', title: 'Режим сна', glyph: 'moon', soon: 'Поможет держать ровное время отхода ко сну.' },
@@ -285,12 +246,13 @@ export function AssistantCarousel({
               <View style={styles.head}>
                 <CardGlyph name={card.glyph} />
                 <Text style={styles.title}>{card.title}</Text>
+                {card.info ? <InfoButton title={card.info.title} text={card.info.text} /> : null}
                 {card.soon ? <Text style={styles.soon}>Скоро</Text> : null}
               </View>
               {card.soon ? (
                 <Text style={styles.text}>{card.soon}</Text>
               ) : card.key === 'food' ? (
-                food && <FoodBody food={food} width={inner} />
+                food && <FoodBody food={food} />
               ) : (
                 coffee && <CoffeeBody coffee={coffee} nowMinute={coffee.nowMinute} width={inner} />
               )}
@@ -338,12 +300,13 @@ const styles = StyleSheet.create({
   hintText: { color: colors.accent, fontSize: 13, fontWeight: '500' },
   flex: { flex: 1 },
   bodyGap: { gap: spacing.sm },
-  foodBody: { flex: 1, justifyContent: 'space-between', paddingBottom: spacing.sm },
+  foodBody: { flex: 1, gap: spacing.md },
   mode: { color: colors.accent, fontSize: 16, fontWeight: '500' },
-  autophagy: { alignItems: 'center', gap: 2 },
-  autophagyValue: { color: colors.text, fontSize: 26, fontWeight: '300', letterSpacing: -0.5 },
-  autophagyRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  autophagyCaption: { color: colors.textFaint, fontSize: 12 },
+  foodRow: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  meals: { gap: spacing.md },
+  meal: { gap: 1 },
+  mealTitle: { color: colors.textFaint, fontSize: 12 },
+  mealTime: { color: colors.text, fontSize: 22, fontWeight: '300', fontVariant: ['tabular-nums'] },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.track },
   dotOn: { backgroundColor: colors.accent },

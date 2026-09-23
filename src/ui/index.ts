@@ -28,3 +28,4 @@ export * from './Mascot';
 export * from './MascotHero';
 export * from './RewardIcons';
 export * from './motion';
+export * from './Flask';

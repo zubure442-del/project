@@ -4,10 +4,12 @@
  * Ночная глюкоза (замеры внутри сна, когда не было активности) за последние семь дней даёт
  * личную норму «натощак» — медиану, она устойчивее среднего к одиночным выбросам. Сегодняшняя
  * ночная глюкоза сравнивается с этой нормой, а вместе с индексом «Сон» выбирает режим дня.
- * Расписание строится от времени пробуждения. Не медицинская рекомендация и не диагноз.
+ * Расписание строится от времени пробуждения, а справа от него стоит колба (flask.ts).
+ * Не медицинская рекомендация и не диагноз.
  */
+import type { FlaskView } from './flask';
 import { STEP_MIN_PER_MIN } from './score';
-import { NOT_MEDICAL_DEVICE, pluralRu } from './texts';
+import { NOT_MEDICAL_DEVICE } from './texts';
 
 /** Окно личной нормы «глюкозы натощак»: последние семь дней. */
 export const FOOD_BASELINE_DAYS = 7;
@@ -18,10 +20,6 @@ export const FOOD_NORM_LOW_SHARE = -0.1;
 export const FOOD_NORM_HIGH_SHARE = 0.25;
 /** Выше этого индекса «Сон» ночь считается восстановившей. */
 export const FOOD_SLEEP_OK = 70;
-/** Точку отсчёта голодания ищем в эти часы перед засыпанием. */
-export const FASTING_LOOKBACK_HOURS = 4;
-/** Часы аутофагии начинаются после этого времени без еды. */
-export const AUTOPHAGY_AFTER_HOURS = 12;
 /** Замер считается ночным, если рядом (± эти минуты) не было активных минут. */
 export const FOOD_QUIET_WINDOW_MIN = 5;
 
@@ -44,17 +42,19 @@ export const FOOD_MODE: Record<FoodMode, { title: string }> = {
   hyper: { title: 'Подозрение на гипергликемию' },
 };
 
-/** Фиксированный текст кнопки «i» рядом со счётчиком аутофагии. Про пользу, без формул и чисел. */
+/** Фиксированный текст кнопки «i» на карточке. Про пользу и про колбу, без формул и чисел. */
 export const AUTOPHAGY_INFO = {
-  title: 'Что такое аутофагия',
+  title: 'Что показывает колба',
   text:
-    'Аутофагия — естественная уборка внутри клеток: в паузе между приёмами пищи организм разбирает ' +
-    'и пускает в дело накопившийся внутренний мусор. В меру это полезно — и «Цикл питания» помогает ' +
-    'держать эту меру.\n\n' +
-    'Каждый день мы смотрим на ваш сон и ночные показатели и подбираем режим. Организм восстановился — ' +
-    'оставляем спокойную паузу и два приёма пищи, чтобы уборка успела пройти. Не восстановился — паузу ' +
-    'убираем и предлагаем есть чаще: в такие дни организму нужнее силы, а не голодание.\n\n' +
-    'Счётчик показывает, сколько длится сегодняшняя пауза. ' + NOT_MEDICAL_DEVICE,
+    'Колба — это путь, который организм проходит между приёмами пищи. Сначала «Переработка»: ' +
+    'он разбирается с тем, что вы съели. Потом «Жиросжигание»: энергия берётся из запасов. ' +
+    'И наверху «Аутофагия» — естественная уборка внутри клеток, когда организм разбирает ' +
+    'и пускает в дело накопившийся внутренний мусор.\n\n' +
+    'Вода поднимается тем быстрее, чем спокойнее держится ваш сахар и чем больше вы двигались. ' +
+    'В меру такая пауза полезна — и «Цикл питания» помогает держать эту меру: когда организм ' +
+    'восстановился, мы оставляем паузу длиннее, а когда нет — предлагаем есть чаще, потому что ' +
+    'в такие дни ему нужнее силы.\n\n' +
+    'Доверху колба не наполняется никогда: это не соревнование и не задача на день. ' + NOT_MEDICAL_DEVICE,
 } as const;
 
 /** Медиана: устойчивее среднего к одиночным выбросам. */
@@ -81,21 +81,6 @@ export function nightGlucose(
   return points
     .filter((p) => p.glucose !== null && asleep(p.m) && quiet(p.m))
     .map((p) => p.glucose as number);
-}
-
-/**
- * Точка отсчёта голодания: минута с самой низкой глюкозой в последние четыре часа перед сном.
- * Замеров в этом окне нет — считаем от засыпания. Минуты — на оси дня пробуждения,
- * вечер накануне отрицательный.
- */
-export function fastingStart(
-  points: readonly { m: number; glucose: number | null }[],
-  sleepOnset: number,
-): number {
-  const from = sleepOnset - FASTING_LOOKBACK_HOURS * 60;
-  const inWindow = points.filter((p) => p.glucose !== null && p.m >= from && p.m <= sleepOnset);
-  if (!inWindow.length) return sleepOnset;
-  return inWindow.reduce((best, p) => ((p.glucose as number) < (best.glucose as number) ? p : best)).m;
 }
 
 /** Режим дня. Порядок проверок задан владельцем: гипергликемия → восстановление → базовый. */
@@ -143,34 +128,6 @@ export function foodMeals(mode: FoodMode, wakeMinute: number): FoodMeal[] {
   ];
 }
 
-/**
- * Часы аутофагии: от точки отсчёта голодания до «сейчас» (или до первого приёма, если он уже был)
- * минус двенадцать часов. Меньше нуля — ноль.
- */
-export function autophagyMinutes(input: { fastingStart: number; firstMeal: number; nowMinute: number }): number {
-  const until = input.nowMinute < input.firstMeal ? input.nowMinute : input.firstMeal;
-  return Math.max(0, until - input.fastingStart - AUTOPHAGY_AFTER_HOURS * 60);
-}
-
-const HOUR_FORMS = ['час', 'часа', 'часов'] as const;
-const MINUTE_FORMS = ['минута', 'минуты', 'минут'] as const;
-
-/** Мелкая подпись под крупным числом часов. */
-export const AUTOPHAGY_CAPTION = 'аутофагии за ночь';
-
-/** Крупное значение счётчика: «3 часа 40 минут», «41 минута», «0 часов». */
-export function autophagyValue(minutes: number): string {
-  if (minutes <= 0) return `0 ${pluralRu(0, HOUR_FORMS)}`;
-  const h = Math.floor(minutes / 60);
-  const m = Math.round(minutes % 60);
-  return [
-    h > 0 ? `${h} ${pluralRu(h, HOUR_FORMS)}` : null,
-    m > 0 ? `${m} ${pluralRu(m, MINUTE_FORMS)}` : null,
-  ]
-    .filter(Boolean)
-    .join(' ');
-}
-
 export interface FoodInput {
   /** Подъём сегодняшней ночи, минуты от полуночи. */
   wakeMinute: number;
@@ -182,8 +139,8 @@ export interface FoodInput {
   glucose: number | null;
   /** Личная норма «натощак» — медиана ночной глюкозы за семь дней; null — данных мало. */
   baseline: number | null;
-  /** Точка отсчёта голодания на оси сегодняшнего дня. */
-  fastingStart: number;
+  /** Колба: уровень и слой по глюкозе за сутки; null — замеров нет. */
+  flask: FlaskView | null;
   nowMinute: number;
 }
 
@@ -191,33 +148,23 @@ export interface FoodCycle {
   mode: FoodMode;
   title: string;
   meals: FoodMeal[];
-  /** Отрезок голодания для таймлайна. */
-  fastingStart: number;
-  firstMeal: number;
   glucose: number | null;
   baseline: number | null;
-  autophagy: number;
-  /** «3 часа 40 минут» — крупной строкой; подпись под ней — AUTOPHAGY_CAPTION. */
-  autophagyValue: string;
+  /** Колба справа от списка приёмов пищи; null — замеров глюкозы нет. */
+  flask: FlaskView | null;
   nowMinute: number;
 }
 
 /** Карточка «Цикл питания» целиком. */
 export function foodCycle(input: FoodInput): FoodCycle {
   const mode = foodMode({ sleepScore: input.sleepScore, glucose: input.glucose, baseline: input.baseline });
-  const meals = foodMeals(mode, input.wakeMinute);
-  const firstMeal = meals[0].minute;
-  const autophagy = autophagyMinutes({ fastingStart: input.fastingStart, firstMeal, nowMinute: input.nowMinute });
   return {
     mode,
     title: FOOD_MODE[mode].title,
-    meals,
-    fastingStart: input.fastingStart,
-    firstMeal,
+    meals: foodMeals(mode, input.wakeMinute),
     glucose: input.glucose,
     baseline: input.baseline,
-    autophagy,
-    autophagyValue: autophagyValue(autophagy),
+    flask: input.flask,
     nowMinute: input.nowMinute,
   };
 }

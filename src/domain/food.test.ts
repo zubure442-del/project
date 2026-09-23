@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AUTOPHAGY_AFTER_HOURS,
-  AUTOPHAGY_CAPTION,
-  FASTING_LOOKBACK_HOURS,
   FOOD_MODE,
   FOOD_SCHEDULE,
   FOOD_SLEEP_OK,
-  autophagyMinutes,
-  autophagyValue,
-  fastingStart,
   foodCycle,
   foodMeals,
   foodMode,
@@ -89,72 +83,21 @@ describe('СИНТЕТИЧЕСКИЕ: расписание приёмов пищ
   });
 });
 
-describe('СИНТЕТИЧЕСКИЕ: точка отсчёта голодания и аутофагия', () => {
-  const onset = -60; // уснул в 23:00 накануне
-
-  it('минимум глюкозы в последние четыре часа перед сном', () => {
-    const points = [
-      { m: -400, glucose: 4.2 }, // раньше окна
-      { m: -200, glucose: 5.5 },
-      { m: -120, glucose: 4.9 }, // минимум в окне
-      { m: 60, glucose: 4.4 }, // уже во сне
-    ];
-    expect(fastingStart(points, onset)).toBe(-120);
-    expect(FASTING_LOOKBACK_HOURS).toBe(4);
-  });
-
-  it('замеров в окне нет — считаем от засыпания', () => {
-    expect(fastingStart([{ m: -500, glucose: 4.2 }], onset)).toBe(onset);
-    expect(fastingStart([], onset)).toBe(onset);
-  });
-
-  it('часы аутофагии: от точки отсчёта до «сейчас» минус двенадцать', () => {
-    const start = -120;
-    const firstMeal = 12 * 60;
-    // 10:40 — это 640 минут; 640 − (−120) = 760 минут без еды, минус 12 часов = 40 минут.
-    expect(autophagyMinutes({ fastingStart: start, firstMeal, nowMinute: 640 })).toBe(40);
-    expect(AUTOPHAGY_AFTER_HOURS).toBe(12);
-  });
-
-  it('после первого приёма счётчик замирает на времени еды', () => {
-    const start = 0;
-    const firstMeal = 13 * 60;
-    const atMeal = autophagyMinutes({ fastingStart: start, firstMeal, nowMinute: firstMeal });
-    expect(autophagyMinutes({ fastingStart: start, firstMeal, nowMinute: 20 * 60 })).toBe(atMeal);
-    expect(atMeal).toBe(60);
-  });
-
-  it('меньше двенадцати часов без еды — ноль часов', () => {
-    expect(autophagyMinutes({ fastingStart: 0, firstMeal: 600, nowMinute: 300 })).toBe(0);
-    expect(autophagyValue(0)).toBe('0 часов');
-    expect(autophagyValue(-30)).toBe('0 часов');
-  });
-
-  it('формат крупного значения: под ним отдельной строкой «аутофагии за ночь»', () => {
-    expect(autophagyValue(220)).toBe('3 часа 40 минут');
-    expect(autophagyValue(60)).toBe('1 час');
-    expect(autophagyValue(41)).toBe('41 минута');
-    expect(AUTOPHAGY_CAPTION).toBe('аутофагии за ночь');
-  });
-});
-
 describe('СИНТЕТИЧЕСКИЕ: карточка целиком', () => {
-  it('собирает режим, расписание и счётчик', () => {
+  it('собирает режим, расписание и колбу', () => {
+    const flask = { stage: 'fat' as const, fill: 40, hours: 6, effectiveHours: 0, glucose: 4.6 };
     const card = foodCycle({
       wakeMinute: 7 * 60,
       sleepOnset: -60,
       sleepScore: 85,
       glucose: NORM,
       baseline: NORM,
-      fastingStart: -120,
+      flask,
       nowMinute: 11 * 60,
     });
     expect(card.mode).toBe('base');
     expect(card.title).toBe(FOOD_MODE.base.title);
-    expect(card.firstMeal).toBe(12 * 60);
-    expect(card.meals).toHaveLength(2);
-    // 11:00 − (−2:00) = 13 часов без еды: час аутофагии.
-    expect(card.autophagy).toBe(60);
-    expect(card.autophagyValue).toBe('1 час');
+    expect(card.meals.map((m) => m.minute)).toEqual([12 * 60, 12 * 60 + 330]);
+    expect(card.flask).toBe(flask);
   });
 });

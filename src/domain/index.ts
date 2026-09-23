@@ -15,3 +15,4 @@ export * from './food';
 export * from './relay';
 export * from './trend';
 export * from './sleep-hr';
+export * from './flask';

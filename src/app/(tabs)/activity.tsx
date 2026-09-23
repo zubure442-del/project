@@ -1,11 +1,13 @@
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import {
   TAB_INFO,
+  bodyOf,
   busiestHour,
   distanceMeters,
   formatCount,
   formatDistance,
   tabInfoText,
+  weekActivityLevel,
 } from '../../domain';
 import { findDay, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
@@ -27,7 +29,7 @@ import {
 const HERO_RING = 150;
 
 export default function ActivityTab() {
-  const { week, state, statusText, sync } = useVuelo();
+  const { week, state, statusText, sync, dayView } = useVuelo();
   const { width } = useWindowDimensions();
   const { date: picked, banner } = useTabDay();
   const day = findDay(state.days, picked);
@@ -38,6 +40,13 @@ export default function ActivityTab() {
   // Калории считаем сами для любого дня; нет биометрии — «—».
   const calories = day?.calories ?? null;
   const weekBars = week.map((w) => ({ date: w.date, value: w.day?.calories ?? null }));
+  // Оценка недели: средний расход по завершённым дням против коридора от базового обмена и цели.
+  const level = weekActivityLevel({
+    days: weekBars,
+    today: dayView.today,
+    body: bodyOf(state.profile),
+    goal: state.profile.goal,
+  });
   // Дистанция — от шагов после шумоподавления и роста из профиля; нет роста — не показываем.
   const distance = day?.steps != null && state.profile.heightCm !== null
     ? formatDistance(distanceMeters(day.steps, state.profile.heightCm))
@@ -84,7 +93,7 @@ export default function ActivityTab() {
         </View>
       </Card>
 
-      <CaloriesWeekCard days={weekBars} width={chartWidth} />
+      <CaloriesWeekCard days={weekBars} width={chartWidth} level={level} />
     </Screen>
   );
 }

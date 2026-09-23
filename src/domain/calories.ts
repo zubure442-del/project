@@ -110,3 +110,53 @@ export const KCAL_PER_PIZZA_SLICE = 250;
 
 /** Сколько кусков пиццы «стоит» такой расход: дробно, для частично закрашенного куска. */
 export const pizzaSlices = (kcal: number): number => kcal / KCAL_PER_PIZZA_SLICE;
+
+/**
+ * Насколько человек двигался за неделю — относительно его базового обмена и цели.
+ *
+ * Коридор активных калорий в день считается долей базового обмена (Mifflin–St Jeor, `bmr`),
+ * а сама доля зависит от цели из профиля. Ниже коридора — двигался мало, выше — слишком много:
+ * при верно выбранной цели перебор так же мешает, как и недобор.
+ */
+export type ActivityGoal = 'lose' | 'gain' | 'keep';
+
+/** Доли базового обмена: сколько активных калорий в день ждём при каждой цели. */
+export const ACTIVITY_CORRIDOR: Record<ActivityGoal, { from: number; to: number }> = {
+  lose: { from: 0.3, to: 0.45 },
+  keep: { from: 0.2, to: 0.35 },
+  gain: { from: 0.15, to: 0.25 },
+};
+
+export type ActivityLevel = 'low' | 'ideal' | 'high';
+
+/** Подписи под расходом за неделю. «Идеальная» — зелёная, остальные — красные. */
+export const ACTIVITY_LEVEL_TEXT: Record<ActivityLevel, string> = {
+  low: 'Низкая активность',
+  ideal: 'Идеальная активность',
+  high: 'Высокая активность',
+};
+
+/** Куда попал средний дневной расход относительно коридора цели. */
+export function activityLevel(perDay: number, body: Body, goal: ActivityGoal): ActivityLevel {
+  const corridor = ACTIVITY_CORRIDOR[goal];
+  const base = bmr(body);
+  if (perDay < base * corridor.from) return 'low';
+  if (perDay > base * corridor.to) return 'high';
+  return 'ideal';
+}
+
+/**
+ * Оценка недели: средний расход по ЗАВЕРШЁННЫМ дням (сегодняшний ещё идёт и среднее занижает).
+ * Нет биометрии, цели или ни одного завершённого дня с расходом — оценки нет.
+ */
+export function weekActivityLevel(input: {
+  days: readonly { date: string; value: number | null }[];
+  today: string;
+  body: Body | null;
+  goal: ActivityGoal | null;
+}): ActivityLevel | null {
+  if (!input.body || input.goal === null) return null;
+  const done = input.days.filter((d) => d.date < input.today && d.value !== null).map((d) => d.value as number);
+  if (!done.length) return null;
+  return activityLevel(done.reduce((a, b) => a + b, 0) / done.length, input.body, input.goal);
+}

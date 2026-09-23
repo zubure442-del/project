@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { formatCount, pizzaSlices, pluralRu, weekCalories } from '../domain';
+import { ACTIVITY_LEVEL_TEXT, formatCount, pizzaSlices, pluralRu, weekCalories, type ActivityLevel } from '../domain';
 import { PizzaSlice } from './Pizza';
 import { Card } from './Screen';
 import { Sheet } from './Sheet';
@@ -41,7 +41,16 @@ function SliceRow({ slices, size = 30 }: { slices: number; size?: number }) {
  * чтобы было понятно, сколько это. По нажатию — лист с расходом по дням.
  * Мера грубая и не медицинская: один кусок — ровно `KCAL_PER_PIZZA_SLICE` ккал.
  */
-export function CaloriesWeekCard({ days, width }: { days: { date: string; value: number | null }[]; width: number }) {
+export function CaloriesWeekCard({
+  days,
+  width,
+  level,
+}: {
+  days: { date: string; value: number | null }[];
+  width: number;
+  /** Оценка недели по коридору от базового обмена и цели; null — нет биометрии, цели или данных. */
+  level?: ActivityLevel | null;
+}) {
   const [open, setOpen] = useState(false);
   const total = weekCalories(days.map((d) => d.value));
   const slices = total === null ? 0 : Math.floor(pizzaSlices(total));
@@ -57,10 +66,18 @@ export function CaloriesWeekCard({ days, width }: { days: { date: string; value:
         style={({ pressed }) => (pressed ? styles.pressed : undefined)}
       >
         <Card title={CALORIES_WEEK_TITLE} right={<Text style={styles.chevron}>›</Text>}>
-          <Text style={styles.total}>
-            {total === null ? '—' : formatCount(total)}
-            <Text style={styles.unit}> ккал</Text>
-          </Text>
+          {/* Справа от числа, по нижнему краю — как неделя смотрится относительно цели. */}
+          <View style={styles.totalRow}>
+            <Text style={styles.total}>
+              {total === null ? '—' : formatCount(total)}
+              <Text style={styles.unit}> ккал</Text>
+            </Text>
+            {level ? (
+              <Text style={[styles.level, level === 'ideal' ? styles.levelGood : styles.levelBad]}>
+                {ACTIVITY_LEVEL_TEXT[level]}
+              </Text>
+            ) : null}
+          </View>
           <SliceRow slices={slices} />
           {slices > 0 ? (
             <Text style={styles.caption}>
@@ -97,7 +114,11 @@ export function CaloriesWeekCard({ days, width }: { days: { date: string; value:
 const styles = StyleSheet.create({
   pressed: { opacity: 0.85 },
   chevron: { color: colors.textFaint, fontSize: 22, lineHeight: 24 },
+  totalRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.sm },
   total: { color: colors.text, fontSize: 38, fontWeight: '200', fontVariant: ['tabular-nums'] },
+  level: { fontSize: 14, fontWeight: '500', marginBottom: 6 },
+  levelGood: { color: colors.positive },
+  levelBad: { color: colors.negative },
   unit: { color: colors.textMuted, fontSize: 15 },
   slices: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: spacing.sm },
   more: { color: colors.textMuted, fontSize: 13, marginLeft: 2 },

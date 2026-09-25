@@ -12,6 +12,7 @@ import {
 import { addReport, profileAge, type VueloState } from '../storage';
 import { currentCycle } from './cycle';
 import { cycleScoreOf, findDay, recommendationsFor, reportMode, todayKey } from './day';
+import { insightsFor } from './insights';
 import { sleepHrFor } from './sleep-hr';
 
 /**
@@ -54,8 +55,9 @@ const mean = (values: readonly number[]) => (values.length ? values.reduce((a, b
  *
  * Модели отдаём всё, что знаем о дне, кроме имени (решение владельца 26.09): профиль, сон
  * и пульс во сне против своей нормы, шаги и калории, замеры «Организма» и план дня из карточек
- * карусели — тренировку, кофе, еду и время отхода ко сну. Глюкозу и давление не отдаём:
- * по ним приложение выводов не делает, и модель не должна.
+ * карусели — тренировку, кофе, еду и время отхода ко сну — и наблюдения дня против своей нормы
+ * (`insightsFor`): из них Лис делает догадку, что на самом деле происходило. Значений глюкозы
+ * и давления не отдаём: о еде Лис говорит через привычки (частые подъёмы — частые перекусы).
  */
 export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRequest | null {
   if (state.demo) return null;
@@ -142,6 +144,7 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
             }
           : null,
       },
+      insights: insightsFor(state, now),
       recent: state.reports
         .filter((r) => r !== stored)
         .slice(-AI_ADVICE_RECENT)

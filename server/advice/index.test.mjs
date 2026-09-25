@@ -48,16 +48,24 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(text).not.toMatch(/из 100|Анна|глюкоз|давлен/);
   });
 
-  it('правила для модели: конкретика из данных, без банальностей и медицины, до 180 символов', () => {
+  it('правила для модели: говорит Лис, начинает с догадки, конкретика из данных, без банальностей и медицины, до 190 символов', () => {
+    expect(fn.SYSTEM_PROMPT).toContain('Ты — Лис');
+    expect(fn.SYSTEM_PROMPT).toContain('от первого лица');
+    expect(fn.SYSTEM_PROMPT).toContain('Начни с догадки');
     expect(fn.SYSTEM_PROMPT).toContain('новых не придумывай');
     expect(fn.SYSTEM_PROMPT).toContain('банальности');
-    expect(fn.SYSTEM_PROMPT).toContain('не больше 180 символов');
+    expect(fn.SYSTEM_PROMPT).toContain('Не больше 190 символов');
   });
 
-  it('пример из README (sample.json) проходит проверку', async () => {
+  it('пример из README (sample.json) проходит проверку; наблюдения попадают в текст для модели', async () => {
     const { readFileSync } = await import('node:fs');
     const sample = JSON.parse(readFileSync(new URL('./sample.json', import.meta.url), 'utf8'));
     expect(fn.validate(sample)).toBeNull();
+    const text = fn.buildUserText(sample);
+    expect(text).toContain('Наблюдения за человеком');
+    expect(text).toContain('- Вчера в 22:10 был подъём глюкозы');
+    expect(fn.validate({ ...sample, insights: undefined })).toBe('insights');
+    expect(fn.buildUserText({ ...sample, insights: [] })).toContain('Особых наблюдений нет');
   });
 
   it('лишние или кривые поля не пропускаем', () => {

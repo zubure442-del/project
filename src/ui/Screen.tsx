@@ -1,7 +1,8 @@
+import * as Haptics from 'expo-haptics';
 import type { ReactNode } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { refreshControlKey, refreshIndicatorVisible, useVuelo } from '../state';
+import { pulledToRefresh } from '../state';
 import { CalendarButton } from './Calendar';
 import { InfoButton } from './Sheet';
 import { colors, radius, spacing } from './theme';
@@ -32,8 +33,6 @@ export interface ScreenProps {
 
 export function Screen({ title, info, statusText, onSync, banner, children }: ScreenProps) {
   const insets = useSafeAreaInsets();
-  // Контрол пересоздаётся на каждом конце загрузки и не залипает: см. src/state/refresh.ts.
-  const { phase } = useVuelo();
 
   return (
     <View style={styles.root}>
@@ -56,14 +55,13 @@ export function Screen({ title, info, statusText, onSync, banner, children }: Sc
 
       <ScrollView
         contentContainerStyle={{ paddingBottom: spacing.xl }}
-        refreshControl={
-          <RefreshControl
-            key={refreshControlKey(phase)}
-            refreshing={refreshIndicatorVisible()}
-            onRefresh={onSync}
-            tintColor={colors.textMuted}
-          />
-        }
+        // Потянуть вниз и отпустить — обновить. Нативного контрола с иконкой нет: он залипал,
+        // если посреди жеста переключить вкладку (см. src/state/refresh.ts).
+        onScrollEndDrag={(e) => {
+          if (!pulledToRefresh(e.nativeEvent.contentOffset.y)) return;
+          void Haptics.selectionAsync();
+          onSync();
+        }}
       >
         {children}
       </ScrollView>

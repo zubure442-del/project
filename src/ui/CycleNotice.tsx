@@ -1,9 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { wallClock } from '../codec';
-import { PAST_DAY_NOTE, distanceMeters, formatCount, formatDistance } from '../domain';
-import type { DaySnapshot } from '../storage';
+import { PAST_DAY_NOTE, formatCount } from '../domain';
 import { Ring } from './Ring';
-import { Card } from './Screen';
 import { TipGlyph } from './TipIcons';
 import { colors, spacing } from './theme';
 
@@ -70,32 +68,16 @@ export function ActivityNow({ activity, steps }: { activity: number | null; step
   );
 }
 
-const hhmm = (minutes: number) => `${Math.floor(minutes / 60)} ч ${String(minutes % 60).padStart(2, '0')} м`;
-
 /**
- * Прошлый день: только устойчивые календарные числа — шаги, дистанция, калории и сон.
- * Итог и индексы считаются по циклам и на прошлых датах не показываются.
+ * Прошлый день на «Сегодня»: только пояснение. Итог и индексы считаются по циклам сна
+ * и бодрствования, а замеры дня (шаги, сон, графики) и так есть на вкладках — здесь их не дублируем.
  */
-export function DayFacts({ day, heightCm }: { day: DaySnapshot; heightCm: number | null }) {
-  const rows = [
-    day.steps !== null && { label: 'Шаги', value: formatCount(day.steps) },
-    day.steps !== null && heightCm !== null && { label: 'Дистанция', value: formatDistance(distanceMeters(day.steps, heightCm)) },
-    day.calories != null && { label: 'Активные калории', value: `${formatCount(day.calories)} ккал` },
-    day.sleep && { label: 'Сон', value: hhmm(day.sleep.totalMin) },
-  ].filter((row): row is { label: string; value: string } => Boolean(row));
+export function PastDayNote() {
   return (
-    <>
-      {/* Почему здесь нет итога: он считается по циклам, а прошлый день — это только замеры. */}
-      <Text style={styles.pastNote}>{PAST_DAY_NOTE}</Text>
-      <Card>
-        {rows.map((row) => (
-          <View key={row.label} style={styles.row}>
-            <Text style={styles.rowLabel}>{row.label}</Text>
-            <Text style={styles.rowValue}>{row.value}</Text>
-          </View>
-        ))}
-      </Card>
-    </>
+    <View style={styles.notice}>
+      <TipGlyph name="info" size={48} />
+      <Text style={styles.text}>{PAST_DAY_NOTE}</Text>
+    </View>
   );
 }
 
@@ -115,16 +97,4 @@ const styles = StyleSheet.create({
   ringValue: { color: colors.text, fontSize: 30, fontWeight: '200' },
   label: { color: colors.textMuted, fontSize: 15 },
   steps: { color: colors.text, fontSize: 17 },
-  pastNote: {
-    color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
-  },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: spacing.xs },
-  rowLabel: { color: colors.textMuted, fontSize: 15 },
-  rowValue: { color: colors.text, fontSize: 22, fontWeight: '200', fontVariant: ['tabular-nums'] },
 });

@@ -40,7 +40,7 @@ describe('СИНТЕТИЧЕСКИЕ: «Режим сна»', () => {
     expect([plan.from, plan.to]).toEqual([hh(22, 10), hh(22, 40)]);
     expect(plan.windDown).toBe(hh(21, 10));
     expect(plan.debtMin).toBe(0);
-    expect(plan.debtCarriesOver).toBe(false);
+    expect(plan.repayNights).toBe(0);
     expect(plan.phase).toBe('day');
   });
 
@@ -51,10 +51,18 @@ describe('СИНТЕТИЧЕСКИЕ: «Режим сна»', () => {
     expect(tired.needMin - rested.needMin).toBe(60 + 40);
   });
 
-  it('раньше привычного больше чем на час не ложимся — большой долг переходит на следующие ночи', () => {
+  it('раньше привычного больше чем на час не ложимся — большой долг возвращается за несколько ночей', () => {
     const plan = sleepMode({ nights: [night(8), night(4), night(4)], usualBedtime: hh(24, 30), activity: 50, nowMinute: 0 });
     expect((plan.from + plan.to) / 2).toBe(hh(24, 30) - BEDTIME_MAX_SHIFT_EARLIER_MIN);
-    expect(plan.debtCarriesOver).toBe(true);
+    // Долг 8 ч; план упирается в предел и почти ничего не даёт сверх базы — считаем по 30 минут за ночь.
+    expect(plan.debtMin).toBe(480);
+    expect(plan.repayNights).toBe(16);
+  });
+
+  it('долг и число ночей: план даёт час сверх базы — долг 1.5 часа уходит за 2 ночи', () => {
+    const plan = sleepMode({ nights: [night(8, 95), night(7.25), night(7.25)], usualBedtime: hh(22), activity: 0, nowMinute: 0 });
+    expect(plan.debtMin).toBe(90);
+    expect(plan.repayNights).toBe(2);
   });
 
   it('состояние по часам: день → пора сбавлять темп → лучшее время → окно прошло', () => {

@@ -35,8 +35,15 @@ export const SLEEP_LATENCY_MIN = 15;
 export const BEDTIME_MAX_SHIFT_EARLIER_MIN = 60;
 /** Окно отхода ко сну: плюс-минус столько (как окно у Oura). */
 export const BEDTIME_WINDOW_HALF_MIN = 15;
-/** За столько до окна — приглушить свет и отложить экраны. */
+/** За столько до окна на карточке — «Скоро время ложиться». */
 export const WIND_DOWN_MIN = 60;
+/**
+ * Сколько долга возвращается за ночь по графику: столько, сколько план на сегодня даёт сверх
+ * своей базы, но не меньше 30 и не больше 60 минут. Не меньше 30 — потому что привычный отход
+ * считается по последним ночам: если ложиться по графику, он сдвигается раньше, и возвращать
+ * становится легче.
+ */
+export const SLEEP_REPAY_MIN_MIN = 30;
 
 /** Одна прошлая ночь (главный сон дня). */
 export interface SleepNight {
@@ -69,14 +76,14 @@ export interface SleepMode {
   to: number;
   /** Подъём завтра — обычное время. */
   wake: number;
-  /** С этого момента — меньше света и экранов. */
+  /** С этого момента — «Скоро время ложиться». */
   windDown: number;
   /** Сколько сна нужно сегодня. */
   needMin: number;
   /** Долг сна за последние ночи (весь, а не только сегодняшняя добавка). */
   debtMin: number;
-  /** Долг больше, чем закроет одна ночь без резкого сдвига отхода. */
-  debtCarriesOver: boolean;
+  /** За сколько ночей по графику вернётся долг; 0 — долга нет. */
+  repayNights: number;
   phase: SleepModePhase;
 }
 
@@ -118,33 +125,32 @@ export function sleepMode(input: SleepModeInput): SleepMode {
   const ideal = wake - inBed;
   const earliest = input.usualBedtime - BEDTIME_MAX_SHIFT_EARLIER_MIN;
   const bedtime = round5(Math.max(ideal, earliest));
+  // Сколько сна даёт план сверх базы — столько долга и возвращается за ночь.
+  const planned = (wake - bedtime - SLEEP_LATENCY_MIN) * sleepEfficiency(nights);
+  const repayPerNight = clamp(planned - base - activityExtra, SLEEP_REPAY_MIN_MIN, SLEEP_DEBT_MAX_EXTRA_MIN);
+  const repayNights = debtMin > 0 ? Math.ceil(debtMin / repayPerNight) : 0;
   const from = bedtime - BEDTIME_WINDOW_HALF_MIN;
   const to = bedtime + BEDTIME_WINDOW_HALF_MIN;
   const windDown = from - WIND_DOWN_MIN;
 
   const now = input.nowMinute;
   const phase: SleepModePhase = now < windDown ? 'day' : now < from ? 'windDown' : now <= to ? 'bedtime' : 'late';
-  return { from, to, wake, windDown, needMin, debtMin: Math.round(debtMin), debtCarriesOver: ideal < earliest, phase };
+  return { from, to, wake, windDown, needMin, debtMin: Math.round(debtMin), repayNights, phase };
 }
 
 /** Строка состояния на карточке. */
 export const SLEEP_MODE_PHASE_TEXT: Record<SleepModePhase, string> = {
   day: 'План на вечер',
-  windDown: 'Пора сбавлять темп: меньше света и экранов',
+  windDown: 'Скоро время ложиться',
   bedtime: 'Лучшее время лечь',
   late: 'Окно прошло — ложитесь, как только сможете',
 };
 
-/** «i» в шапке карточки: простыми словами, без формул и чисел. */
+/** «i» в шапке карточки: общими словами, без того, как считается (владелец: расчёты — наш секрет). */
 export const SLEEP_MODE_INFO = {
-  title: 'Как считается режим',
+  title: 'Режим сна',
   text:
-    'Сначала мы оцениваем, сколько сна вам нужно сегодня: ваша обычная потребность — по ночам, после ' +
-    'которых вы высыпались лучше всего, — плюс немного, если последние ночи были короткими или день ' +
-    'выдался активным.\n\n' +
-    'Время отхода считаем от вашего обычного подъёма: вставать в одно и то же время — главная опора ' +
-    'режима. Ложиться намного раньше привычного бесполезно — перед обычным сном организм бодрее всего, ' +
-    'поэтому большой долг сна лучше возвращать за несколько ночей.\n\n' +
-    'Перед окном — время сбавить темп: приглушить свет и отложить экраны. ' +
+    'Режим сна — ваше время отхода ко сну на сегодня. Мы подбираем его каждый день по вашим данным, ' +
+    'чтобы вы высыпались и вставали в своё время, а накопившийся недосып уходил без рывков.\n\n' +
     NOT_MEDICAL_DEVICE,
 } as const;

@@ -6,8 +6,8 @@ import {
   Calibration,
   CycleNotice,
   DayBanner,
-  DayFacts,
   MascotHero,
+  PastDayNote,
   Screen,
 } from '../../ui';
 
@@ -15,7 +15,6 @@ export default function TodayTab() {
   const { state, statusText, sync, homeRequest } = useVuelo();
   const { width } = useWindowDimensions();
   const { date: picked, banner, isToday, today, hasData } = useTabDay();
-  const day = findDay(state.days, picked);
   // Рекомендации (совет, питание, пик выносливости, кофейное окно, режим сна) — только за сегодня; на прошлом дне блока нет вовсе.
   const recs = recommendationsFor(state, picked);
   const relay = relayFor(state);
@@ -28,9 +27,10 @@ export default function TodayTab() {
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       {!isToday ? (
-        // Прошлый день: итог и индексы считаются по циклам и тут не показываются — только счётчики дня.
-        day && hasData ? (
-          <DayFacts day={day} heightCm={state.profile.heightCm} />
+        // Прошлый день: итог и индексы считаются по циклам и тут не показываются. Замеры дня есть
+        // на вкладках, поэтому здесь только пояснение.
+        hasData ? (
+          <PastDayNote />
         ) : (
           <Calibration today={false} />
         )

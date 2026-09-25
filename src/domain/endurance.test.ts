@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avoidMeals, endurancePeak, sustained, type EnduranceInput } from './endurance';
+import { avoidMeals, enduranceLevel, endurancePeak, sustained, workoutType, type EnduranceInput } from './endurance';
 
 /** Подъём в 7:00, сон как обычно, замеры в норме, еды нет. */
 const base: EnduranceInput = {
@@ -91,5 +91,28 @@ describe('СИНТЕТИЧЕСКИЕ: «Пик выносливости»', () =
     const r = endurancePeak({ ...base, wakeMinute: hh(13), bedtimeMinute: hh(24, 30) });
     expect(r.to).toBeLessThanOrEqual(hh(24, 30));
     expect(r.to - r.from).toBe(120);
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: тренировка и уровень вместо процента', () => {
+  it('тип по цели: набор массы — силовые, похудение — кардио, поддержание — через день', () => {
+    expect(workoutType('training', 'gain', '2026-09-26')).toBe('strength');
+    expect(workoutType('training', 'lose', '2026-09-26')).toBe('cardio');
+    const keep = [workoutType('training', 'keep', '2026-09-26'), workoutType('training', 'keep', '2026-09-27')];
+    expect(new Set(keep)).toEqual(new Set(['strength', 'cardio']));
+    expect(workoutType('training', null, '2026-09-26')).toBe(keep[0]);
+  });
+
+  it('по замерам лучше поберечься — восстановительное кардио при любой цели', () => {
+    for (const goal of ['gain', 'lose', 'keep', null] as const) {
+      expect(workoutType('recovery', goal, '2026-09-26')).toBe('recoveryCardio');
+    }
+  });
+
+  it('уровень: полная нагрузка — хард, после короткого сна — средне, перегрузка и восстановление — лайт', () => {
+    expect(enduranceLevel(100)).toBe('hard');
+    expect(enduranceLevel(80)).toBe('medium');
+    expect(enduranceLevel(50)).toBe('light');
+    expect(enduranceLevel(30)).toBe('light');
   });
 });

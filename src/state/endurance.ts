@@ -1,4 +1,15 @@
-import { averageBedtime, endurancePeak, foodCycle, PERSONAL_BASELINE_DAYS, type EnduranceInput, type EnduranceResult } from '../domain';
+import {
+  PERSONAL_BASELINE_DAYS,
+  averageBedtime,
+  endurancePeak,
+  enduranceLevel,
+  foodCycle,
+  workoutType,
+  type EnduranceInput,
+  type EnduranceLevel,
+  type EnduranceResult,
+  type WorkoutType,
+} from '../domain';
 import type { CycleSnapshot, DaySnapshot, VueloState } from '../storage';
 import { cycleClock } from './cycle';
 import { coffeeInput, findDay } from './day';
@@ -61,7 +72,13 @@ function stressForecast(days: readonly DaySnapshot[], date: string): (number | n
   return buckets.map((values) => mean(values));
 }
 
-export type EnduranceView = EnduranceResult & { nowMinute: number };
+export type EnduranceView = EnduranceResult & {
+  nowMinute: number;
+  /** Какую тренировку выбрать — по цели профиля. */
+  workout: WorkoutType;
+  /** Насколько интенсивно — «Хард», «Средне», «Лайт». */
+  level: EnduranceLevel;
+};
 
 /**
  * «Пик выносливости» текущего цикла. Нет цикла со сном — null: карточки нет, как у «Кофейного окна».
@@ -104,5 +121,11 @@ export function enduranceFor(state: VueloState, now = new Date()): EnduranceView
     stressByHour: stressForecast(state.days, date),
     meals: meals ? foodCycle(meals).meals : [],
   };
-  return { ...endurancePeak(input), nowMinute };
+  const peak = endurancePeak(input);
+  return {
+    ...peak,
+    nowMinute,
+    workout: workoutType(peak.kind, state.profile.goal, date),
+    level: enduranceLevel(peak.intensity),
+  };
 }

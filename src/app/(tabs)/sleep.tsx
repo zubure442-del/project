@@ -78,8 +78,10 @@ export default function SleepTab() {
       {sleepHr ? (
         <Card title="Пульс во сне">
           {/* Два числа ночи и отклонение каждого от своей нормы; ниже — вывод по категории. */}
-          <HrRow label="Минимальный" value={sleepHr.night.min} delta={sleepHr.deltaMin} />
-          <HrRow label="Средний" value={sleepHr.night.avg} delta={sleepHr.deltaAvg} />
+          {/* Отклонение от нормы — только за сегодня: норма со временем меняется, и на прошлой дате
+              сегодняшняя норма вводила бы в заблуждение. */}
+          <HrRow label="Минимальный" value={sleepHr.night.min} delta={isToday ? sleepHr.deltaMin : null} />
+          <HrRow label="Средний" value={sleepHr.night.avg} delta={isToday ? sleepHr.deltaAvg : null} />
           {/* Вывод читается по цвету точки: зелёная — ночь как обычно или лучше, красная — есть отклонение.
               Только за сегодня: на прошлых датах — одни замеры, без выводов. */}
           {isToday ? (

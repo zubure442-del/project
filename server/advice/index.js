@@ -8,13 +8,18 @@
  * стресс, шаги, нагрузка, время еды по подъёмам глюкозы — без значений глюкозы и давления),
  * шаги сегодня по часам и план Vuelo на сегодня.
  *
- * Как ежедневные сообщения Oura (контекст, догадка о причине, одно маленькое действие): главное
- * наблюдение дня выбирает не модель, а эта функция — по правилам и личным нормам человека
- * (`observe`): что видно, вероятная причина и одно действие из плана Vuelo с его временем.
- * Модель только говорит это голосом Лиса. Раньше модель сама читала всю таблицу — Lite путалась
- * и связывала несвязанное («легли поздно — поешьте по графику»; владелец 26.09: «бред»).
- * Функция отдаёт `{ text, finding }`: приложение показывает text, finding (какое наблюдение
- * выбрано) виден при проверке через curl.
+ * Два шага, как у Oura Advisor (ИИ смотрит не на сырые замеры, а на то, что алгоритм уже
+ * посчитал против личной нормы):
+ * 1. ИИ-анализ (`signals`): функция считает личные нормы за неделю и передаёт модели всё, что заметно
+ *    отличается от обычного, с метками, и действия из плана Vuelo. Что из этого главное, что с чем
+ *    связано, какая причина и какое действие — решает модель; она отвечает меткой главного,
+ *    причиной, меткой действия и текстом Лиса. Функция проверяет: метки настоящие, действие
+ *    подходит к главному (`FITS`), в тексте нет чужих чисел и есть время действия.
+ * 2. Запасной шаг (`observe`), если ответ анализа не прошёл проверку: главное наблюдение выбирает
+ *    правило, модель только говорит его голосом Лиса. Раньше модель читала всю таблицу сама —
+ *    Lite путалась и связывала несвязанное («легли поздно — поешьте по графику»; владелец 26.09: «бред»).
+ * Функция отдаёт `{ text, mode, focus, cause }`: приложение показывает text; остальное — для проверки
+ * через curl (mode: analysis — решил ИИ, guided — запасной шаг).
  *
  * Ключей API здесь нет: функция ходит в YandexGPT от имени своего сервисного аккаунта
  * (роль ai.languageModels.user), токен выдаёт сама платформа (context.token).
@@ -44,10 +49,49 @@ const SEX_TEXT = { male: 'мужчина', female: 'женщина' };
 const WORKOUT_TEXT = { cardio: 'кардио', strength: 'силовая' };
 
 /**
- * Правила для модели. Наблюдение уже выбрано (`observe`), модель его только говорит — два
+ * Правила для ИИ-анализа: модель сама разбирает, что заметил Vuelo, и выбирает главное, причину
+ * и действие. Как читать числа — общие знания (так же рассуждает любой хороший тренер по сну),
+ * выводов про конкретный день здесь нет.
+ */
+const ANALYSIS_PROMPT = `Ты — Лис, маскот Vuelo — приложения к умному кольцу. Ты давно наблюдаешь за этим человеком и знаешь его ритм. Говоришь с ним сам, от первого лица, как близкий друг, а не как врач или аналитик. Обращайся на «вы».
+
+Тебе дают всё, что Vuelo заметил по кольцу за последние дни, — уже в сравнении с тем, что обычно для этого человека, — и действия из плана Vuelo на сегодня. Разберись сам: какие наблюдения связаны между собой, что за ними стоит и что сейчас для человека главное. Потом скажи ему своё мнение и дай одно действие.
+
+Как читать наблюдения:
+- пульс во сне выше и вариабельность ниже обычного — тело ночью плохо восстановилось; частые причины: поздний ужин (если была поздняя еда), вчерашняя тренировка (если была нагрузка), напряжённый день (если был стресс), иначе бокал вина или кофе после обеда;
+- поздняя еда вместе с поздним засыпанием или плохим восстановлением — поздний ужин;
+- много приёмов пищи за день — перекусы;
+- засыпание всё позже или в разное время — сбился режим;
+- короткий сон несколько ночей или долг сна — накопилась усталость;
+- стресс несколько дней подряд — человек давно без передышки;
+- пульс во сне ниже и вариабельность выше обычного — тело отлично восстановилось;
+- мало шагов к середине дня — день выходит сидячим.
+Главное — одно или два связанных наблюдения. Причина должна их объяснять, а действие — помогать именно с ними: при позднем засыпании — окно сна, при позднем ужине — ужин по плану, при отличном восстановлении — тренировка или шаги.
+
+Ответ — ровно четыре строки:
+Главное: метки главных наблюдений, например [late-meal] [hrv-down]
+Причина: одна вероятная причина, конкретно
+Действие: метка одного действия из плана, например [dinner]
+Лис: ответ человеку — два предложения, не больше 190 символов
+
+Правила для строки «Лис:»:
+- Первое предложение — твоё мнение: что с человеком и почему, как догадка («похоже», «кажется», «думаю»). Второе — выбранное действие с его временем, можно с короткой поддержкой.
+- Не называй показатели и числа из наблюдений: никаких «пульс», «вариабельность», «стресс», «глубокий сон», процентов и «выше/ниже обычного». Говори о человеке: теле, ночи, вечере, режиме, привычках. Числа — только из выбранного действия.
+- Учитывай пол, возраст и цель, но не называй их и не оценивай фигуру.
+- Слова недавних мнений не повторяй.
+- Нельзя: приветствия, прощания, вопросы; болезни, диагнозы, лекарства, врачи, обещания результата; слова «глюкоза», «сахар», «давление»; оценки «из 100»; другие приложения и бренды, кроме Vuelo; эмодзи, списки, кавычки; общие слова вроде «что-то задержало», «выделите время для себя», «не перегружайте себя», «берегите себя».
+
+Пример ответа (времена в нём чужие):
+Главное: [late-meal] [hrv-down]
+Причина: поздний ужин
+Действие: [dinner]
+Лис: Похоже, вчера был поздний ужин — ночью телу пришлось работать, а не отдыхать. Сегодня поужинайте по графику Vuelo, в 19:30.`;
+
+/**
+ * Правила запасного шага: наблюдение уже выбрано (`observe`), модель его только говорит — два
  * предложения голосом Лиса: мнение о причине и действие из плана с его временем.
  */
-const SYSTEM_PROMPT = `Ты — Лис, маскот Vuelo — приложения к умному кольцу. Ты давно наблюдаешь за этим человеком и знаешь его ритм. Говоришь с ним сам, от первого лица, как близкий друг, а не как врач или аналитик. Обращайся на «вы».
+const GUIDED_PROMPT = `Ты — Лис, маскот Vuelo — приложения к умному кольцу. Ты давно наблюдаешь за этим человеком и знаешь его ритм. Говоришь с ним сам, от первого лица, как близкий друг, а не как врач или аналитик. Обращайся на «вы».
 
 Каждый раз Vuelo по числам кольца выбирает одно главное наблюдение: что видно, вероятную причину и одно действие из плана. Твоя задача — сказать это человеку своими словами, тепло и просто, как короткое сообщение в хорошем приложении для сна. Наблюдение уже выбрано: не ищи другое и ничего к нему не добавляй.
 
@@ -73,7 +117,7 @@ const SYSTEM_PROMPT = `Ты — Лис, маскот Vuelo — приложен�
 Плохо, так нельзя:
 Ответ: Похоже, вы легли позже обычного — может, что-то задержало. Не перегружайте себя вечером, выделите время для себя по графику Vuelo.`;
 
-// ── Наблюдение дня ──────────────────────────────────────────────────────────────────────────────
+// ── Что видно по числам ─────────────────────────────────────────────────────────────────────────
 
 /** Личная норма — среднее прошлых дней таблицы, если их хотя бы столько. */
 const NORM_MIN_DAYS = 3;
@@ -93,15 +137,21 @@ const LATE_BED_MIN = 60;
 const LATER_BED_MIN = 45;
 /** Три ночи подряд засыпание всё позже, от первой до последней — хотя бы на столько. */
 const DRIFT_MIN = 30;
+/** Засыпание за неделю «скачет»: от самого раннего до самого позднего — столько минут. */
+const IRREGULAR_SPREAD_MIN = 120;
 /** Стресс днём выше своего уровня три дня подряд; напряжённый день — на столько выше. */
 const STRESS_STREAK_UP = 8;
 const TENSE_DAY_UP = 10;
 /**
- * Короткий сон три ночи подряд: меньше 6.5 ч или на 45 мин меньше обычного. Долг сна из плана
- * сам по себе не повод: у того, кто всегда спит 6.5 ч, он есть каждый день.
+ * Короткий сон: меньше 6.5 ч или на 45 мин меньше обычного (повод — три такие ночи подряд).
+ * Долг сна из плана сам по себе не повод: у того, кто всегда спит 6.5 ч, он есть каждый день.
  */
 const SHORT_SLEEP_MIN = 390;
 const SHORT_SLEEP_UNDER_NORM = 45;
+const LONG_SLEEP_OVER_NORM = 45;
+const SLEEP_DEBT_MIN = 90;
+/** Глубокий сон заметно меньше или больше обычного. */
+const DEEP_CHANGE = 0.2;
 /** Столько приёмов пищи за день — перекусы. */
 const SNACKS_FROM = 5;
 /** Нагрузка вчера во столько раз выше обычной — тяжёлый день. */
@@ -125,6 +175,8 @@ const lastMealOf = (d) => {
   const evening = d.meals.map(clockMin).filter((m) => m >= 12 * 60);
   return evening.length ? Math.max(...evening) : null;
 };
+/** « — обычно около …», если норма есть. */
+const usual = (v, format = Math.round) => (v === null ? '' : ` — обычно около ${format(v)}`);
 
 /** Среднее по дням, где значение есть; меньше NORM_MIN_DAYS дней — нормы нет. */
 function normOf(days, pick) {
@@ -133,7 +185,7 @@ function normOf(days, pick) {
 }
 
 /**
- * Действия из плана Vuelo, которые ещё впереди: текст для модели вместе с временем.
+ * Действия из плана Vuelo, которые ещё впереди, с их временем. Ключ — метка для модели.
  * Ночью (до 4:00) впереди только сон.
  */
 function planActions(p, now, today) {
@@ -143,10 +195,16 @@ function planActions(p, now, today) {
   const act = {};
   const b = plan.bedtime;
   if (b && nightMin(clockMin(b.to)) > (lateNight ? now + 1440 : now)) act.bed = `лечь между ${b.from} и ${b.to}`;
-  const dinner = plan.meals.find((m) => m.title.toLowerCase() === 'ужин');
-  if (dinner && ahead(dinner.time, 30)) act.dinner = `поужинать по графику Vuelo в ${dinner.time}`;
+  // Ужин — «Ужин» из плана, а в режимах из двух приёмов («Первый приём», «Второй приём») — последний.
+  const dinner = plan.meals.find((m) => m.title.toLowerCase() === 'ужин') || (plan.meals.length > 1 ? plan.meals[plan.meals.length - 1] : null);
+  if (dinner && ahead(dinner.time, 30)) {
+    act.dinner = dinner.title.toLowerCase() === 'ужин'
+      ? `поужинать по графику Vuelo в ${dinner.time}`
+      : `последний приём пищи по графику Vuelo — в ${dinner.time}`;
+  }
   const next = plan.meals.find((m) => ahead(m.time));
-  if (next) act.nextMeal = `${next.title.toLowerCase()} по графику Vuelo в ${next.time}, без перекусов до него`;
+  const genitive = { завтрак: 'завтрака', обед: 'обеда', ужин: 'ужина', 'первый приём': 'первого приёма пищи', 'второй приём': 'второго приёма пищи' };
+  if (next) act.meal = `до ${genitive[next.title.toLowerCase()] || 'еды'} в ${next.time} обойтись без перекусов`;
   if (plan.noCoffee) act.coffee = 'сегодня обойтись без кофе';
   else if (plan.coffee) act.coffee = ahead(plan.coffee.until) ? `последнюю чашку кофе — до ${plan.coffee.until}` : 'кофе на сегодня уже хватит';
   const w = plan.workout;
@@ -160,143 +218,242 @@ function planActions(p, now, today) {
 }
 
 /**
- * Главное наблюдение дня — одно, по порядку важности, как «находки» Oura: что видно (числа
- * с личной нормой — модели для понимания, в ответ они не идут), вероятная причина (или null —
- * тогда не гадаем) и одно действие из плана. Сегодняшняя строка таблицы — это и прошедшая ночь.
+ * Числа против личной нормы — общее для обоих режимов. Сегодняшняя строка таблицы — это
+ * и прошедшая ночь. Выводов здесь нет: только что выше или ниже обычного и насколько.
  */
-function observe(p) {
+function measure(p) {
   const byAgo = new Map(p.days.map((d) => [d.ago, d]));
   const today = byAgo.get(0) || null;
   const yesterday = byAgo.get(1) || null;
   const prior = p.days.filter((d) => d.ago >= 1);
+  const older = p.days.filter((d) => d.ago >= 2);
   const norm = {
     asleep: normOf(prior, asleepMin),
     sleepMin: normOf(prior, (d) => d.sleepMin),
+    deepMin: normOf(prior, (d) => d.deepMin),
     nightPulse: normOf(prior, (d) => d.nightPulse),
     hrv: normOf(prior, (d) => d.hrv),
     load: normOf(prior, (d) => d.load),
-    lastMeal: normOf(p.days.filter((d) => d.ago >= 2), lastMealOf),
+    lastMeal: normOf(older, lastMealOf),
+    meals: normOf(older.filter((d) => d.meals.length), (d) => d.meals.length),
+    dayStress: normOf(older, (d) => d.stress),
   };
   const now = clockMin(p.time);
-  const evening = p.mode === 'evening';
-  const act = planActions(p, now, today);
-  const action = (...keys) => keys.map((k) => act[k]).find(Boolean) || null;
-  const found = (id, facts, cause, todo) => ({ id, facts: facts.filter(Boolean), cause, action: todo });
 
-  // Ночь: восстановление против своей нормы.
   const pulseUp = today && present(today.nightPulse) && present(norm.nightPulse) ? today.nightPulse - norm.nightPulse : null;
   const hrvDrop = today && present(today.hrv) && norm.hrv ? 1 - today.hrv / norm.hrv : null;
   const strain =
     (pulseUp !== null && hrvDrop !== null && pulseUp >= STRAIN_PULSE_UP && hrvDrop >= STRAIN_HRV_DROP) ||
     (pulseUp !== null && pulseUp >= STRAIN_PULSE_UP_ALONE) ||
     (hrvDrop !== null && hrvDrop >= STRAIN_HRV_DROP_ALONE);
-  const nightParts = [
-    pulseUp !== null && `пульс во сне ${today.nightPulse} (обычно ${Math.round(norm.nightPulse)})`,
-    hrvDrop !== null && `вариабельность ${today.hrv} мс (обычно ${Math.round(norm.hrv)})`,
-  ].filter(Boolean);
-  const strainFact = `этой ночью тело отдыхало хуже обычного: ${nightParts.join(', ')}`;
+  const recovered =
+    pulseUp !== null && hrvDrop !== null && pulseUp <= 0 && hrvDrop <= 0 && (pulseUp <= -RECOVERY_PULSE_DOWN || hrvDrop <= -RECOVERY_HRV_UP);
+  const pulseText = pulseUp !== null && `пульс во сне ${today.nightPulse}${usual(norm.nightPulse)}`;
+  const hrvText = hrvDrop !== null && `вариабельность ${today.hrv} мс${usual(norm.hrv)}`;
 
   const bedLate = asleepMin(today) !== null && norm.asleep !== null ? asleepMin(today) - norm.asleep : null;
-  const bedFact = bedLate !== null && `уснули в ${today.asleep} (обычно около ${clockOf(norm.asleep)})`;
-
-  // 1. Поздний ужин и тяжёлая или поздняя ночь.
   const lateMeals = [
     ...(yesterday ? yesterday.meals.filter((t) => clockMin(t) >= LATE_MEAL_FROM) : []),
     ...(today ? today.meals.filter((t) => clockMin(t) < NIGHT_UNTIL && (asleepMin(today) === null || nightMin(clockMin(t)) <= asleepMin(today))) : []),
   ];
-  const lateMeal = lateMeals.length ? lateMeals[lateMeals.length - 1] : null;
-  if (lateMeal && (strain || (bedLate !== null && bedLate >= LATE_BED_MIN))) {
-    const usual = norm.lastMeal !== null ? ` (обычно около ${clockOf(norm.lastMeal)})` : '';
+  const heavy = !!yesterday && (!!yesterday.workout || (present(yesterday.load) && !!norm.load && yesterday.load >= norm.load * HEAVY_LOAD_RATIO));
+
+  // Утром сегодняшнего стресса ещё нет — серию берём по трём прошлым дням.
+  const streakDays = today && present(today.stress) ? [2, 1, 0] : [3, 2, 1];
+  const streak = streakDays.map((a) => byAgo.get(a)).map((d) => (d ? d.stress : null));
+  const stressBase = normOf(p.days.filter((d) => d.ago > streakDays[0]), (d) => d.stress);
+  const stressStreak = stressBase !== null && streak.every((v) => present(v) && v >= stressBase + STRESS_STREAK_UP);
+  const tense = !!yesterday && present(yesterday.stress) && norm.dayStress !== null && yesterday.stress >= norm.dayStress + TENSE_DAY_UP;
+
+  const nights = [2, 1, 0].map((a) => asleepMin(byAgo.get(a)));
+  const drift = nights.every(present) && nights[0] < nights[1] && nights[1] < nights[2] && nights[2] - nights[0] >= DRIFT_MIN && bedLate >= LATER_BED_MIN;
+  const sleeps = [2, 1, 0].map((a) => byAgo.get(a)).map((d) => (d ? d.sleepMin : null));
+  const short = (v) => present(v) && (v < SHORT_SLEEP_MIN || (norm.sleepMin !== null && v <= norm.sleepMin - SHORT_SLEEP_UNDER_NORM));
+
+  let lowActivity = false;
+  if (today && present(today.steps) && today.stepNorm && now >= LOW_ACTIVITY_FROM) {
+    lowActivity = today.steps < today.stepNorm * Math.min(1, (now - 8 * 60) / (13 * 60)) * LOW_ACTIVITY_SHARE;
+  }
+
+  return {
+    byAgo, today, yesterday, norm, now,
+    evening: p.mode === 'evening',
+    act: planActions(p, now, today),
+    pulseUp, hrvDrop, strain, recovered, pulseText, hrvText,
+    bedLate,
+    lateMeal: lateMeals.length ? lateMeals[lateMeals.length - 1] : null,
+    heavy, streak, stressBase, stressStreak, tense,
+    drift, sleeps, shortStreak: sleeps.every(short),
+    debt: p.plan.bedtime ? p.plan.bedtime.debtMinutes : 0,
+    snackDay: [yesterday, today].find((d) => d && d.meals.length >= SNACKS_FROM) || null,
+    lowActivity,
+  };
+}
+
+/**
+ * Что Vuelo заметил по кольцу — всё, что заметно отличается от обычного для человека, с метками.
+ * Это вход для ИИ-анализа (как «составляющие» у Oura Advisor): что из этого главное, что с чем
+ * связано и почему — решает модель. Плюс что в норме.
+ */
+function signals(p, m = measure(p)) {
+  const { today, yesterday, norm } = m;
+  const flagged = [];
+  const add = (id, text) => flagged.push({ id, text });
+
+  if (m.lateMeal) add('late-meal', `вчера последний приём пищи в ${m.lateMeal}${usual(norm.lastMeal, clockOf)}`);
+  if (m.snackDay) {
+    const when = m.snackDay === today ? 'сегодня' : 'вчера';
+    add('many-meals', `${when} ${m.snackDay.meals.length} приёмов пищи: ${m.snackDay.meals.join(', ')}${usual(norm.meals)}`);
+  }
+  if (m.drift) {
+    add('bed-drift', `засыпание три ночи подряд всё позже: ${[2, 1, 0].map((a) => m.byAgo.get(a).asleep).join(', ')}${usual(norm.asleep, clockOf)}`);
+  } else if (m.bedLate !== null && m.bedLate >= LATER_BED_MIN) {
+    add('bed-late', `этой ночью уснули в ${today.asleep}${usual(norm.asleep, clockOf)}`);
+  }
+  const bedtimes = p.days.map(asleepMin).filter(present);
+  if (!m.drift && bedtimes.length >= 4 && Math.max(...bedtimes) - Math.min(...bedtimes) >= IRREGULAR_SPREAD_MIN) {
+    add('bed-irregular', `время засыпания за неделю скачет: от ${clockOf(Math.min(...bedtimes))} до ${clockOf(Math.max(...bedtimes))}`);
+  }
+  if (m.shortStreak) {
+    add('sleep-short', `сон три ночи подряд короткий: ${m.sleeps.map(hm).join(', ')}${usual(norm.sleepMin, hm)}`);
+  } else if (today && present(today.sleepMin) && norm.sleepMin !== null) {
+    if (today.sleepMin <= norm.sleepMin - SHORT_SLEEP_UNDER_NORM) add('sleep-short', `сон этой ночью ${hm(today.sleepMin)}${usual(norm.sleepMin, hm)}`);
+    else if (today.sleepMin >= norm.sleepMin + LONG_SLEEP_OVER_NORM) add('sleep-long', `сон этой ночью ${hm(today.sleepMin)}${usual(norm.sleepMin, hm)}`);
+  }
+  if (m.debt >= SLEEP_DEBT_MIN) add('sleep-debt', `накопился долг сна ${duration(m.debt)}`);
+  if (today && present(today.deepMin) && norm.deepMin) {
+    const change = today.deepMin / norm.deepMin - 1;
+    const text = `глубокий сон ${hm(today.deepMin)}${usual(norm.deepMin, hm)}`;
+    if (change <= -DEEP_CHANGE) add('deep-low', text);
+    else if (change >= DEEP_CHANGE) add('deep-high', text);
+  }
+  if (m.pulseUp !== null && m.pulseUp >= STRAIN_PULSE_UP) add('night-pulse-up', m.pulseText);
+  else if (m.pulseUp !== null && m.pulseUp <= -RECOVERY_PULSE_DOWN) add('night-pulse-down', m.pulseText);
+  if (m.hrvDrop !== null && m.hrvDrop >= STRAIN_HRV_DROP) add('hrv-down', m.hrvText);
+  else if (m.hrvDrop !== null && m.hrvDrop <= -RECOVERY_HRV_UP) add('hrv-up', m.hrvText);
+  if (m.stressStreak) {
+    add('stress-days', `стресс днём несколько дней подряд выше обычного: ${m.streak.join(', ')}${usual(m.stressBase)}`);
+  } else if (m.tense) {
+    add('stress-up', `вчера стресс днём ${yesterday.stress}${usual(norm.dayStress)}`);
+  } else if (today && present(today.stress) && norm.dayStress !== null && today.stress >= norm.dayStress + TENSE_DAY_UP) {
+    add('stress-up', `сегодня стресс днём ${today.stress}${usual(norm.dayStress)}`);
+  }
+  if (m.heavy) {
+    add('workout-yesterday', yesterday.workout
+      ? `вчера была тренировка (${WORKOUT_TEXT[yesterday.workout]})`
+      : `вчера нагрузка ${yesterday.load}${usual(norm.load)}`);
+  }
+  if (m.lowActivity) add('steps-low', `к ${p.time} — ${count(today.steps)} шагов из нормы ${count(today.stepNorm)}`);
+  else if (today && present(today.steps) && today.stepNorm && today.steps >= today.stepNorm) {
+    add('steps-done', `норма шагов уже выполнена: ${count(today.steps)} из ${count(today.stepNorm)}`);
+  }
+
+  const ids = new Set(flagged.map((s) => s.id));
+  const hit = (...list) => list.some((id) => ids.has(id));
+  const normal = [
+    today && today.asleep && !hit('bed-drift', 'bed-late', 'bed-irregular') && 'время засыпания',
+    today && present(today.sleepMin) && !hit('sleep-short', 'sleep-long') && 'длительность сна',
+    (m.pulseUp !== null || m.hrvDrop !== null) && !hit('night-pulse-up', 'night-pulse-down', 'hrv-down', 'hrv-up') && 'восстановление ночью',
+    today && present(today.stress) && !hit('stress-days', 'stress-up') && 'стресс',
+    !hit('late-meal', 'many-meals') && 'время еды',
+    today && present(today.steps) && !hit('steps-low', 'steps-done') && 'шаги',
+  ].filter(Boolean);
+  return { flagged, normal };
+}
+
+/**
+ * С какими действиями плана сочетается наблюдение: действие должно помогать именно с ним.
+ * Защищает от «легли поздно — поешьте по графику» (владелец 26.09: «бред»).
+ */
+const FITS = {
+  'late-meal': ['dinner', 'bed'],
+  'many-meals': ['meal', 'dinner'],
+  'bed-late': ['bed', 'coffee'],
+  'bed-drift': ['bed', 'coffee'],
+  'bed-irregular': ['bed'],
+  'sleep-short': ['bed', 'coffee'],
+  'sleep-debt': ['bed', 'coffee'],
+  'sleep-long': ['workout', 'steps', 'norm'],
+  'deep-low': ['bed', 'coffee', 'dinner'],
+  'deep-high': ['workout', 'steps', 'norm'],
+  'night-pulse-up': ['bed', 'coffee', 'dinner', 'workout'],
+  'hrv-down': ['bed', 'coffee', 'dinner', 'workout'],
+  'night-pulse-down': ['workout', 'steps', 'norm'],
+  'hrv-up': ['workout', 'steps', 'norm'],
+  'stress-days': ['bed', 'workout'],
+  'stress-up': ['bed', 'workout'],
+  'workout-yesterday': ['workout', 'bed'],
+  'steps-low': ['steps', 'workout'],
+  'steps-done': ['bed', 'workout'],
+};
+
+/**
+ * Запасной режим: главное наблюдение выбирает правило, по порядку важности (как ежедневные
+ * сообщения Oura): что видно, причина (или null — не гадаем) и одно действие.
+ * Нужен, когда ответ ИИ-анализа не прошёл проверку.
+ */
+function observe(p, m = measure(p)) {
+  const { today, yesterday, norm, evening, act } = m;
+  const action = (...keys) => keys.map((k) => act[k]).find(Boolean) || null;
+  const found = (id, facts, cause, todo) => ({ id, facts: facts.filter(Boolean), cause, action: todo });
+  const nightParts = [m.pulseText, m.hrvText].filter(Boolean);
+  const strainFact = `этой ночью тело отдыхало хуже обычного: ${nightParts.join(', ')}`;
+  const bedFact = m.bedLate !== null && `уснули в ${today.asleep}${usual(norm.asleep, clockOf)}`;
+
+  if (m.lateMeal && (m.strain || (m.bedLate !== null && m.bedLate >= LATE_BED_MIN))) {
     return found(
       'late-meal',
-      [`вчера последний приём пищи в ${lateMeal}${usual}`, strain && strainFact, bedLate >= LATER_BED_MIN && bedFact],
+      [`вчера последний приём пищи в ${m.lateMeal}${usual(norm.lastMeal, clockOf)}`, m.strain && strainFact, m.bedLate >= LATER_BED_MIN && bedFact],
       'поздний ужин — ночью телу пришлось переваривать, а не отдыхать',
       action('dinner', 'bed'),
     );
   }
-
-  // 2. Тяжёлая ночь после тренировки или большой нагрузки.
-  const heavy = yesterday && (yesterday.workout || (present(yesterday.load) && norm.load && yesterday.load >= norm.load * HEAVY_LOAD_RATIO));
-  if (strain && heavy) {
+  if (m.strain && m.heavy) {
     const what = yesterday.workout ? `вчера была тренировка (${WORKOUT_TEXT[yesterday.workout]})` : 'вчера нагрузка была заметно выше обычной';
     return found('after-workout', [what, strainFact], 'вчерашняя нагрузка — телу нужно больше времени, чтобы восстановиться', action(evening ? 'bed' : 'workout', 'bed'));
   }
-
-  // 3. Несколько дней подряд напряжение (утром сегодняшнего стресса ещё нет — берём три прошлых дня).
-  const streakDays = today && present(today.stress) ? [2, 1, 0] : [3, 2, 1];
-  const streak = streakDays.map((a) => byAgo.get(a)).map((d) => (d ? d.stress : null));
-  const stressBase = normOf(p.days.filter((d) => d.ago > streakDays[0]), (d) => d.stress);
-  if (stressBase !== null && streak.every((v) => present(v) && v >= stressBase + STRESS_STREAK_UP)) {
+  if (m.stressStreak) {
     return found(
       'stress-streak',
-      [`стресс днём выше обычного несколько дней подряд: ${streak.join(', ')} (обычно около ${Math.round(stressBase)})`, strain && strainFact],
+      [`стресс днём выше обычного несколько дней подряд: ${m.streak.join(', ')}${usual(m.stressBase)}`, m.strain && strainFact],
       'вы давно без передышки — много дел, голова не отключается',
       action(evening ? 'bed' : 'workout', 'bed'),
     );
   }
-
-  // 4. Тяжёлая ночь без поздней еды и нагрузки.
-  if (strain) {
-    const dayBase = normOf(p.days.filter((d) => d.ago >= 2), (d) => d.stress);
-    const tense = yesterday && present(yesterday.stress) && dayBase !== null && yesterday.stress >= dayBase + TENSE_DAY_UP;
-    return tense
-      ? found('night-strain', [strainFact, `вчера днём стресс ${yesterday.stress} (обычно около ${Math.round(dayBase)})`],
+  if (m.strain) {
+    return m.tense
+      ? found('night-strain', [strainFact, `вчера днём стресс ${yesterday.stress}${usual(norm.dayStress)}`],
           'напряжённый день — голова долго не отпускала дела', action('bed'))
       : found('night-strain', [strainFact], 'бокал вина или кофе после обеда', action(evening ? 'bed' : 'coffee', 'bed'));
   }
-
-  // 5. Засыпание три ночи подряд всё позже.
-  const nights = [2, 1, 0].map((a) => asleepMin(byAgo.get(a)));
-  if (nights.every(present) && nights[0] < nights[1] && nights[1] < nights[2] && nights[2] - nights[0] >= DRIFT_MIN && bedLate >= LATER_BED_MIN) {
-    const times = [2, 1, 0].map((a) => byAgo.get(a).asleep).join(', ');
-    return found('bedtime-drift', [`засыпание три ночи подряд всё позже: ${times} (обычно около ${clockOf(norm.asleep)})`],
+  if (m.drift) {
+    const times = [2, 1, 0].map((a) => m.byAgo.get(a).asleep).join(', ');
+    return found('bedtime-drift', [`засыпание три ночи подряд всё позже: ${times}${usual(norm.asleep, clockOf)}`],
       'сбился режим — вечер каждый раз затягивается', action('bed'));
   }
-
-  // 6. Недосып несколько ночей.
-  const sleeps = [2, 1, 0].map((a) => byAgo.get(a)).map((d) => (d ? d.sleepMin : null));
-  const short = (v) => present(v) && (v < SHORT_SLEEP_MIN || (norm.sleepMin !== null && v <= norm.sleepMin - SHORT_SLEEP_UNDER_NORM));
-  const debt = p.plan.bedtime ? p.plan.bedtime.debtMinutes : 0;
-  if (sleeps.every(short)) {
+  if (m.shortStreak) {
     return found(
       'short-sleep',
-      [sleeps.every(present) && `сон три последние ночи: ${sleeps.map(hm).join(', ')}` + (norm.sleepMin !== null ? ` (обычно около ${hm(norm.sleepMin)})` : ''),
-        debt > 0 && `долг сна ${duration(debt)}`],
+      [`сон три последние ночи: ${m.sleeps.map(hm).join(', ')}${usual(norm.sleepMin, hm)}`, m.debt > 0 && `долг сна ${duration(m.debt)}`],
       'накопилась усталость',
       action('bed'),
     );
   }
-
-  // 7. Одна поздняя ночь — причину не придумываем.
-  if (bedLate !== null && bedLate >= LATE_BED_MIN) return found('late-bed', [bedFact], null, action('bed'));
-
-  // 8. Перекусы.
-  const snackDay = [yesterday, today].find((d) => d && d.meals.length >= SNACKS_FROM);
-  if (snackDay) {
-    const when = snackDay === today ? 'сегодня' : 'вчера';
-    return found('snacks', [`${when} ${snackDay.meals.length} приёмов пищи: ${snackDay.meals.join(', ')}`], 'много перекусов', action('nextMeal', 'dinner'));
+  if (m.bedLate !== null && m.bedLate >= LATE_BED_MIN) return found('late-bed', [bedFact], null, action('bed'));
+  if (m.snackDay) {
+    const when = m.snackDay === today ? 'сегодня' : 'вчера';
+    return found('snacks', [`${when} ${m.snackDay.meals.length} приёмов пищи: ${m.snackDay.meals.join(', ')}`], 'много перекусов', action('meal', 'dinner'));
   }
-
-  // 9. Сидячий день.
-  if (today && present(today.steps) && today.stepNorm && now >= LOW_ACTIVITY_FROM) {
-    const expected = today.stepNorm * Math.min(1, (now - 8 * 60) / (13 * 60));
-    if (today.steps < expected * LOW_ACTIVITY_SHARE) {
-      return found('low-activity', [`к ${p.time} — ${count(today.steps)} шагов из ${count(today.stepNorm)}`], 'день выходит сидячим', action('steps'));
-    }
+  if (m.lowActivity) {
+    return found('low-activity', [`к ${p.time} — ${count(today.steps)} шагов из ${count(today.stepNorm)}`], 'день выходит сидячим', action('steps'));
   }
-
-  // 10. Отличное восстановление.
   const sleptEnough = today && present(today.sleepMin) && today.sleepMin >= (norm.sleepMin !== null ? norm.sleepMin : 420) - 15;
-  const recovered =
-    pulseUp !== null && hrvDrop !== null && pulseUp <= 0 && hrvDrop <= 0 && (pulseUp <= -RECOVERY_PULSE_DOWN || hrvDrop <= -RECOVERY_HRV_UP);
-  const noNorms = pulseUp === null && hrvDrop === null && p.scores.sleep >= 85 && p.scores.organism >= 80;
-  if (sleptEnough && (recovered || noNorms)) {
+  const noNorms = m.pulseUp === null && m.hrvDrop === null && p.scores.sleep >= 85 && p.scores.organism >= 80;
+  if (sleptEnough && (m.recovered || noNorms)) {
     return found('good-recovery', [`сон ${hm(today.sleepMin)}`, nightParts.length && `ночью тело отлично отдохнуло: ${nightParts.join(', ')}`],
       'тело отлично восстановилось', action(evening ? 'bed' : 'workout', 'norm'));
   }
-
-  // 11. Ничего не выделяется.
-  return found('steady', ['сон, восстановление и нагрузка — как обычно'], 'ровный режим', action(evening ? 'bed' : 'workout', 'nextMeal', 'bed', 'norm'));
+  return found('steady', ['сон, восстановление и нагрузка — как обычно'], 'ровный режим', action(evening ? 'bed' : 'workout', 'meal', 'bed', 'norm'));
 }
 
 // ── Ответ модели ────────────────────────────────────────────────────────────────────────────────
@@ -345,15 +502,37 @@ function answerProblem(text, action = null) {
   return null;
 }
 
-/** Что сказать модели, когда просим переписать. */
-const RETRY_TEXT = {
-  format: 'Нужен только текст Лиса — два предложения, без рассуждений. Ответь ещё раз.',
-  short: 'Слишком коротко: нужны мнение о причине и одно действие. Ответь ещё раз.',
-  long: 'Длиннее 190 символов. Сократи до двух коротких предложений и ответь ещё раз.',
-  vague: 'Расплывчато. Скажи о причине из наблюдения и о действии из «Что предложить» с его временем. Ответь ещё раз.',
-  numbers: 'В ответе числа не из «Что предложить». Числа можно только оттуда. Ответь ещё раз.',
-  'no-time': 'Назови действие из «Что предложить» вместе с его временем. Ответь ещё раз.',
-};
+/**
+ * Ответ ИИ-анализа — четыре строки: «Главное: [метки]», «Причина: …», «Действие: [метка]», «Лис: …».
+ * Не разобрать — поля null / пустые, проверка это поймает.
+ */
+function parseAnalysis(raw) {
+  const text = String(raw).replace(/\*/g, '');
+  const line = (name) => {
+    const found = new RegExp(`${name}\\s*:\\s*(.*)`).exec(text);
+    return found ? found[1].trim() : '';
+  };
+  const said = /Лис\s*:\s*([\s\S]*)$/.exec(text);
+  return {
+    focus: line('Главное').match(/[a-z]+(?:-[a-z]+)*/g) || [],
+    cause: line('Причина') || null,
+    action: (line('Действие').match(/[a-z]+/) || [null])[0],
+    text: said ? said[1].replace(/\s+/g, ' ').trim() || null : null,
+  };
+}
+
+/**
+ * Что не так с ответом ИИ-анализа: null — годится. Главное — из того, что заметил Vuelo;
+ * действие — из плана и подходит к главному (`FITS`); текст — по правилам `answerProblem`.
+ */
+function analysisProblem(answer, seen, act) {
+  if (!answer.text) return 'format';
+  if (!answer.action || !has(act, answer.action)) return 'action';
+  const focus = answer.focus.filter((id) => seen.flagged.some((s) => s.id === id));
+  if (seen.flagged.length && !focus.length) return 'focus';
+  if (focus.length && !focus.some((id) => (FITS[id] || []).includes(answer.action))) return 'mismatch';
+  return answerProblem(answer.text, act[answer.action]);
+}
 
 // ── Запрос ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -472,18 +651,34 @@ function personLine(pr) {
   return `Человек: ${person || 'профиль не заполнен'}. Цель: ${pr.goal ? GOAL_TEXT[pr.goal] : 'не указана'}.`;
 }
 
-/** Текст для модели: кто человек и одно наблюдение дня — что видно, причина, что предложить. */
+const recentLine = (p) => (p.recent.length ? [`Недавние мнения (не повторяй их слова): ${p.recent.map((t) => `— ${t}`).join(' ')}`] : []);
+
+/** Вход ИИ-анализа: кто человек, всё, что заметил Vuelo (с метками), что в норме и действия плана. */
+function buildAnalysisText(p, m = measure(p), seen = signals(p, m)) {
+  const actions = Object.entries(m.act).map(([key, text]) => `- [${key}] ${text}`);
+  return [
+    `Сейчас: ${MODE_TEXT[p.mode]}, ${p.time}.`,
+    personLine(p.profile),
+    'Что Vuelo заметил по кольцу (в сравнении с обычным для этого человека за неделю):',
+    ...(seen.flagged.length ? seen.flagged.map((s) => `- [${s.id}] ${s.text}`) : ['- ничего необычного']),
+    `В норме: ${seen.normal.length ? seen.normal.join(', ') : 'данных мало'}.`,
+    'Действия из плана Vuelo на сегодня (ещё впереди):',
+    ...actions,
+    ...recentLine(p),
+  ].join('\n');
+}
+
+/** Вход запасного шага: кто человек и одно наблюдение дня — что видно, причина, что предложить. */
 function buildUserText(p, seen = observe(p)) {
-  const lines = [
+  return [
     `Сейчас: ${MODE_TEXT[p.mode]}, ${p.time}.`,
     personLine(p.profile),
     'Наблюдение дня (Vuelo выбрал его по числам кольца):',
     `Что видно: ${seen.facts.join('; ')}.`,
     `Причина: ${seen.cause || 'не видна — не додумывай, скажи только о том, что видно'}.`,
     `Что предложить: ${seen.action || 'одно простое действие по теме наблюдения на ближайшие часы'}.`,
-  ];
-  if (p.recent.length) lines.push(`Недавние мнения (не повторяй их слова): ${p.recent.map((t) => `— ${t}`).join(' ')}`);
-  return lines.join('\n');
+    ...recentLine(p),
+  ].join('\n');
 }
 
 const reply = (statusCode, body) => ({
@@ -520,28 +715,38 @@ async function handler(event, context) {
   if (!token || !folder) return reply(500, { error: 'service account or FOLDER_ID is not set' });
   const model = process.env.MODEL || 'yandexgpt';
 
-  const seen = observe(payload);
-  // Ответ не подошёл (длинный, расплывчатый, чужие числа, нет времени действия) — один раз просим
-  // переписать, если приложение ещё ждёт. Не вышло — 502, приложение оставит шаблонный совет.
+  const m = measure(payload);
   const started = Date.now();
-  const messages = [
-    { role: 'system', text: SYSTEM_PROMPT },
-    { role: 'user', text: buildUserText(payload, seen) },
-  ];
-  let problem = 'empty';
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const left = DEADLINE_MS - (Date.now() - started);
-    if (attempt > 0 && left < RETRY_MIN_MS) break;
-    const result = await askModel({ token, folder, model, messages, timeoutMs: Math.min(LLM_TIMEOUT_MS, left) });
+  const timeLeft = () => Math.min(LLM_TIMEOUT_MS, DEADLINE_MS - (Date.now() - started));
+  const ask = (system, user) =>
+    askModel({ token, folder, model, timeoutMs: timeLeft(), messages: [{ role: 'system', text: system }, { role: 'user', text: user }] });
+
+  // 1. ИИ-анализ: главное, причину и действие выбирает модель. Без действий в плане — сразу шаг 2.
+  let problem = 'no actions';
+  if (Object.keys(m.act).length) {
+    const seen = signals(payload, m);
+    const result = await ask(ANALYSIS_PROMPT, buildAnalysisText(payload, m, seen));
     if (result.status) return reply(result.status, { error: result.error });
-    const text = parseAnswer(result.text);
-    problem = text ? answerProblem(text, seen.action) : 'format';
-    if (!problem) return reply(200, { text, finding: seen.id });
-    // Причина — в лог функции без текста ответа: видно, как часто модель промахивается.
-    console.warn('answer rejected', problem, 'attempt', attempt + 1);
-    messages.push({ role: 'assistant', text: result.text }, { role: 'user', text: RETRY_TEXT[problem] });
+    const answer = parseAnalysis(result.text);
+    problem = analysisProblem(answer, seen, m.act);
+    if (!problem) {
+      const focus = answer.focus.filter((id) => seen.flagged.some((s) => s.id === id));
+      return reply(200, { text: answer.text, mode: 'analysis', focus, cause: answer.cause });
+    }
+    // Причина — в лог функции без текста ответа: видно, как часто анализ промахивается.
+    console.warn('analysis rejected', problem);
   }
-  return reply(502, { error: `answer ${problem}`, finding: seen.id });
+
+  // 2. Запасной шаг: наблюдение выбирает правило, модель его только говорит. Если приложение ещё ждёт.
+  if (DEADLINE_MS - (Date.now() - started) < RETRY_MIN_MS) return reply(502, { error: `answer ${problem}` });
+  const seen = observe(payload, m);
+  const result = await ask(GUIDED_PROMPT, buildUserText(payload, seen));
+  if (result.status) return reply(result.status, { error: result.error });
+  const text = parseAnswer(result.text);
+  const guided = text ? answerProblem(text, seen.action) : 'format';
+  if (!guided) return reply(200, { text, mode: 'guided', focus: [seen.id], cause: seen.cause });
+  console.warn('guided rejected', guided);
+  return reply(502, { error: `answer ${problem} / ${guided}` });
 }
 
 /** Один запрос к YandexGPT: `{ text }` или `{ status, error }`. */
@@ -577,4 +782,7 @@ async function askModel({ token, folder, model, messages, timeoutMs }) {
   return text ? { text } : { status: 502, error: 'empty' };
 }
 
-module.exports = { handler, validate, observe, buildUserText, parseAnswer, answerProblem, SYSTEM_PROMPT };
+module.exports = {
+  handler, validate, measure, signals, observe, buildAnalysisText, buildUserText,
+  parseAnalysis, analysisProblem, parseAnswer, answerProblem, ANALYSIS_PROMPT, GUIDED_PROMPT, FITS,
+};

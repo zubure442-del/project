@@ -55,35 +55,88 @@ afterEach(() => {
 });
 
 describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнения Лиса»', () => {
-  it('запрос приложения проходит проверку; модель видит одно наблюдение дня, а не таблицу', () => {
+  it('запрос приложения проходит проверку; ИИ видит всё, что заметил Vuelo, и действия плана', () => {
     const payload = appPayload();
     expect(fn.validate(payload)).toBeNull();
-    const text = fn.buildUserText(payload);
+    const text = fn.buildAnalysisText(payload);
     expect(text).toContain('Сейчас: день, 15:00.');
     expect(text).toContain('Человек: женщина, 32 года, рост 168 см, вес 60 кг. Цель: поддерживать форму.');
-    expect(text).toContain('Наблюдение дня (Vuelo выбрал его по числам кольца):');
-    expect(text).toMatch(/\nЧто видно: .+\.\nПричина: .+\.\nЧто предложить: .+\./);
-    expect(text).not.toMatch(/Анна|давлен|Таблица/);
+    expect(text).toContain('Что Vuelo заметил по кольцу (в сравнении с обычным для этого человека за неделю):');
+    expect(text).toMatch(/\nВ норме: .+\.\nДействия из плана Vuelo на сегодня \(ещё впереди\):\n- \[\w+\] /);
+    expect(text).not.toMatch(/Анна|давлен/);
+    expect(fn.buildUserText(payload)).toMatch(/\nЧто видно: .+\.\nПричина: .+\.\nЧто предложить: .+\./);
   });
 
-  it('пример из README (sample.json): вчера еда в 22:30 и тяжёлая ночь — поздний ужин, ужин по плану в 18:45', async () => {
+  it('пример из README (sample.json): ИИ получает всё необычное за неделю с метками и нормой', async () => {
     const sample = await readSample();
     expect(fn.validate(sample)).toBeNull();
-    const seen = fn.observe(sample);
-    expect(seen.id).toBe('late-meal');
-    expect(seen.cause).toContain('поздний ужин');
-    expect(seen.action).toBe('поужинать по графику Vuelo в 18:45');
-    expect(seen.facts[0]).toBe('вчера последний приём пищи в 22:30 (обычно около 19:42)');
-    expect(seen.facts[1]).toBe('этой ночью тело отдыхало хуже обычного: пульс во сне 62 (обычно 56), вариабельность 38 мс (обычно 47)');
-    expect(seen.facts[2]).toBe('уснули в 01:10 (обычно около 23:58)');
-    const text = fn.buildUserText(sample, seen);
-    expect(text).toContain('Что предложить: поужинать по графику Vuelo в 18:45.');
+    const seen = fn.signals(sample);
+    expect(seen.flagged).toEqual([
+      { id: 'late-meal', text: 'вчера последний приём пищи в 22:30 — обычно около 19:42' },
+      { id: 'bed-drift', text: 'засыпание три ночи подряд всё позже: 00:20, 00:40, 01:10 — обычно около 23:58' },
+      { id: 'deep-low', text: 'глубокий сон 0:50 — обычно около 1:12' },
+      { id: 'night-pulse-up', text: 'пульс во сне 62 — обычно около 56' },
+      { id: 'hrv-down', text: 'вариабельность 38 мс — обычно около 47' },
+      { id: 'stress-days', text: 'стресс днём несколько дней подряд выше обычного: 44, 49, 52 — обычно около 31' },
+    ]);
+    expect(seen.normal).toEqual(['длительность сна', 'шаги']);
+    const text = fn.buildAnalysisText(sample);
+    expect(text).toContain('- [dinner] поужинать по графику Vuelo в 18:45');
+    expect(text).toContain('- [bed] лечь между 23:00 и 23:30');
+    expect(text).toContain('- [meal] до ужина в 18:45 обойтись без перекусов');
   });
 
-  it('наблюдение дня выбирается по порядку важности и личным нормам', async () => {
+  it('у каждого наблюдения есть подходящие действия; «легли поздно — поешьте по графику» не пройдёт', async () => {
+    const ids = new Set();
+    const cases = [
+      [{}, {}], [{ nightPulse: 52, hrv: 56, sleepMin: 500, deepMin: 110 }, {}], [{ steps: 1000 }, {}], [{ steps: 9500 }, {}],
+      [{ nightPulse: 61, hrv: 42, asleep: '00:45', sleepMin: 380, deepMin: 50, stress: 50 }, { 1: { workout: 'cardio', meals: ['08:00', '10:30', '13:00', '16:00', '22:40'], stress: 48 }, 2: { stress: 45 } }],
+      [{ asleep: '00:40', sleepMin: 365 }, { 2: { asleep: '23:50', sleepMin: 370 }, 1: { asleep: '00:10', sleepMin: 360 } }],
+      [{}, { 5: { asleep: '02:00' }, 1: { stress: 45 } }],
+    ];
+    for (const [today, past] of cases) for (const s of fn.signals(await week(today, past)).flagged) ids.add(s.id);
+    ids.add('sleep-debt');
+    expect([...ids].sort()).toEqual(Object.keys(fn.FITS).sort());
+
+    const seen = { flagged: [{ id: 'bed-drift', text: '' }, { id: 'late-meal', text: '' }] };
+    const act = { dinner: 'поужинать по графику Vuelo в 18:45', bed: 'лечь между 23:00 и 23:30' };
+    const answer = (focus, action, text) => ({ focus, cause: 'x', action, text });
+    const lateBedDinner = answer(['bed-drift'], 'dinner', 'Похоже, вы легли позже обычного. Сегодня поешьте по графику Vuelo в 18:45.');
+    expect(fn.analysisProblem(lateBedDinner, seen, act)).toBe('mismatch');
+    expect(fn.analysisProblem(answer(['late-meal'], 'dinner', 'Похоже, вчера был поздний ужин. Сегодня поужинайте в 18:45.'), seen, act)).toBeNull();
+    expect(fn.analysisProblem(answer(['bed-drift'], 'bed', 'Похоже, сбился режим. Сегодня лягте между 23:00 и 23:30.'), seen, act)).toBeNull();
+    expect(fn.analysisProblem(answer(['moon'], 'bed', 'Похоже, сбился режим. Сегодня лягте между 23:00 и 23:30.'), seen, act)).toBe('focus');
+    expect(fn.analysisProblem(answer(['bed-drift'], 'yoga', 'Похоже, сбился режим. Сегодня лягте между 23:00 и 23:30.'), seen, act)).toBe('action');
+    expect(fn.analysisProblem(answer(['bed-drift'], 'bed', null), seen, act)).toBe('format');
+  });
+
+  it('ответ ИИ-анализа: четыре строки, метки разбираются', () => {
+    const raw = '**Главное:** [late-meal] [hrv-down]\nПричина: поздний ужин\nДействие: [dinner]\nЛис: Похоже, вчера был поздний ужин.\nСегодня поужинайте в 18:45.';
+    expect(fn.parseAnalysis(raw)).toEqual({
+      focus: ['late-meal', 'hrv-down'], cause: 'поздний ужин', action: 'dinner', text: 'Похоже, вчера был поздний ужин. Сегодня поужинайте в 18:45.',
+    });
+    expect(fn.parseAnalysis('Похоже, всё хорошо.')).toEqual({ focus: [], cause: null, action: null, text: null });
+  });
+
+  it('правила ИИ-анализа: разобраться самому, одно главное, причина и действие — к нему; пример проходит проверку', () => {
+    expect(fn.ANALYSIS_PROMPT).toContain('Ты — Лис');
+    expect(fn.ANALYSIS_PROMPT).toContain('Разберись сам: какие наблюдения связаны между собой, что за ними стоит и что сейчас для человека главное');
+    expect(fn.ANALYSIS_PROMPT).toContain('Причина должна их объяснять, а действие — помогать именно с ними');
+    expect(fn.ANALYSIS_PROMPT).toContain('Не называй показатели и числа из наблюдений');
+    expect(fn.ANALYSIS_PROMPT).toContain('не больше 190 символов');
+    const example = fn.parseAnalysis(fn.ANALYSIS_PROMPT.slice(fn.ANALYSIS_PROMPT.indexOf('Пример ответа')));
+    const seen = { flagged: [{ id: 'late-meal', text: '' }, { id: 'hrv-down', text: '' }] };
+    expect(fn.analysisProblem(example, seen, { dinner: 'поужинать по графику Vuelo в 19:30' })).toBeNull();
+  });
+
+  it('запасной шаг: наблюдение дня выбирается по порядку важности и личным нормам', async () => {
     const id = async (today, past, extra) => fn.observe(await week(today, past, extra));
     expect((await id()).id).toBe('steady');
     expect((await id()).action).toBe('спокойное кардио с 18:00 до 20:00');
+
+    const sample = fn.observe(await readSample());
+    expect([sample.id, sample.action]).toEqual(['late-meal', 'поужинать по графику Vuelo в 18:45']);
+    expect(sample.facts[0]).toBe('вчера последний приём пищи в 22:30 — обычно около 19:42');
 
     const late = await id({ nightPulse: 60 }, { 1: { meals: ['08:00', '13:00', '19:30', '22:40'] } });
     expect([late.id, late.action]).toEqual(['late-meal', 'поужинать по графику Vuelo в 18:45']);
@@ -109,7 +162,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(short.id).toBe('short-sleep');
 
     const snacks = await id({}, { 1: { meals: ['08:00', '10:30', '13:00', '16:00', '19:30'] } });
-    expect([snacks.id, snacks.action]).toEqual(['snacks', 'ужин по графику Vuelo в 18:45, без перекусов до него']);
+    expect([snacks.id, snacks.action]).toEqual(['snacks', 'до ужина в 18:45 обойтись без перекусов']);
 
     const sitting = await id({ steps: 1000 });
     expect([sitting.id, sitting.action]).toEqual(['low-activity', 'до нормы шагов осталось около 8 000']);
@@ -118,43 +171,34 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect([good.id, good.cause, good.action]).toEqual(['good-recovery', 'тело отлично восстановилось', 'спокойное кардио с 18:00 до 20:00']);
   });
 
-  it('вечером предлагаем то, что ещё впереди: ужин прошёл — лечь в окно Vuelo', async () => {
+  it('действия — только то, что ещё впереди: вечером ужин прошёл — окно сна; ночью — ничего', async () => {
     const evening = await week({ nightPulse: 60 }, { 1: { meals: ['08:00', '13:00', '22:40'] } }, { mode: 'evening', time: '21:00' });
-    const seen = fn.observe(evening);
-    expect([seen.id, seen.action]).toEqual(['late-meal', 'лечь между 23:00 и 23:30']);
-    // Утром окно сна ещё впереди, ночью (до 4:00) — только если не прошло.
+    expect(fn.measure(evening).act).toEqual({ bed: 'лечь между 23:00 и 23:30', coffee: 'кофе на сегодня уже хватит', steps: 'до нормы шагов осталось около 4 000', norm: 'норма на сегодня 9 000 шагов' });
+    expect([fn.observe(evening).id, fn.observe(evening).action]).toEqual(['late-meal', 'лечь между 23:00 и 23:30']);
     const morning = fn.observe(await week({ asleep: '00:45' }, {}, { mode: 'morning', time: '09:00' }));
     expect([morning.id, morning.action]).toEqual(['late-bed', 'лечь между 23:00 и 23:30']);
     const night = fn.observe(await week({ asleep: '00:45' }, {}, { mode: 'morning', time: '01:00' }));
     expect(night.action).toBeNull();
   });
 
-  it('правила для модели: Лис говорит выбранное наблюдение своими словами, без чисел и названий показателей', () => {
-    expect(fn.SYSTEM_PROMPT).toContain('Ты — Лис');
-    expect(fn.SYSTEM_PROMPT).toContain('от первого лица');
-    expect(fn.SYSTEM_PROMPT).toContain('Наблюдение уже выбрано: не ищи другое и ничего к нему не добавляй');
-    expect(fn.SYSTEM_PROMPT).toContain('Не называй показатели и числа из «Что видно»');
-    expect(fn.SYSTEM_PROMPT).toContain('Причина не видна — скажи только о том, что видно, и ничего не додумывай');
-    expect(fn.SYSTEM_PROMPT).toContain('не больше 190 символов');
-    expect(fn.SYSTEM_PROMPT).toContain('Плохо, так нельзя:\nОтвет: Похоже, вы легли позже обычного — может, что-то задержало.');
-  });
-
-  it('хорошие примеры из правил проходят проверку ответа, плохой — нет', () => {
-    const [good, bad] = fn.SYSTEM_PROMPT.split('Плохо, так нельзя:');
+  it('правила запасного шага: Лис говорит выбранное наблюдение своими словами; хорошие примеры проходят, плохой — нет', () => {
+    expect(fn.GUIDED_PROMPT).toContain('Наблюдение уже выбрано: не ищи другое и ничего к нему не добавляй');
+    expect(fn.GUIDED_PROMPT).toContain('Причина не видна — скажи только о том, что видно, и ничего не додумывай');
+    const [good, bad] = fn.GUIDED_PROMPT.split('Плохо, так нельзя:');
     const pairs = [...good.matchAll(/Что предложить: (.+)\.\nОтвет: (.+)/g)];
     expect(pairs).toHaveLength(4);
     for (const [, action, answer] of pairs) expect(fn.answerProblem(answer, action)).toBeNull();
     expect(fn.answerProblem(bad.replace(/^\s*Ответ: /, '').trim(), 'лечь между 23:00 и 23:30')).toBe('vague');
   });
 
-  it('ответ модели: без подписи «Ответ:» / «Лис:» и без рассуждений', () => {
+  it('ответ запасного шага: без подписи «Ответ:» / «Лис:» и без рассуждений', () => {
     expect(fn.parseAnswer(' Похоже, вчера был поздний ужин. ')).toBe('Похоже, вчера был поздний ужин.');
     expect(fn.parseAnswer('Ответ: Похоже,\nвчера был поздний ужин.')).toBe('Похоже, вчера был поздний ужин.');
     expect(fn.parseAnswer('Думаю: ужин в 22:30.\n**Лис:** Похоже, вчера был поздний ужин.')).toBe('Похоже, вчера был поздний ужин.');
     expect(fn.parseAnswer('Думаю: поздний ужин.')).toBeNull();
   });
 
-  it('проверка ответа: без расплывчатого, числа только из действия, время действия — обязательно', () => {
+  it('проверка текста: без расплывчатого, числа только из действия, время действия — обязательно', () => {
     const dinner = 'поужинать по графику Vuelo в 18:45';
     expect(fn.answerProblem('Похоже, вчера был поздний ужин — ночью телу было не до отдыха. Сегодня поужинайте в 18:45.', dinner)).toBeNull();
     expect(fn.answerProblem('Похоже, вы легли позже обычного — может, что-то задержало. Поужинайте в 18:45.', dinner)).toBe('vague');
@@ -183,19 +227,24 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect((await fn.handler(event({ ...appPayload(), mode: 'night' }), context)).statusCode).toBe(400);
   });
 
-  it('ходит в YandexGPT от имени сервисного аккаунта, логирование у Яндекса выключено, отдаёт текст и наблюдение', async () => {
+  it('ИИ-анализ: ходит в YandexGPT от имени сервисного аккаунта, логирование у Яндекса выключено; решение модели — в ответе', async () => {
     vi.stubEnv('APP_KEY', 'secret');
     vi.stubEnv('FOLDER_ID', 'b1gfolder');
     const calls = [];
     vi.stubGlobal('fetch', async (url, init) => {
       calls.push({ url, init });
-      return modelAnswer(' Похоже, вчера был поздний ужин — ночью телу было не до отдыха. Сегодня поужинайте по графику Vuelo, в 18:45. ');
+      return modelAnswer(
+        'Главное: [stress-days] [bed-drift]\nПричина: давно без передышки\nДействие: [bed]\n' +
+          'Лис: Кажется, вы уже несколько дней как натянутая струна, и вечера затягиваются. Сегодня лягте между 23:00 и 23:30.',
+      );
     });
     const res = await fn.handler(event(await readSample()), context);
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body)).toEqual({
-      text: 'Похоже, вчера был поздний ужин — ночью телу было не до отдыха. Сегодня поужинайте по графику Vuelo, в 18:45.',
-      finding: 'late-meal',
+      text: 'Кажется, вы уже несколько дней как натянутая струна, и вечера затягиваются. Сегодня лягте между 23:00 и 23:30.',
+      mode: 'analysis',
+      focus: ['stress-days', 'bed-drift'],
+      cause: 'давно без передышки',
     });
     const sent = JSON.parse(calls[0].init.body);
     expect(calls).toHaveLength(1);
@@ -203,33 +252,32 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(calls[0].init.headers.Authorization).toBe('Bearer iam-token');
     expect(calls[0].init.headers['x-data-logging-enabled']).toBe('false');
     expect(sent.modelUri).toBe('gpt://b1gfolder/yandexgpt/latest');
-    expect(sent.messages[0].role).toBe('system');
-    expect(sent.messages[1].text).toContain('Что предложить: поужинать по графику Vuelo в 18:45.');
+    expect(sent.messages[0].text).toBe(fn.ANALYSIS_PROMPT);
+    expect(sent.messages[1].text).toContain('- [late-meal] вчера последний приём пищи в 22:30');
   });
 
-  it('ответ не по правилам — один раз просим переписать; снова мимо — 502, в приложении шаблон', async () => {
+  it('анализ невпопад — запасной шаг с готовым наблюдением; и он мимо — 502, в приложении шаблон', async () => {
     vi.stubEnv('APP_KEY', 'secret');
     vi.stubEnv('FOLDER_ID', 'b1gfolder');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const vague = 'Похоже, вы легли позже обычного — может, что-то задержало. Выделите время для себя по графику Vuelo.';
-    const good = 'Похоже, вчера был поздний ужин. Сегодня поужинайте по графику Vuelo, в 18:45.';
+    const mismatch = 'Главное: [bed-drift]\nПричина: сбился режим\nДействие: [dinner]\nЛис: Похоже, вы легли позже обычного. Сегодня поешьте по графику Vuelo в 18:45.';
+    const guided = 'Похоже, вчера был поздний ужин — ночью телу было не до отдыха. Сегодня поужинайте по графику Vuelo, в 18:45.';
     const bodies = [];
-    let answers = [vague, good];
+    let answers = [mismatch, guided];
     vi.stubGlobal('fetch', async (url, init) => {
       bodies.push(JSON.parse(init.body));
       return modelAnswer(answers.shift());
     });
     const sample = await readSample();
     const res = await fn.handler(event(sample), context);
-    expect(JSON.parse(res.body).text).toBe(good);
-    expect(bodies).toHaveLength(2);
-    expect(bodies[1].messages.slice(2).map((m) => m.role)).toEqual(['assistant', 'user']);
-    expect(bodies[1].messages[3].text).toContain('Расплывчато');
+    expect(JSON.parse(res.body)).toEqual({ text: guided, mode: 'guided', focus: ['late-meal'], cause: 'поздний ужин — ночью телу пришлось переваривать, а не отдыхать' });
+    expect(bodies.map((b) => b.messages[0].text)).toEqual([fn.ANALYSIS_PROMPT, fn.GUIDED_PROMPT]);
+    expect(bodies[1].messages[1].text).toContain('Что предложить: поужинать по графику Vuelo в 18:45.');
 
-    answers = [vague, vague];
+    answers = [mismatch, 'Похоже, вы легли позже обычного — может, что-то задержало. Выделите время для себя по графику Vuelo.'];
     const again = await fn.handler(event(sample), context);
     expect(again.statusCode).toBe(502);
-    expect(JSON.parse(again.body)).toEqual({ error: 'answer vague', finding: 'late-meal' });
+    expect(JSON.parse(again.body)).toEqual({ error: 'answer mismatch / vague' });
   });
 
   it('модель недоступна — 502, приложение оставит шаблонный совет', async () => {

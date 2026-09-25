@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, FadeIn, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 import {
   ADVICE_LABEL,
@@ -326,6 +326,58 @@ function SleepModeBody({ plan }: { plan: SleepMode }) {
   );
 }
 
+/** Такт точек «Лис смотрит…»: каждая загорается по очереди. */
+const THINKING_DOT_MS = 420;
+/** Новое мнение проявляется, а не подменяется молча. */
+const ADVICE_FADE_MS = 450;
+
+function ThinkingDot({ index }: { index: number }) {
+  const reduceMotion = useReduceMotion();
+  const on = useSharedValue(reduceMotion ? 1 : 0.25);
+  useEffect(() => {
+    if (reduceMotion) {
+      on.value = 1;
+      return;
+    }
+    on.value = withDelay(
+      index * THINKING_DOT_MS,
+      withRepeat(withSequence(withTiming(1, { duration: THINKING_DOT_MS }), withTiming(0.25, { duration: THINKING_DOT_MS * 2 })), -1),
+    );
+  }, [index, on, reduceMotion]);
+  const style = useAnimatedStyle(() => ({ opacity: on.value }));
+  return <Animated.View style={[styles.thinkingDot, style]} />;
+}
+
+/**
+ * Мнение Лиса. Пока идёт выгрузка или запрос за свежим мнением (`foxThinking`), вместо старого
+ * текста — «Лис смотрит, как прошла ночь» и три точки: так видно, что Лис разбирает свежие данные,
+ * а не показывает вчерашнее. Новый текст проявляется (кроме «Уменьшения движения»); текст, который
+ * был при появлении карточки, показывается сразу.
+ */
+function AdviceBody({ text, thinking }: { text: string; thinking: string | null }) {
+  const reduceMotion = useReduceMotion();
+  const [initial] = useState(thinking ? null : text);
+  if (thinking) {
+    return (
+      <View style={[styles.advice, styles.thinking]}>
+        <Text style={styles.thinkingText}>{thinking}</Text>
+        <View style={styles.thinkingDots}>
+          {[0, 1, 2].map((i) => (
+            <ThinkingDot key={i} index={i} />
+          ))}
+        </View>
+      </View>
+    );
+  }
+  return (
+    <Animated.View key={text} entering={!reduceMotion && text !== initial ? FadeIn.duration(ADVICE_FADE_MS) : undefined} style={styles.advice}>
+      <Text style={[styles.adviceText, adviceFontSize(text)]} numberOfLines={ADVICE_MAX_LINES} ellipsizeMode="tail">
+        {text}
+      </Text>
+    </Animated.View>
+  );
+}
+
 interface Slide {
   key: Exclude<AssistantSlide, 'advice'>;
   title: string;
@@ -357,6 +409,7 @@ export function AssistantCarousel({
   slides,
   advice,
   adviceLabel,
+  thinking = null,
   coffee,
   food,
   endurance = null,
@@ -365,6 +418,8 @@ export function AssistantCarousel({
   slides: readonly AssistantSlide[];
   advice: string | null;
   adviceLabel: string;
+  /** «Лис смотрит, как прошла ночь» — вместо совета, пока готовится свежее мнение. */
+  thinking?: string | null;
   coffee: (CoffeeWindow & { nowMinute: number }) | null;
   food: FoodCycle | null;
   endurance?: EnduranceView | null;
@@ -400,11 +455,7 @@ export function AssistantCarousel({
             {advice ? (
               <>
                 <Text style={styles.small}>{adviceLabel}</Text>
-                <View style={styles.advice}>
-                  <Text style={[styles.adviceText, adviceFontSize(advice)]} numberOfLines={ADVICE_MAX_LINES} ellipsizeMode="tail">
-                    {advice}
-                  </Text>
-                </View>
+                <AdviceBody text={advice} thinking={thinking} />
               </>
             ) : (
               <Text style={styles.text}>{ADVICE_LABEL} появится, когда день будет полным</Text>
@@ -461,6 +512,10 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   adviceText: { color: colors.text, fontSize: 18, lineHeight: 27 },
+  thinking: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  thinkingText: { color: colors.textMuted, fontSize: 16, lineHeight: 23, flexShrink: 1 },
+  thinkingDots: { flexDirection: 'row', gap: 5 },
+  thinkingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
   text: { color: colors.textMuted, fontSize: 15, lineHeight: 22 },
   small: { color: colors.textFaint, fontSize: 12 },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },

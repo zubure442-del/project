@@ -84,6 +84,10 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(text).toContain('- [dinner] поужинать по графику Vuelo в 18:45');
     expect(text).toContain('- [bed] лечь между 23:00 и 23:30');
     expect(text).toContain('- [meal] до ужина в 18:45 обойтись без перекусов');
+    // Лис помнит, что говорил: недавние мнения с тем, когда они были.
+    expect(text).toContain('\nЧто ты уже говорил этому человеку:\n- вчера вечером — ');
+    expect(text).toContain('\n- сегодня утром — Похоже, поздний ужин снова затянул вечер');
+    expect(fn.ANALYSIS_PROMPT).toContain('Если сегодня вы уже говорили — продолжи ту же историю');
   });
 
   it('другие дни из README дают другие истории: бокал-другой, работа допоздна, отличное восстановление', async () => {
@@ -148,7 +152,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const seen = { flagged: [{ id: 'night-pulse-up', text: '' }, { id: 'hrv-down', text: '' }] };
     expect(fn.analysisProblem(example, seen, { bed: 'лечь между 22:45 и 23:15' })).toBeNull();
     const more = [...fn.ANALYSIS_PROMPT.slice(fn.ANALYSIS_PROMPT.indexOf('Ещё примеры')).matchAll(/\nЛис: (.+)/g)].map((x) => x[1]);
-    expect(more).toHaveLength(5);
+    expect(more).toHaveLength(6);
     for (const line of more) expect(fn.answerProblem(line, line)).toBeNull();
   });
 

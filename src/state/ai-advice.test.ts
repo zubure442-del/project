@@ -2,7 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { AI_TEMPLATE_ID } from '../domain';
 import { EMPTY_STATE, type VueloState } from '../storage';
 import { emptySyncResult } from '../ble/sync';
-import { AI_ADVICE_RETRY_MS, aiAdviceDue, aiAdviceKey, aiAdviceRequest, fetchAiAdvice, withAiAdvice } from './ai-advice';
+import {
+  AI_ADVICE_RETRY_MS,
+  FOX_THINKING_TEXT,
+  aiAdviceDue,
+  aiAdviceKey,
+  aiAdviceRequest,
+  fetchAiAdvice,
+  foxThinking,
+  recentOpinions,
+  withAiAdvice,
+} from './ai-advice';
 import { currentCycle } from './cycle';
 import { adviceFor, adviceModeNow, coffeeInput } from './day';
 import { sleepModeFor } from './sleep-mode';
@@ -52,7 +62,7 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
     expect(request.templateId).toBe('d-act-mid-1');
     expect(p.time).toBe('15:00');
     expect(p.profile).toEqual({ sex: 'male', age: 36, heightCm: 180, weightKg: 82, goal: 'lose' });
-    expect(p.recent).toEqual(['День получился сбалансированным.']);
+    expect(p.recent).toEqual(['вчера вечером — День получился сбалансированным.']);
     expect(JSON.stringify(p)).not.toContain('Анна');
     // Таблица чисел по дням: неделя до сегодня и сегодня; шаги сегодня по часам.
     expect(p.days.at(-1)?.ago).toBe(0);
@@ -137,6 +147,42 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
     expect(aiAdviceDue(undefined, 0)).toBe(true);
     expect(aiAdviceDue(0, AI_ADVICE_RETRY_MS - 1)).toBe(false);
     expect(aiAdviceDue(0, AI_ADVICE_RETRY_MS)).toBe(true);
+  });
+
+  it('память Лиса: недавние мнения по порядку и с тем, когда сказаны; текущий отрезок не входит', () => {
+    const r = (date: string, mode: 'morning' | 'day' | 'evening', text: string) => ({ date, mode, templateId: 'ai:yandexgpt', text });
+    const current = r('2026-09-25', 'evening', 'Шаблон на вечер.');
+    const reports = [r('2026-09-25', 'morning', 'Похоже, вчера был поздний ужин.'), r('2026-09-23', 'evening', 'Давно.'),
+      r('2026-09-24', 'evening', 'Вечер вышел спокойным.'), r('2026-09-25', 'day', 'День идёт ровно.'), current];
+    expect(recentOpinions(reports, '2026-09-25', current)).toEqual([
+      'вчера вечером — Вечер вышел спокойным.',
+      'сегодня утром — Похоже, вчера был поздний ужин.',
+      'сегодня днём — День идёт ровно.',
+    ]);
+  });
+
+  it('«Лис смотрит…» вместо старого совета — пока идёт выгрузка или запрос за свежим мнением', () => {
+    const state = stateWithTemplate();
+    const base = { state, now: NOW, aiOn: true, syncing: false, requesting: null };
+    // Мнения от модели на дневной отрезок нет: пока идёт выгрузка — «смотрит, как идёт день».
+    expect(foxThinking({ ...base, syncing: true })).toBe('day');
+    expect(FOX_THINKING_TEXT.day).toBe('Лис смотрит, как идёт день');
+    // Запрос уже идёт — тоже думает; ничего не идёт — показываем то, что есть.
+    expect(foxThinking({ ...base, requesting: 'day' })).toBe('day');
+    expect(foxThinking(base)).toBeNull();
+    // Без ИИ и в демо — никогда; неудачная попытка только что — после выгрузки просить не будем, сразу шаблон.
+    expect(foxThinking({ ...base, syncing: true, aiOn: false })).toBeNull();
+    expect(foxThinking({ ...base, syncing: true, state: { ...state, demo: true } })).toBeNull();
+    expect(foxThinking({ ...base, syncing: true, lastTry: () => NOW.getTime() - 60_000 })).toBeNull();
+    // Мнение от модели на отрезок уже есть — показываем его и во время выгрузки.
+    const request = aiAdviceRequest(state, NOW)!;
+    const withAi = withAiAdvice(state, request, 'Похоже, день идёт ровно. Сегодня лягте в окно Vuelo.');
+    expect(foxThinking({ ...base, state: withAi, syncing: true })).toBeNull();
+    // Утро следующего дня, новая ночь ещё на кольце: вчерашнее вечернее мнение не показываем.
+    const nextMorning = new Date(2026, 8, 26, 8, 30);
+    expect(foxThinking({ ...base, state: withAi, now: nextMorning, syncing: true })).toBe('morning');
+    // Ночью (до 4:00) ночь ещё идёт: не «как прошла ночь», а вечерний отрезок того же цикла.
+    expect(foxThinking({ ...base, state: withAi, now: new Date(2026, 8, 26, 3, 0), syncing: true })).toBe('evening');
   });
 
   it('ответ посредника: хороший текст — берём; ошибка, пустой ответ, запретный текст, нет сети — шаблон', async () => {

@@ -12,7 +12,7 @@ import {
 } from '../../ui';
 
 export default function TodayTab() {
-  const { state, statusText, sync, homeRequest } = useVuelo();
+  const { state, statusText, sync, homeRequest, foxThinking } = useVuelo();
   const { width } = useWindowDimensions();
   const { date: picked, banner, isToday, today, hasData } = useTabDay();
   // Рекомендации (совет, питание, пик выносливости, кофейное окно, режим сна) — только за сегодня; на прошлом дне блока нет вовсе.
@@ -45,6 +45,7 @@ export default function TodayTab() {
               slides={recs.slides}
               advice={recs.advice?.text ?? null}
               adviceLabel={adviceLabel(picked)}
+              thinking={foxThinking}
               coffee={recs.coffee}
               food={recs.food}
               endurance={recs.endurance}

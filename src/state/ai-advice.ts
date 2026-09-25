@@ -8,10 +8,11 @@ import {
   type AdvicePayload,
   type ReportMode,
 } from '../domain';
-import { addReport, profileAge, type VueloState } from '../storage';
+import { nowRingTs } from '../codec';
+import { addReport, profileAge, type StoredReport, type VueloState } from '../storage';
 import { adviceDaysFor } from './advice-days';
 import { currentCycle } from './cycle';
-import { adviceModeNow, recommendationsFor, todayKey } from './day';
+import { DAY_START_HOUR, adviceModeNow, recommendationsFor, todayKey } from './day';
 
 /**
  * Адрес посредника и ключ приложения — из файла `.env` в корне проекта (в git не попадает):
@@ -56,6 +57,83 @@ export interface AiAdviceRequest {
 }
 
 /**
+ * На какой цикл и отрезок нужно мнение от модели: текущий цикл с итогом и его отрезок, если мнения
+ * от модели на него ещё нет. null — не нужно (уже есть, нет итога, демо).
+ */
+export function aiAdviceTarget(
+  state: VueloState,
+  now = new Date(),
+): { date: string; mode: ReportMode; stored: StoredReport | null } | null {
+  if (state.demo) return null;
+  const cycle = currentCycle(state);
+  if (!cycle || cycle.total === null) return null;
+  const mode = adviceModeNow(state, now);
+  const stored = state.reports.find((r) => r.date === cycle.date && r.mode === mode) ?? null;
+  return stored && isAiTemplate(stored.templateId) ? null : { date: cycle.date, mode, stored };
+}
+
+const SLOT_ORDER: Record<ReportMode, number> = { morning: 0, day: 1, evening: 2 };
+const SLOT_WHEN: Record<ReportMode, string> = { morning: 'утром', day: 'днём', evening: 'вечером' };
+const shiftDate = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+
+/**
+ * Недавние мнения для модели — с тем, когда они были сказаны («сегодня утром — …»), по порядку:
+ * Лис продолжает историю дня (утром советовал лечь пораньше — вечером видит, что вышло), а не
+ * начинает каждый раз с нуля (владелец 26.09: «как будто не следит за тобой»).
+ */
+export function recentOpinions(reports: readonly StoredReport[], date: string, except: StoredReport | null): string[] {
+  const day = (d: string) => (d === date ? 'сегодня' : d === shiftDate(date, -1) ? 'вчера' : 'раньше');
+  return [...reports]
+    .filter((r) => r !== except && r.date <= date)
+    .sort((a, b) => a.date.localeCompare(b.date) || SLOT_ORDER[a.mode] - SLOT_ORDER[b.mode])
+    .slice(-AI_ADVICE_RECENT)
+    .map((r) => `${day(r.date)} ${SLOT_WHEN[r.mode]} — ${r.text}`);
+}
+
+/** Цикл в кэше, скорее всего, уже закончился: с подъёма прошло столько часов, а новая ночь ещё на кольце. */
+export const FOX_STALE_CYCLE_HOURS = 20;
+
+/** Что видно на карточке, пока Лис готовит мнение, — по отрезку. */
+export const FOX_THINKING_TEXT: Record<ReportMode, string> = {
+  morning: 'Лис смотрит, как прошла ночь',
+  day: 'Лис смотрит, как идёт день',
+  evening: 'Лис подводит итог дня',
+};
+
+/**
+ * Показывать ли вместо совета «Лис смотрит…»: свежее мнение от модели вот-вот будет, и старый текст
+ * (особенно вчерашний вечерний утром) выглядел бы неактуально (владелец 26.09). Отрезок — для текста.
+ * - запрос к модели уже идёт;
+ * - или идёт выгрузка, а после неё модель спросят: на текущий отрезок мнения от модели нет
+ *   (и прошлая неудачная попытка была давно), либо цикл в кэше, похоже, закончился — утро,
+ *   новая ночь ещё на кольце.
+ * Нет ИИ (нет `.env`) и в демо — никогда: там сразу шаблон.
+ */
+export function foxThinking(input: {
+  state: VueloState;
+  now?: Date;
+  aiOn: boolean;
+  syncing: boolean;
+  requesting: ReportMode | null;
+  lastTry?: (key: string) => number | undefined;
+}): ReportMode | null {
+  const { state, aiOn, syncing, requesting } = input;
+  const now = input.now ?? new Date();
+  if (!aiOn || state.demo) return null;
+  if (requesting) return requesting;
+  if (!syncing) return null;
+  const cycle = currentCycle(state);
+  if (!cycle) return null;
+  const nowTs = nowRingTs(now.getTime(), -now.getTimezoneOffset() * 60);
+  // Ночью (до 4:00) ночь ещё не кончилась — «как прошла ночь» говорить рано.
+  if (nowTs - cycle.start >= FOX_STALE_CYCLE_HOURS * 3600 && now.getHours() >= DAY_START_HOUR) return 'morning';
+  const target = aiAdviceTarget(state, now);
+  if (!target) return null;
+  return aiAdviceDue(input.lastTry?.(aiAdviceKey(target)), now.getTime()) ? target.mode : null;
+}
+
+/**
  * Какой совет попросить у модели. Тот же, что показывает «Сегодня» (`adviceFor`): текущий цикл
  * с итогом и его отрезок — после пробуждения, днём или перед сном (`adviceModeNow`). Совет от модели
  * на этот цикл и отрезок уже есть — не просим: текст не должен меняться от синхронизации
@@ -69,12 +147,10 @@ export interface AiAdviceRequest {
  * Значений глюкозы и давления не отдаём — только время подъёмов глюкозы (обычно это еда).
  */
 export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRequest | null {
-  if (state.demo) return null;
+  const target = aiAdviceTarget(state, now);
   const cycle = currentCycle(state);
-  if (!cycle || cycle.total === null) return null;
-  const mode = adviceModeNow(state, now);
-  const stored = state.reports.find((r) => r.date === cycle.date && r.mode === mode) ?? null;
-  if (stored && isAiTemplate(stored.templateId)) return null;
+  if (!target || !cycle) return null;
+  const { mode, stored } = target;
 
   const today = todayKey(now);
   const rec = recommendationsFor(state, today, now);
@@ -127,10 +203,7 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
             }
           : null,
       },
-      recent: state.reports
-        .filter((r) => r !== stored)
-        .slice(-AI_ADVICE_RECENT)
-        .map((r) => r.text),
+      recent: recentOpinions(state.reports, cycle.date, stored),
     },
   };
 }

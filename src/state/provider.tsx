@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { nowRingTs } from '../codec';
+import type { ReportMode } from '../domain';
 import {
   RingBle,
   clearPacketLog,
@@ -32,7 +33,17 @@ import { DEMO_STATUS_TEXT, demoState } from './demo';
 import { loadPlan, loadProgress, recordDurations, runsInBackground, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withOnboarding } from './profile';
 import { settleRelayState } from './relay';
-import { AI_ADVICE_SLOT_TEXT, aiAdviceConfig, aiAdviceDue, aiAdviceKey, aiAdviceRequest, fetchAiAdvice, withAiAdvice } from './ai-advice';
+import {
+  AI_ADVICE_SLOT_TEXT,
+  FOX_THINKING_TEXT,
+  aiAdviceConfig,
+  aiAdviceDue,
+  aiAdviceKey,
+  aiAdviceRequest,
+  fetchAiAdvice,
+  foxThinking,
+  withAiAdvice,
+} from './ai-advice';
 import { applySyncResult, newUserTodayOnly, planDays, rebuildDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -105,6 +116,12 @@ interface Vuelo {
    * Меняется, пока приложение открыто, — «Сегодня» перерисовывает совет под новый отрезок.
    */
   adviceSlot: string;
+  /**
+   * «Лис смотрит, как прошла ночь» — пока идёт выгрузка или запрос за свежим мнением от модели
+   * (`foxThinking`): вместо старого совета карточка показывает, что Лис разбирает свежие данные.
+   * null — показываем совет как есть.
+   */
+  foxThinking: string | null;
   /** Демо-режим включён: экраны показывают синтетические показатели, посчитанные реальными формулами. */
   demo: boolean;
   /** Включить или выключить демо-режим (меню разработчика). Реальное состояние и хранилище не трогаются. */
@@ -176,14 +193,20 @@ export function VueloProvider({ children }: { children: ReactNode }) {
    */
   const adviceBusy = useRef(false);
   const adviceTried = useRef(new Map<string, number>());
+  // То же для экрана: идёт ли запрос и когда пробовали — от этого зависит «Лис смотрит…».
+  const [adviceRequesting, setAdviceRequesting] = useState<ReportMode | null>(null);
+  const [adviceTriedAt, setAdviceTriedAt] = useState<Record<string, number>>({});
   const refineAdvice = useCallback(async () => {
     const config = aiAdviceConfig();
     const request = config ? aiAdviceRequest(latest.current) : null;
     if (!config || !request || adviceBusy.current) return;
     const key = aiAdviceKey(request);
     if (!aiAdviceDue(adviceTried.current.get(key))) return;
-    adviceTried.current.set(key, Date.now());
+    const triedAt = Date.now();
+    adviceTried.current.set(key, triedAt);
+    setAdviceTriedAt((prev) => ({ ...prev, [key]: triedAt }));
     adviceBusy.current = true;
+    setAdviceRequesting(request.mode);
     const slot = AI_ADVICE_SLOT_TEXT[request.mode];
     try {
       const result = await fetchAiAdvice(request.payload, config);
@@ -200,6 +223,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       logNote(`мнение Лиса (${slot}) от модели получено`);
     } finally {
       adviceBusy.current = false;
+      setAdviceRequesting(null);
     }
   }, [commit]);
 
@@ -524,6 +548,13 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     const clock = new Date(y, m - 1, d, 12);
     const view = dayView(shown.days, clock);
     const week = weekDays(shown.days, clock);
+    const thinking = foxThinking({
+      state: shown,
+      aiOn: aiAdviceConfig() !== null,
+      syncing: phase === 'loading' || phase === 'background',
+      requesting: adviceRequesting,
+      lastTry: (key) => adviceTriedAt[key],
+    });
     return {
       state: shown,
       ready,
@@ -548,10 +579,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       clearData,
       homeRequest,
       adviceSlot,
+      foxThinking: thinking ? FOX_THINKING_TEXT[thinking] : null,
       demo: demo !== null,
       setDemo,
     };
-  }, [adviceSlot, clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, homeRequest, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
+  }, [adviceRequesting, adviceSlot, adviceTriedAt, clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, homeRequest, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

@@ -6,10 +6,16 @@
  * Приложение присылает всё, кроме имени (решение владельца 26.09): профиль (пол, возраст, рост,
  * вес, цель), оценки дня, таблицу чисел по последним дням (сон, пульс во сне, вариабельность,
  * стресс, шаги, нагрузка, время еды по подъёмам глюкозы — без значений глюкозы и давления),
- * шаги сегодня по часам и план Vuelo на сегодня. Никаких готовых выводов: по числам модель пишет
- * «Мнение Лиса» — не анализ, а личное мнение о том, что с человеком происходит, и одно напутствие.
- * Модель отвечает двумя строками — «Думаю:» (рассуждение) и «Лис:» (текст); функция отдаёт
- * `{ text, thought }`, приложение показывает только text, thought виден при проверке через curl.
+ * шаги сегодня по часам и план Vuelo на сегодня.
+ *
+ * Как ежедневные сообщения Oura (контекст, догадка о причине, одно маленькое действие): главное
+ * наблюдение дня выбирает не модель, а эта функция — по правилам и личным нормам человека
+ * (`observe`): что видно, вероятная причина и одно действие из плана Vuelo с его временем.
+ * Модель только говорит это голосом Лиса. Раньше модель сама читала всю таблицу — Lite путалась
+ * и связывала несвязанное («легли поздно — поешьте по графику»; владелец 26.09: «бред»).
+ * Функция отдаёт `{ text, finding }`: приложение показывает text, finding (какое наблюдение
+ * выбрано) виден при проверке через curl.
+ *
  * Ключей API здесь нет: функция ходит в YandexGPT от имени своего сервисного аккаунта
  * (роль ai.languageModels.user), токен выдаёт сама платформа (context.token).
  * Яндексу передаётся x-data-logging-enabled: false — запросы не сохраняются у него для обучения.
@@ -38,54 +44,262 @@ const SEX_TEXT = { male: 'мужчина', female: 'женщина' };
 const WORKOUT_TEXT = { cardio: 'кардио', strength: 'силовая' };
 
 /**
- * Правила для модели. Ответ — две строки: «Думаю:» (рассуждение по числам, человеку не показываем)
- * и «Лис:» (сам текст). Рассуждение перед ответом заметно улучшает догадки слабых моделей (Lite):
- * сначала найти в таблице, что отличается, потом назвать причину. Владелец 26.09: причина —
- * конкретная («поздний ужин», а не «что-то задержало»), напутствие — пункт плана Vuelo с его временем
- * («выделите время для себя по графику Vuelo» — бессмыслица: такого пункта в плане нет).
+ * Правила для модели. Наблюдение уже выбрано (`observe`), модель его только говорит — два
+ * предложения голосом Лиса: мнение о причине и действие из плана с его временем.
  */
 const SYSTEM_PROMPT = `Ты — Лис, маскот Vuelo — приложения к умному кольцу. Ты давно наблюдаешь за этим человеком и знаешь его ритм. Говоришь с ним сам, от первого лица, как близкий друг, а не как врач или аналитик. Обращайся на «вы».
 
-Тебе дают таблицу чисел по дням и план Vuelo на сегодня. Не пересказывай числа — скажи своё мнение: что, по-твоему, происходит с человеком и почему, — и дай одно конкретное напутствие.
+Каждый раз Vuelo по числам кольца выбирает одно главное наблюдение: что видно, вероятную причину и одно действие из плана. Твоя задача — сказать это человеку своими словами, тепло и просто, как короткое сообщение в хорошем приложении для сна. Наблюдение уже выбрано: не ищи другое и ничего к нему не добавляй.
 
-Ответ — ровно две строки:
-Думаю: для себя, до 200 символов — что в таблице отличается от обычного (дни и числа) и какую причину ты из этого выводишь.
-Лис: сам ответ человеку.
+Ответ — только текст, два предложения, не больше 190 символов:
+1. Твоё мнение: что с человеком и почему. Причину говори как свою догадку: «похоже», «кажется», «думаю». Причина не видна — скажи только о том, что видно, и ничего не додумывай.
+2. Действие из «Что предложить» — с его временем, если оно там есть. Можно добавить короткую поддержку.
 
-Как найти причину:
-- Сравни вчера и сегодня с остальными днями и посмотри на несколько дней подряд. Выбери одну главную мысль — самую важную сейчас; тему и слова недавних мнений не повторяй.
-- Причину называй прямо — одну, ту, на которую указывают числа:
-  поздний подъём глюкозы (после 21:00) — поздний ужин;
-  больше четырёх подъёмов глюкозы за день — перекусы;
-  ночью пульс выше и вариабельность ниже обычного, поздней еды не было — бокал вина или кофе после обеда;
-  то же после дня с тренировкой или большой нагрузкой — поздняя тренировка, тело не успело остыть;
-  стресс днём выше обычного — голова занята делами, трудно отключиться;
-  несколько дней подряд стресс растёт, а сон короче — вы давно без передышки;
-  засыпание день ото дня всё позже или в разное время — сбился режим;
-  короткий сон несколько ночей подряд — накопилась усталость;
-  сон дольше и глубже обычного, ночью пульс ниже — тело отлично восстановилось.
-- Нельзя расплывчато: «что-то задержало», «что-то помешало», «какие-то дела», «по какой-то причине». Не видно причины — не гадай, скажи о том, что видно: режим, усталость, хорошее восстановление.
+Правила:
+- Не называй показатели и числа из «Что видно»: никаких «пульс», «вариабельность», «стресс», «глубокий сон», процентов и «выше/ниже обычного». Говори о человеке: теле, ночи, вечере, режиме, привычках. Числа — только из «Что предложить».
+- Учитывай пол, возраст и цель, но не называй их и не оценивай фигуру.
+- Слова недавних мнений не повторяй.
+- Нельзя: приветствия, прощания, вопросы; болезни, диагнозы, лекарства, врачи, обещания результата; слова «глюкоза», «сахар», «давление»; оценки «из 100»; другие приложения и бренды, кроме Vuelo; эмодзи, списки, кавычки; общие слова вроде «что-то задержало», «выделите время для себя», «не перегружайте себя», «берегите себя».
 
-Напутствие — одно конкретное действие на ближайшие часы, лучше пункт плана Vuelo с его временем: поужинать в такое-то время, последний кофе до такого-то, лечь в окно из плана, вечер без поздней еды. Время бери только из плана ниже, не из примеров. «По графику Vuelo» — только рядом с таким пунктом и его временем. Нельзя абстрактно: «выделите время для себя», «следуйте графику Vuelo», «не перегружайте себя», «берегите себя».
-
-Пример ответа целиком:
-Думаю: вчера подъём глюкозы в 23:10, заснул в 01:20 вместо обычных 23:30, ночью пульс 61 при обычных 55 — поздний ужин.
-Лис: Похоже, вчера был поздний ужин — ночью телу было не до отдыха. Сегодня поужинайте по графику Vuelo, в 19:30, и лягте между 22:45 и 23:15.
-
-Ещё хорошие строки «Лис:»:
-Лис: Вы уже несколько дней без передышки, как натянутая струна. Сегодня вечер без дел и поздней еды, а лечь лучше в окно Vuelo — до 23:15.
-Лис: Кажется, виноват кофе после обеда: ночью тело долго не могло расслабиться. Сегодня последнюю чашку — до 13:00.
-Лис: Тело отлично восстановилось — это ваш день. Норма 11 000 шагов, и вы её возьмёте.
+Примеры (времена в них чужие — бери свои из «Что предложить»):
+Причина: поздний ужин. Что предложить: поужинать по графику Vuelo в 19:30.
+Ответ: Похоже, вчера был поздний ужин — ночью телу пришлось работать, а не отдыхать. Сегодня поужинайте по графику Vuelo, в 19:30.
+Причина: вы давно без передышки. Что предложить: лечь между 22:45 и 23:15.
+Ответ: Вы уже несколько дней как натянутая струна — пора выдохнуть. Сегодня вечер без дел, а лечь лучше между 22:45 и 23:15.
+Причина: бокал вина или кофе после обеда. Что предложить: последнюю чашку кофе — до 13:00.
+Ответ: Кажется, ночью телу мешал кофе после обеда или бокал вина. Сегодня последнюю чашку — до 13:00, и вечер пройдёт спокойнее.
+Причина: тело отлично восстановилось. Что предложить: норма на сегодня 11 000 шагов.
+Ответ: Тело отлично восстановилось — это ваш день. Норма 11 000 шагов, и вы её возьмёте.
 Плохо, так нельзя:
-Лис: Похоже, вы легли позже обычного — может, что-то задержало. Не перегружайте себя вечером, выделите время для себя по графику Vuelo.
+Ответ: Похоже, вы легли позже обычного — может, что-то задержало. Не перегружайте себя вечером, выделите время для себя по графику Vuelo.`;
 
-Правила для строки «Лис:»:
-- Два предложения, не больше 190 символов.
-- Не называй показатели и числа из таблицы: никаких «пульс», «вариабельность», «стресс», «глубокий сон», процентов и сравнений «выше/ниже обычного». Числа — только время из плана Vuelo или норма шагов.
-- Утром — про ночь и день впереди, днём — про остаток дня, вечером — про вечер и сон.
-- Не советуй прогулки и шаги, если движение — не главная проблема дня.
-- Учитывай пол, возраст, рост, вес и цель, но не называй их и не оценивай фигуру.
-- Нельзя: приветствия, прощания, вопросы; болезни, диагнозы, лекарства, врачи, обещания результата; слова «глюкоза», «сахар», «давление»; оценки «из 100»; другие приложения и бренды, кроме Vuelo; эмодзи, списки, кавычки.`;
+// ── Наблюдение дня ──────────────────────────────────────────────────────────────────────────────
+
+/** Личная норма — среднее прошлых дней таблицы, если их хотя бы столько. */
+const NORM_MIN_DAYS = 3;
+/** Ночь тяжелее обычного: пульс во сне выше нормы и вариабельность ниже — или одно из них сильно. */
+const STRAIN_PULSE_UP = 3;
+const STRAIN_HRV_DROP = 0.08;
+const STRAIN_PULSE_UP_ALONE = 5;
+const STRAIN_HRV_DROP_ALONE = 0.15;
+/** Отличное восстановление: ночь не хуже обычного и хотя бы одно заметно лучше. */
+const RECOVERY_PULSE_DOWN = 2;
+const RECOVERY_HRV_UP = 0.08;
+/** Поздняя еда — подъём глюкозы вечером с 21:00 или ночью до 4:00. */
+const LATE_MEAL_FROM = 21 * 60;
+const NIGHT_UNTIL = 4 * 60;
+/** Уснул позже обычного: заметно (для отдельной ночи) и просто позже (как подробность). */
+const LATE_BED_MIN = 60;
+const LATER_BED_MIN = 45;
+/** Три ночи подряд засыпание всё позже, от первой до последней — хотя бы на столько. */
+const DRIFT_MIN = 30;
+/** Стресс днём выше своего уровня три дня подряд; напряжённый день — на столько выше. */
+const STRESS_STREAK_UP = 8;
+const TENSE_DAY_UP = 10;
+/**
+ * Короткий сон три ночи подряд: меньше 6.5 ч или на 45 мин меньше обычного. Долг сна из плана
+ * сам по себе не повод: у того, кто всегда спит 6.5 ч, он есть каждый день.
+ */
+const SHORT_SLEEP_MIN = 390;
+const SHORT_SLEEP_UNDER_NORM = 45;
+/** Столько приёмов пищи за день — перекусы. */
+const SNACKS_FROM = 5;
+/** Нагрузка вчера во столько раз выше обычной — тяжёлый день. */
+const HEAVY_LOAD_RATIO = 1.5;
+/** Сидячий день: после 13:00 шагов меньше половины того, что к этому часу «положено» по норме. */
+const LOW_ACTIVITY_FROM = 13 * 60;
+const LOW_ACTIVITY_SHARE = 0.5;
+
+const present = (v) => v !== null && v !== undefined;
+const mean = (values) => values.reduce((a, b) => a + b, 0) / values.length;
+const clockMin = (c) => Number(c.slice(0, 2)) * 60 + Number(c.slice(3, 5));
+/** Время засыпания на шкале «от полудня»: 00:40 позже 23:40. */
+const nightMin = (m) => (m < 12 * 60 ? m + 1440 : m);
+const clockOf = (m) => {
+  const x = ((Math.round(m) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`;
+};
+const asleepMin = (d) => (d && d.asleep ? nightMin(clockMin(d.asleep)) : null);
+/** Последний приём пищи дня после полудня. */
+const lastMealOf = (d) => {
+  const evening = d.meals.map(clockMin).filter((m) => m >= 12 * 60);
+  return evening.length ? Math.max(...evening) : null;
+};
+
+/** Среднее по дням, где значение есть; меньше NORM_MIN_DAYS дней — нормы нет. */
+function normOf(days, pick) {
+  const values = days.map(pick).filter(present);
+  return values.length >= NORM_MIN_DAYS ? mean(values) : null;
+}
+
+/**
+ * Действия из плана Vuelo, которые ещё впереди: текст для модели вместе с временем.
+ * Ночью (до 4:00) впереди только сон.
+ */
+function planActions(p, now, today) {
+  const plan = p.plan;
+  const lateNight = now < NIGHT_UNTIL;
+  const ahead = (clock, slack = 0) => !lateNight && clockMin(clock) + slack > now;
+  const act = {};
+  const b = plan.bedtime;
+  if (b && nightMin(clockMin(b.to)) > (lateNight ? now + 1440 : now)) act.bed = `лечь между ${b.from} и ${b.to}`;
+  const dinner = plan.meals.find((m) => m.title.toLowerCase() === 'ужин');
+  if (dinner && ahead(dinner.time, 30)) act.dinner = `поужинать по графику Vuelo в ${dinner.time}`;
+  const next = plan.meals.find((m) => ahead(m.time));
+  if (next) act.nextMeal = `${next.title.toLowerCase()} по графику Vuelo в ${next.time}, без перекусов до него`;
+  if (plan.noCoffee) act.coffee = 'сегодня обойтись без кофе';
+  else if (plan.coffee) act.coffee = ahead(plan.coffee.until) ? `последнюю чашку кофе — до ${plan.coffee.until}` : 'кофе на сегодня уже хватит';
+  const w = plan.workout;
+  if (w && ahead(w.to)) act.workout = `${w.title.toLowerCase()} с ${w.from} до ${w.to}`;
+  if (today && present(today.steps) && today.stepNorm) {
+    const left = Math.round((today.stepNorm - today.steps) / 100) * 100;
+    if (left > 0) act.steps = `до нормы шагов осталось около ${count(left)}`;
+    act.norm = `норма на сегодня ${count(today.stepNorm)} шагов`;
+  }
+  return act;
+}
+
+/**
+ * Главное наблюдение дня — одно, по порядку важности, как «находки» Oura: что видно (числа
+ * с личной нормой — модели для понимания, в ответ они не идут), вероятная причина (или null —
+ * тогда не гадаем) и одно действие из плана. Сегодняшняя строка таблицы — это и прошедшая ночь.
+ */
+function observe(p) {
+  const byAgo = new Map(p.days.map((d) => [d.ago, d]));
+  const today = byAgo.get(0) || null;
+  const yesterday = byAgo.get(1) || null;
+  const prior = p.days.filter((d) => d.ago >= 1);
+  const norm = {
+    asleep: normOf(prior, asleepMin),
+    sleepMin: normOf(prior, (d) => d.sleepMin),
+    nightPulse: normOf(prior, (d) => d.nightPulse),
+    hrv: normOf(prior, (d) => d.hrv),
+    load: normOf(prior, (d) => d.load),
+    lastMeal: normOf(p.days.filter((d) => d.ago >= 2), lastMealOf),
+  };
+  const now = clockMin(p.time);
+  const evening = p.mode === 'evening';
+  const act = planActions(p, now, today);
+  const action = (...keys) => keys.map((k) => act[k]).find(Boolean) || null;
+  const found = (id, facts, cause, todo) => ({ id, facts: facts.filter(Boolean), cause, action: todo });
+
+  // Ночь: восстановление против своей нормы.
+  const pulseUp = today && present(today.nightPulse) && present(norm.nightPulse) ? today.nightPulse - norm.nightPulse : null;
+  const hrvDrop = today && present(today.hrv) && norm.hrv ? 1 - today.hrv / norm.hrv : null;
+  const strain =
+    (pulseUp !== null && hrvDrop !== null && pulseUp >= STRAIN_PULSE_UP && hrvDrop >= STRAIN_HRV_DROP) ||
+    (pulseUp !== null && pulseUp >= STRAIN_PULSE_UP_ALONE) ||
+    (hrvDrop !== null && hrvDrop >= STRAIN_HRV_DROP_ALONE);
+  const nightParts = [
+    pulseUp !== null && `пульс во сне ${today.nightPulse} (обычно ${Math.round(norm.nightPulse)})`,
+    hrvDrop !== null && `вариабельность ${today.hrv} мс (обычно ${Math.round(norm.hrv)})`,
+  ].filter(Boolean);
+  const strainFact = `этой ночью тело отдыхало хуже обычного: ${nightParts.join(', ')}`;
+
+  const bedLate = asleepMin(today) !== null && norm.asleep !== null ? asleepMin(today) - norm.asleep : null;
+  const bedFact = bedLate !== null && `уснули в ${today.asleep} (обычно около ${clockOf(norm.asleep)})`;
+
+  // 1. Поздний ужин и тяжёлая или поздняя ночь.
+  const lateMeals = [
+    ...(yesterday ? yesterday.meals.filter((t) => clockMin(t) >= LATE_MEAL_FROM) : []),
+    ...(today ? today.meals.filter((t) => clockMin(t) < NIGHT_UNTIL && (asleepMin(today) === null || nightMin(clockMin(t)) <= asleepMin(today))) : []),
+  ];
+  const lateMeal = lateMeals.length ? lateMeals[lateMeals.length - 1] : null;
+  if (lateMeal && (strain || (bedLate !== null && bedLate >= LATE_BED_MIN))) {
+    const usual = norm.lastMeal !== null ? ` (обычно около ${clockOf(norm.lastMeal)})` : '';
+    return found(
+      'late-meal',
+      [`вчера последний приём пищи в ${lateMeal}${usual}`, strain && strainFact, bedLate >= LATER_BED_MIN && bedFact],
+      'поздний ужин — ночью телу пришлось переваривать, а не отдыхать',
+      action('dinner', 'bed'),
+    );
+  }
+
+  // 2. Тяжёлая ночь после тренировки или большой нагрузки.
+  const heavy = yesterday && (yesterday.workout || (present(yesterday.load) && norm.load && yesterday.load >= norm.load * HEAVY_LOAD_RATIO));
+  if (strain && heavy) {
+    const what = yesterday.workout ? `вчера была тренировка (${WORKOUT_TEXT[yesterday.workout]})` : 'вчера нагрузка была заметно выше обычной';
+    return found('after-workout', [what, strainFact], 'вчерашняя нагрузка — телу нужно больше времени, чтобы восстановиться', action(evening ? 'bed' : 'workout', 'bed'));
+  }
+
+  // 3. Несколько дней подряд напряжение (утром сегодняшнего стресса ещё нет — берём три прошлых дня).
+  const streakDays = today && present(today.stress) ? [2, 1, 0] : [3, 2, 1];
+  const streak = streakDays.map((a) => byAgo.get(a)).map((d) => (d ? d.stress : null));
+  const stressBase = normOf(p.days.filter((d) => d.ago > streakDays[0]), (d) => d.stress);
+  if (stressBase !== null && streak.every((v) => present(v) && v >= stressBase + STRESS_STREAK_UP)) {
+    return found(
+      'stress-streak',
+      [`стресс днём выше обычного несколько дней подряд: ${streak.join(', ')} (обычно около ${Math.round(stressBase)})`, strain && strainFact],
+      'вы давно без передышки — много дел, голова не отключается',
+      action(evening ? 'bed' : 'workout', 'bed'),
+    );
+  }
+
+  // 4. Тяжёлая ночь без поздней еды и нагрузки.
+  if (strain) {
+    const dayBase = normOf(p.days.filter((d) => d.ago >= 2), (d) => d.stress);
+    const tense = yesterday && present(yesterday.stress) && dayBase !== null && yesterday.stress >= dayBase + TENSE_DAY_UP;
+    return tense
+      ? found('night-strain', [strainFact, `вчера днём стресс ${yesterday.stress} (обычно около ${Math.round(dayBase)})`],
+          'напряжённый день — голова долго не отпускала дела', action('bed'))
+      : found('night-strain', [strainFact], 'бокал вина или кофе после обеда', action(evening ? 'bed' : 'coffee', 'bed'));
+  }
+
+  // 5. Засыпание три ночи подряд всё позже.
+  const nights = [2, 1, 0].map((a) => asleepMin(byAgo.get(a)));
+  if (nights.every(present) && nights[0] < nights[1] && nights[1] < nights[2] && nights[2] - nights[0] >= DRIFT_MIN && bedLate >= LATER_BED_MIN) {
+    const times = [2, 1, 0].map((a) => byAgo.get(a).asleep).join(', ');
+    return found('bedtime-drift', [`засыпание три ночи подряд всё позже: ${times} (обычно около ${clockOf(norm.asleep)})`],
+      'сбился режим — вечер каждый раз затягивается', action('bed'));
+  }
+
+  // 6. Недосып несколько ночей.
+  const sleeps = [2, 1, 0].map((a) => byAgo.get(a)).map((d) => (d ? d.sleepMin : null));
+  const short = (v) => present(v) && (v < SHORT_SLEEP_MIN || (norm.sleepMin !== null && v <= norm.sleepMin - SHORT_SLEEP_UNDER_NORM));
+  const debt = p.plan.bedtime ? p.plan.bedtime.debtMinutes : 0;
+  if (sleeps.every(short)) {
+    return found(
+      'short-sleep',
+      [sleeps.every(present) && `сон три последние ночи: ${sleeps.map(hm).join(', ')}` + (norm.sleepMin !== null ? ` (обычно около ${hm(norm.sleepMin)})` : ''),
+        debt > 0 && `долг сна ${duration(debt)}`],
+      'накопилась усталость',
+      action('bed'),
+    );
+  }
+
+  // 7. Одна поздняя ночь — причину не придумываем.
+  if (bedLate !== null && bedLate >= LATE_BED_MIN) return found('late-bed', [bedFact], null, action('bed'));
+
+  // 8. Перекусы.
+  const snackDay = [yesterday, today].find((d) => d && d.meals.length >= SNACKS_FROM);
+  if (snackDay) {
+    const when = snackDay === today ? 'сегодня' : 'вчера';
+    return found('snacks', [`${when} ${snackDay.meals.length} приёмов пищи: ${snackDay.meals.join(', ')}`], 'много перекусов', action('nextMeal', 'dinner'));
+  }
+
+  // 9. Сидячий день.
+  if (today && present(today.steps) && today.stepNorm && now >= LOW_ACTIVITY_FROM) {
+    const expected = today.stepNorm * Math.min(1, (now - 8 * 60) / (13 * 60));
+    if (today.steps < expected * LOW_ACTIVITY_SHARE) {
+      return found('low-activity', [`к ${p.time} — ${count(today.steps)} шагов из ${count(today.stepNorm)}`], 'день выходит сидячим', action('steps'));
+    }
+  }
+
+  // 10. Отличное восстановление.
+  const sleptEnough = today && present(today.sleepMin) && today.sleepMin >= (norm.sleepMin !== null ? norm.sleepMin : 420) - 15;
+  const recovered =
+    pulseUp !== null && hrvDrop !== null && pulseUp <= 0 && hrvDrop <= 0 && (pulseUp <= -RECOVERY_PULSE_DOWN || hrvDrop <= -RECOVERY_HRV_UP);
+  const noNorms = pulseUp === null && hrvDrop === null && p.scores.sleep >= 85 && p.scores.organism >= 80;
+  if (sleptEnough && (recovered || noNorms)) {
+    return found('good-recovery', [`сон ${hm(today.sleepMin)}`, nightParts.length && `ночью тело отлично отдохнуло: ${nightParts.join(', ')}`],
+      'тело отлично восстановилось', action(evening ? 'bed' : 'workout', 'norm'));
+  }
+
+  // 11. Ничего не выделяется.
+  return found('steady', ['сон, восстановление и нагрузка — как обычно'], 'ровный режим', action(evening ? 'bed' : 'workout', 'nextMeal', 'bed', 'norm'));
+}
+
+// ── Ответ модели ────────────────────────────────────────────────────────────────────────────────
 
 /** Длиннее приложение не покажет (`AI_ADVICE_MAX_CHARS`), короче — это не мнение (`AI_ADVICE_MIN_CHARS`). */
 const ANSWER_MIN_CHARS = 20;
@@ -101,28 +315,31 @@ const VAGUE = [
   /берегите себя/,
 ];
 
-/**
- * Ответ модели: «Думаю: …» (рассуждение) и «Лис: …» (текст человеку). Без «Лис:» годится только
- * ответ без рассуждения — его берём целиком. Не разобрать — null.
- */
+/** Текст ответа: без «Ответ:» / «Лис:» в начале и рассуждений, если модель их всё же дописала. */
 function parseAnswer(raw) {
-  const text = String(raw).replace(/\*/g, '').trim();
-  const fox = /Лис\s*:\s*/.exec(text);
-  const think = /Думаю\s*:\s*/.exec(text);
-  const flat = (s) => s.replace(/\s+/g, ' ').trim();
-  if (!fox) return think ? null : { text: flat(text), thought: '' };
-  const start = fox.index + fox[0].length;
-  const said = flat(think && think.index > fox.index ? text.slice(start, think.index) : text.slice(start));
-  const thought = think && think.index < fox.index ? flat(text.slice(think.index + think[0].length, fox.index)) : '';
-  return said ? { text: said, thought } : null;
+  let text = String(raw).replace(/\*/g, '').trim();
+  const lead = /(?:Лис|Ответ)\s*:\s*/.exec(text);
+  if (lead) text = text.slice(lead.index + lead[0].length);
+  else if (/Думаю\s*:/.test(text)) return null;
+  text = text.replace(/Думаю\s*:[\s\S]*$/, '').replace(/^[→—–-]+/, '').replace(/\s+/g, ' ').trim();
+  return text || null;
 }
 
-/** Что не так с текстом «Лис:»: null — годится. */
-function answerProblem(text) {
+/** Числа в тексте: «07:00» и «7:00», «11 000» и «11000» — одно и то же. */
+const numbersIn = (s) =>
+  (s.match(/\d+(?:[:.\u00a0 ]\d+)*/g) || []).map((t) => t.replace(/[\u00a0 ]/g, '').replace('.', ':').replace(/^0(\d)/, '$1'));
+
+/** Что не так с ответом: null — годится. Числа — только из действия, его время — обязательно. */
+function answerProblem(text, action = null) {
   if (text.length < ANSWER_MIN_CHARS) return 'short';
   if (text.length > ANSWER_MAX_CHARS) return 'long';
   const lower = text.toLowerCase();
   if (VAGUE.some((re) => re.test(lower))) return 'vague';
+  const allowed = numbersIn(action || '');
+  const used = numbersIn(text);
+  if (used.some((n) => !allowed.includes(n))) return 'numbers';
+  const times = allowed.filter((n) => n.includes(':'));
+  if (times.length && !used.some((n) => times.includes(n))) return 'no-time';
   // «По графику Vuelo» без времени — ссылка на план ни о чём.
   if (/график\S* vuelo/.test(lower) && !/\d?\d:\d\d/.test(text)) return 'vague';
   return null;
@@ -130,13 +347,15 @@ function answerProblem(text) {
 
 /** Что сказать модели, когда просим переписать. */
 const RETRY_TEXT = {
-  format: 'Нужно ровно две строки: «Думаю: …» и «Лис: …». Ответь ещё раз.',
-  short: 'Строка «Лис:» слишком короткая: нужны причина и одно действие. Ответь ещё раз.',
-  long: 'Строка «Лис:» длиннее 190 символов. Сократи до двух коротких предложений и ответь ещё раз.',
-  vague:
-    'Строка «Лис:» расплывчатая. Назови одну конкретную причину, на которую указывают числа, и одно действие ' +
-    'с временем из плана Vuelo. Ответь ещё раз.',
+  format: 'Нужен только текст Лиса — два предложения, без рассуждений. Ответь ещё раз.',
+  short: 'Слишком коротко: нужны мнение о причине и одно действие. Ответь ещё раз.',
+  long: 'Длиннее 190 символов. Сократи до двух коротких предложений и ответь ещё раз.',
+  vague: 'Расплывчато. Скажи о причине из наблюдения и о действии из «Что предложить» с его временем. Ответь ещё раз.',
+  numbers: 'В ответе числа не из «Что предложить». Числа можно только оттуда. Ответь ещё раз.',
+  'no-time': 'Назови действие из «Что предложить» вместе с его временем. Ответь ещё раз.',
 };
+
+// ── Запрос ──────────────────────────────────────────────────────────────────────────────────────
 
 const has = (obj, key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(obj, key);
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -228,15 +447,18 @@ const plural = (n, forms) => {
   const b = a % 10;
   return forms[a > 10 && a < 20 ? 2 : b === 1 ? 0 : b >= 2 && b <= 4 ? 1 : 2];
 };
-const count = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-const duration = (min) => {
+function count(n) {
+  return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+function duration(min) {
   const h = Math.floor(min / 60);
   const m = Math.round(min % 60);
   return h ? `${h} ч ${String(m).padStart(2, '0')} мин` : `${m} мин`;
-};
-/** «7:20» — длительность в таблице. */
-const hm = (min) => `${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')}`;
-const cell = (v, format = String) => (v === null || v === undefined ? '—' : format(v));
+}
+/** «7:20» — длительность сна. */
+function hm(min) {
+  return `${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')}`;
+}
 const joined = (parts) => parts.filter(Boolean).join(', ');
 
 /** Человек: пол, возраст, рост, вес и цель — только то, что заполнено в профиле. */
@@ -250,76 +472,17 @@ function personLine(pr) {
   return `Человек: ${person || 'профиль не заполнен'}. Цель: ${pr.goal ? GOAL_TEXT[pr.goal] : 'не указана'}.`;
 }
 
-const dayName = (ago, time) => (ago === 0 ? `сегодня (до ${time})` : ago === 1 ? 'вчера' : `${ago} дн. назад`);
-
-/** Таблица по дням: строка на день, от старых к сегодняшнему. */
-function tableLines(p) {
-  if (!p.days.length) return ['Данных по дням пока нет.'];
-  const head =
-    'день | засыпание | подъём | сон | глубокий | пульс во сне | вариабельность, мс | пульс покоя | кислород, % | ' +
-    'стресс днём (0–100) | шаги / норма | активные ккал | нагрузка по пульсу | тренировка | подъёмы глюкозы';
-  const rows = [...p.days]
-    .sort((a, b) => b.ago - a.ago)
-    .map((d) =>
-      [
-        dayName(d.ago, p.time),
-        cell(d.asleep),
-        cell(d.awake),
-        cell(d.sleepMin, hm),
-        cell(d.deepMin, hm),
-        cell(d.nightPulse),
-        cell(d.hrv),
-        cell(d.restingPulse),
-        cell(d.spo2),
-        cell(d.stress),
-        `${cell(d.steps, count)} / ${cell(d.stepNorm, count)}`,
-        cell(d.calories, count),
-        cell(d.load),
-        cell(d.workout, (w) => WORKOUT_TEXT[w]),
-        d.meals.length ? d.meals.join(' ') : '—',
-      ].join(' | '),
-    );
-  const lines = ['Таблица по дням (числа кольца; «—» — нет данных):', head, ...rows];
-  if (p.hours) {
-    lines.push(`Шаги сегодня по часам: ${p.hours.steps.map((v, i) => `${p.hours.from + i} ч — ${count(v)}`).join(', ')}.`);
-  }
-  return lines;
-}
-
-function planLines(plan) {
-  const lines = [];
-  const w = plan.workout;
-  if (w) lines.push(`- тренировка «${w.title}», ${w.minutes} минут, ${w.effort.toLowerCase()}, лучшее время ${w.from}–${w.to};`);
-  if (plan.coffee) {
-    const c = plan.coffee;
-    const cups = c.cups !== null ? `, не больше ${c.cups} ${plural(c.cups, ['чашки', 'чашек', 'чашек'])}` : '';
-    lines.push(`- кофе: с ${c.from} до ${c.until}${cups};`);
-  } else if (plan.noCoffee) {
-    lines.push('- кофе сегодня лучше не пить;');
-  }
-  if (plan.meals.length) lines.push(`- еда: ${plan.meals.map((m) => `${m.title.toLowerCase()} ${m.time}`).join(', ')};`);
-  const b = plan.bedtime;
-  if (b) {
-    const debt = b.debtMinutes > 0 ? `, накопился долг сна ${duration(b.debtMinutes)}` : ', долга сна нет';
-    lines.push(`- сон: лечь с ${b.from} до ${b.to}, подъём ${b.wake}, нужно сна ${duration(b.needMinutes)}${debt}.`);
-  }
-  return lines.length
-    ? ['План Vuelo на сегодня (человек видит его на экране; напутствие — один из этих пунктов с его временем):', ...lines]
-    : [];
-}
-
-/** Данные для модели: кто человек, оценки, таблица чисел по дням и план Vuelo. Без выводов. */
-function buildUserText(p) {
-  const sc = p.scores;
+/** Текст для модели: кто человек и одно наблюдение дня — что видно, причина, что предложить. */
+function buildUserText(p, seen = observe(p)) {
   const lines = [
     `Сейчас: ${MODE_TEXT[p.mode]}, ${p.time}.`,
     personLine(p.profile),
-    `Оценки Vuelo за сегодня (0–100, человек их видит): день ${cell(sc.total)}, сон ${cell(sc.sleep)}, ` +
-      `активность ${cell(sc.activity)}, организм ${cell(sc.organism)}.`,
-    ...tableLines(p),
-    ...planLines(p.plan),
+    'Наблюдение дня (Vuelo выбрал его по числам кольца):',
+    `Что видно: ${seen.facts.join('; ')}.`,
+    `Причина: ${seen.cause || 'не видна — не додумывай, скажи только о том, что видно'}.`,
+    `Что предложить: ${seen.action || 'одно простое действие по теме наблюдения на ближайшие часы'}.`,
   ];
-  if (p.recent.length) lines.push(`Недавние мнения (не повторяй ни тему, ни слова): ${p.recent.map((t) => `— ${t}`).join(' ')}`);
+  if (p.recent.length) lines.push(`Недавние мнения (не повторяй их слова): ${p.recent.map((t) => `— ${t}`).join(' ')}`);
   return lines.join('\n');
 }
 
@@ -357,12 +520,13 @@ async function handler(event, context) {
   if (!token || !folder) return reply(500, { error: 'service account or FOLDER_ID is not set' });
   const model = process.env.MODEL || 'yandexgpt';
 
-  // Ответ не подошёл (нет «Лис:», длинный, расплывчатый) — один раз просим переписать,
-  // если приложение ещё ждёт. Не вышло — 502, приложение оставит шаблонный совет.
+  const seen = observe(payload);
+  // Ответ не подошёл (длинный, расплывчатый, чужие числа, нет времени действия) — один раз просим
+  // переписать, если приложение ещё ждёт. Не вышло — 502, приложение оставит шаблонный совет.
   const started = Date.now();
   const messages = [
     { role: 'system', text: SYSTEM_PROMPT },
-    { role: 'user', text: buildUserText(payload) },
+    { role: 'user', text: buildUserText(payload, seen) },
   ];
   let problem = 'empty';
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -370,14 +534,14 @@ async function handler(event, context) {
     if (attempt > 0 && left < RETRY_MIN_MS) break;
     const result = await askModel({ token, folder, model, messages, timeoutMs: Math.min(LLM_TIMEOUT_MS, left) });
     if (result.status) return reply(result.status, { error: result.error });
-    const answer = parseAnswer(result.text);
-    problem = answer ? answerProblem(answer.text) : 'format';
-    if (!problem) return reply(200, answer);
+    const text = parseAnswer(result.text);
+    problem = text ? answerProblem(text, seen.action) : 'format';
+    if (!problem) return reply(200, { text, finding: seen.id });
     // Причина — в лог функции без текста ответа: видно, как часто модель промахивается.
     console.warn('answer rejected', problem, 'attempt', attempt + 1);
     messages.push({ role: 'assistant', text: result.text }, { role: 'user', text: RETRY_TEXT[problem] });
   }
-  return reply(502, { error: `answer ${problem}` });
+  return reply(502, { error: `answer ${problem}`, finding: seen.id });
 }
 
 /** Один запрос к YandexGPT: `{ text }` или `{ status, error }`. */
@@ -394,7 +558,7 @@ async function askModel({ token, folder, model, messages, timeoutMs }) {
       },
       body: JSON.stringify({
         modelUri: `gpt://${folder}/${model}/latest`,
-        completionOptions: { stream: false, temperature: 0.6, maxTokens: '500' },
+        completionOptions: { stream: false, temperature: 0.5, maxTokens: '300' },
         messages,
       }),
       signal: AbortSignal.timeout(timeoutMs),
@@ -413,4 +577,4 @@ async function askModel({ token, folder, model, messages, timeoutMs }) {
   return text ? { text } : { status: 502, error: 'empty' };
 }
 
-module.exports = { handler, validate, buildUserText, parseAnswer, answerProblem, SYSTEM_PROMPT };
+module.exports = { handler, validate, observe, buildUserText, parseAnswer, answerProblem, SYSTEM_PROMPT };

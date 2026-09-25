@@ -22,4 +22,4 @@ export * from './sleep-mode';
 export * from './training';
 export * from './glucose';
 export * from './ai-advice';
-export * from './facts';
+export * from './advice-days';

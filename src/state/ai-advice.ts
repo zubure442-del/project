@@ -1,7 +1,6 @@
 import {
   AI_TEMPLATE_ID,
   EFFORT_TEXT,
-  buildTemplateReport,
   cleanAdvice,
   coffeeClock,
   isAiTemplate,
@@ -10,10 +9,9 @@ import {
   type ReportMode,
 } from '../domain';
 import { addReport, profileAge, type VueloState } from '../storage';
+import { adviceDaysFor } from './advice-days';
 import { currentCycle } from './cycle';
-import { cycleScoreOf, findDay, recommendationsFor, reportMode, todayKey } from './day';
-import { factsFor } from './facts';
-import { sleepHrFor } from './sleep-hr';
+import { recommendationsFor, reportMode, todayKey } from './day';
 
 /**
  * Адрес посредника и ключ приложения — из файла `.env` в корне проекта (в git не попадает):
@@ -42,22 +40,17 @@ export interface AiAdviceRequest {
   payload: AdvicePayload;
 }
 
-/** Кольцевая метка → «ЧЧ:ММ»: метки кольца — местное время, записанное как UTC. */
-const clockOfTs = (ts: number) => coffeeClock(Math.floor((((ts % 86400) + 86400) % 86400) / 60));
-const round = (v: number | null | undefined) => (v === null || v === undefined ? null : Math.round(v));
-const mean = (values: readonly number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
-
 /**
  * Какой совет попросить у модели. Тот же, что показывает «Сегодня» (`adviceFor`): текущий цикл
  * с итогом и время суток. Совет от модели на этот цикл и время суток уже есть — не просим:
  * текст не должен меняться от синхронизации к синхронизации, и лишние запросы стоят денег.
  * В демо-режиме к модели не ходим.
  *
- * Модели отдаём всё, что знаем о дне, кроме имени (решение владельца 26.09): профиль, сон
- * и пульс во сне против своей нормы, шаги и калории, замеры «Организма» и план дня из карточек
- * карусели — тренировку, кофе, еду и время отхода ко сну — и факты дня против своей нормы
- * (`factsFor`) без готовых выводов: что на самом деле происходило, догадывается сама модель.
- * Значений глюкозы и давления не отдаём — только время подъёмов глюкозы.
+ * Модели отдаём всё, кроме имени (решение владельца 26.09): профиль, оценки, таблицу чисел
+ * за последнюю неделю и сегодня (`adviceDaysFor`), шаги сегодня по часам и план Vuelo на сегодня
+ * (тренировка, кофе, еда, время отхода ко сну). Никаких готовых выводов: мнение о том, что
+ * с человеком происходит, модель составляет сама. Значений глюкозы и давления не отдаём —
+ * только время подъёмов глюкозы (обычно это еда).
  */
 export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRequest | null {
   if (state.demo) return null;
@@ -68,15 +61,12 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
   if (!stored || isAiTemplate(stored.templateId)) return null;
 
   const today = todayKey(now);
-  const startDay = findDay(state.days, cycle.date);
-  const calendarDay = findDay(state.days, today);
-  const weakest = buildTemplateReport({ mode, score: cycleScoreOf(cycle), recentTemplateIds: [] }).focus;
-  const sleepHr = sleepHrFor(state, today, now);
   const rec = recommendationsFor(state, today, now);
   const coffee = rec?.coffee ?? null;
   const endurance = rec?.endurance ?? null;
   const sleepMode = rec?.sleepMode ?? null;
   const { profile } = state;
+  const { days, hours } = adviceDaysFor(state, now);
 
   return {
     date: cycle.date,
@@ -92,32 +82,9 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
         weightKg: profile.weightKg,
         goal: profile.goal ?? null,
       },
-      total: cycle.total,
-      weakest,
-      sleep: {
-        score: cycle.scores.sleep,
-        minutes: cycle.sleep?.totalMin ?? null,
-        deepMinutes: cycle.sleep?.deepMin ?? null,
-        lightMinutes: cycle.sleep?.lightMin ?? null,
-        asleep: cycle.sleep ? clockOfTs(cycle.sleep.start) : null,
-        awake: cycle.sleep ? clockOfTs(cycle.sleep.end) : null,
-        pulse: sleepHr
-          ? { min: sleepHr.night.min, avg: sleepHr.night.avg, vsNormMin: sleepHr.deltaMin, vsNormAvg: sleepHr.deltaAvg }
-          : null,
-      },
-      activity: {
-        score: cycle.scores.activity,
-        steps: cycle.steps,
-        norm: startDay?.stepNorm?.value ?? null,
-        caloriesToday: calendarDay?.calories ?? null,
-      },
-      organism: {
-        score: cycle.scores.state,
-        hrv: round(calendarDay?.estimates.hrv),
-        restingPulse: round(calendarDay?.restingHr),
-        spo2: round(mean((calendarDay?.spo2 ?? []).map((p) => p.v))),
-        stress: round(calendarDay?.estimates.stress),
-      },
+      scores: { total: cycle.total, sleep: cycle.scores.sleep, activity: cycle.scores.activity, organism: cycle.scores.state },
+      days,
+      hours,
       plan: {
         workout: endurance
           ? {
@@ -144,7 +111,6 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
             }
           : null,
       },
-      facts: factsFor(state, now),
       recent: state.reports
         .filter((r) => r !== stored)
         .slice(-AI_ADVICE_RECENT)

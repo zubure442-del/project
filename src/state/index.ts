@@ -14,4 +14,4 @@ export * from './endurance';
 export * from './sleep-mode';
 export * from './refresh';
 export * from './ai-advice';
-export * from './facts';
+export * from './advice-days';

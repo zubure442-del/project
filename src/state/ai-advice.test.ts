@@ -18,6 +18,7 @@ function stateWithTemplate(): VueloState {
   expect(cycle.total).not.toBeNull();
   return {
     ...built,
+    lastSyncAt: NOW.getTime(),
     profile: { name: 'Анна', sex: 'male', heightCm: 180, weightKg: 82, birthYear: 1990, goal: 'lose' },
     reports: [
       { date: '2026-09-24', mode: 'evening', templateId: 'e-good-1', text: 'День получился сбалансированным.' },
@@ -41,17 +42,15 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
     expect(p.profile).toEqual({ sex: 'male', age: 36, heightCm: 180, weightKg: 82, goal: 'lose' });
     expect(p.recent).toEqual(['День получился сбалансированным.']);
     expect(JSON.stringify(p)).not.toContain('Анна');
-    // Сон с временем засыпания и подъёма, замеры «Организма» и план дня из карточек.
-    expect(p.sleep.asleep).toMatch(/^\d\d:\d\d$/);
-    expect(p.sleep.minutes).toBeGreaterThan(0);
-    expect(p.organism.hrv).not.toBeNull();
+    // Таблица чисел по дням: неделя до сегодня и сегодня; шаги сегодня по часам.
+    expect(p.days.at(-1)?.ago).toBe(0);
+    expect(p.days.length).toBeGreaterThan(5);
+    expect(p.days.at(-1)?.asleep).toMatch(/^\d\d:\d\d$/);
+    expect(p.hours?.steps.length).toBeGreaterThan(0);
+    expect(p.scores.total).not.toBeNull();
     expect(p.plan.workout?.title).toBeTruthy();
     expect(p.plan.bedtime?.from).toMatch(/^\d\d:\d\d$/);
-    expect(p.plan.meals.length).toBeGreaterThan(0);
-    // Факты дня «сегодня — обычно» без выводов: сон, тело, шаги по часам и т. д.
-    expect(p.facts.some((f) => f.startsWith('Сон прошлой ночи: засыпание'))).toBe(true);
-    expect(p.facts.join(' ')).not.toMatch(/похоже|перекус|ужин/);
-    // Значений глюкозы и давления в запросе нет: о еде Лис говорит через привычки.
+    // Значений глюкозы и давления в запросе нет — только время подъёмов глюкозы (еда).
     expect(JSON.stringify(p)).not.toMatch(/glucose|systolic|diastolic/);
   });
 

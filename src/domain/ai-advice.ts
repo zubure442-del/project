@@ -1,13 +1,13 @@
+import type { AdviceDay } from './advice-days';
 import type { ReportMode } from './report';
-import type { ComponentId } from './score';
 
 /**
  * «Мнение Лиса» от YandexGPT. Приложение отправляет своему посреднику (облачная функция
- * `server/advice`) всё, что знает о дне, кроме имени (решение владельца 26.09): профиль, сон,
- * пульс во сне, активность, замеры «Организма» (без значений глюкозы и давления), план дня
- * из карточек карусели и факты дня против своей нормы (`facts.ts`) — из них Лис сам делает
- * догадку о привычках. Получает две-три фразы. Текст проверяется здесь: не прошёл —
- * остаётся шаблонный совет.
+ * `server/advice`) всё, кроме имени (решение владельца 26.09): профиль, оценки, таблицу чисел
+ * за последние дни (`advice-days.ts`: сон, пульс во сне, вариабельность, стресс, шаги, нагрузка,
+ * время еды по подъёмам глюкозы — без значений глюкозы и давления) и план Vuelo на сегодня.
+ * Лис по этим числам пишет своё мнение о человеке — не анализ. Получает две-три фразы.
+ * Текст проверяется здесь: не прошёл — остаётся шаблонный совет.
  */
 
 /** Пометка совета от модели в истории: такой совет на тот же цикл и время суток больше не запрашиваем. */
@@ -15,7 +15,7 @@ export const AI_TEMPLATE_ID = 'ai:yandexgpt';
 
 export const isAiTemplate = (templateId: string) => templateId.startsWith('ai:');
 
-/** Что уходит посреднику. Всё о дне, кроме имени. Времена — «ЧЧ:ММ» по местному времени. */
+/** Что уходит посреднику. Всё о днях, кроме имени: числа, без выводов. Времена — «ЧЧ:ММ» по местному времени. */
 export interface AdvicePayload {
   mode: ReportMode;
   /** Местное время запроса. */
@@ -27,28 +27,16 @@ export interface AdvicePayload {
     weightKg: number | null;
     goal: 'lose' | 'keep' | 'gain' | null;
   };
-  total: number | null;
-  /** Самая слабая составляющая (как у шаблона); null — всё хорошо. */
-  weakest: ComponentId | null;
-  sleep: {
-    score: number | null;
-    minutes: number | null;
-    deepMinutes: number | null;
-    lightMinutes: number | null;
-    asleep: string | null;
-    awake: string | null;
-    /** Пульс во сне и отклонение от своей нормы; нормы ещё нет — отклонений нет. */
-    pulse: { min: number; avg: number; vsNormMin: number | null; vsNormAvg: number | null } | null;
-  };
-  activity: { score: number | null; steps: number | null; norm: number | null; caloriesToday: number | null };
-  organism: {
-    score: number | null;
-    hrv: number | null;
-    restingPulse: number | null;
-    spo2: number | null;
-    stress: number | null;
-  };
-  /** План дня из карточек карусели: модель объясняет его, а не спорит с ним. */
+  /** Оценки приложения за текущий цикл, 0–100: человек их видит на экране. */
+  scores: { total: number | null; sleep: number | null; activity: number | null; organism: number | null };
+  /**
+   * Таблица чисел: строка на каждый из последних дней, где есть данные, и сегодня
+   * (`adviceDaysFor`). Решение владельца 26.09: мнение Лиса — из чисел, а не из готовых фраз.
+   */
+  days: AdviceDay[];
+  /** Шаги сегодня по часам с часа `from`; сегодняшних данных нет — null. */
+  hours: { from: number; steps: number[] } | null;
+  /** План Vuelo на сегодня из карточек карусели: человек его видит, на него можно сослаться. */
   plan: {
     workout: { title: string; effort: string; minutes: number; from: string; to: string } | null;
     coffee: { from: string; until: string; cups: number | null } | null;
@@ -57,13 +45,7 @@ export interface AdvicePayload {
     meals: { title: string; time: string }[];
     bedtime: { from: string; to: string; wake: string; needMinutes: number; debtMinutes: number } | null;
   };
-  /**
-   * Факты дня против своей нормы (`dayFacts`), без выводов: что за ними стоит — частые перекусы,
-   * поздний ужин, долгое сидение, — догадывается сама модель (владелец 26.09: «прозрачные
-   * исходные данные, а не готовый сценарий ответа»).
-   */
-  facts: string[];
-  /** Последние выданные советы: чтобы модель не повторялась. */
+  /** Последние выданные советы: чтобы модель не повторялась ни словами, ни темой. */
   recent: string[];
 }
 

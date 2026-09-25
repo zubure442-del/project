@@ -330,6 +330,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       // Автоочистка кэша при запуске: дальше CACHE_DAYS хранить незачем.
       const kept = { ...loaded, raw: keepRecentDays(loaded.raw) };
       // Кэш до циклов бодрствования: циклы собираются из рядов сразу, не дожидаясь выгрузки.
+      // Нагрузка по дням пересоберётся с первой же выгрузкой при запуске.
       const trimmed = kept.cycles.length || !Object.keys(kept.raw).length ? kept : rebuildDays(kept);
       // «Эстафета»: орехи за вчерашние и прошлые дни с нормой — по кэшу, сразу при открытии.
       const cleaned = settleRelayState(trimmed);

@@ -16,6 +16,7 @@ export async function loadState(): Promise<VueloState> {
       // Старый кэш циклов не знал: они пересоберутся из рядов при первой же выгрузке или правке.
       cycles: parsed.cycles ?? [],
       ringOffSince: parsed.ringOffSince ?? null,
+      training: parsed.training ?? {},
       // Старый кэш без рядов переносим, иначе сон пропадёт при первой же синхронизации.
       raw: parsed.raw ?? migrateSnapshots(parsed.days ?? []),
       reports: parsed.reports ?? [],

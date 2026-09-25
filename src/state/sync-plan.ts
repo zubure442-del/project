@@ -124,13 +124,19 @@ export function markSynced(
 export function rebuildDays(state: VueloState, now = new Date(), horizon?: Date): VueloState {
   const sync = toSyncResult(state.raw);
   const age = profileAge(state.profile, now) ?? state.age;
-  const days = keepLastDays(buildSnapshots(sync, age, state.stepNorms, bodyOf(state.profile, now), now));
+  const all = buildSnapshots(sync, age, state.stepNorms, bodyOf(state.profile, now), now);
+  const days = keepLastDays(all);
   const { cycles, ringOffSince } = buildCycleSnapshots(sync, age, days, dataHorizon(state, sync, horizon));
+  // Нагрузка — за все дни рядов, а не только за две недели сводок: привычная нагрузка — четыре недели.
+  const training = Object.fromEntries(
+    all.filter((d) => d.load).map((d) => [d.date, d.load as NonNullable<typeof d.load>]),
+  );
   return {
     ...state,
     days,
     cycles,
     ringOffSince,
+    training,
     stepNorms: collectStepNorms(state.stepNorms, days),
     hadCompleteDay: state.hadCompleteDay || days.some(isCompleteDay) || cycles.some((c) => c.total !== null),
   };

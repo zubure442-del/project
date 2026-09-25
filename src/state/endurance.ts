@@ -2,15 +2,14 @@ import {
   PERSONAL_BASELINE_DAYS,
   averageBedtime,
   endurancePeak,
-  enduranceLevel,
+  enduranceReadiness,
   foodCycle,
-  workoutType,
+  workoutPlan,
   type EnduranceInput,
-  type EnduranceLevel,
   type EnduranceResult,
-  type WorkoutType,
+  type WorkoutPlan,
 } from '../domain';
-import type { CycleSnapshot, DaySnapshot, VueloState } from '../storage';
+import { profileAge, type CycleSnapshot, type DaySnapshot, type VueloState } from '../storage';
 import { cycleClock } from './cycle';
 import { coffeeInput, findDay } from './day';
 import { foodInput } from './food';
@@ -74,10 +73,8 @@ function stressForecast(days: readonly DaySnapshot[], date: string): (number | n
 
 export type EnduranceView = EnduranceResult & {
   nowMinute: number;
-  /** Какую тренировку выбрать — по цели профиля. */
-  workout: WorkoutType;
-  /** Насколько интенсивно — «Хард», «Средне», «Лайт». */
-  level: EnduranceLevel;
+  /** Тренировка дня: по готовности, нагрузке последних недель и цели профиля (training.ts). */
+  plan: WorkoutPlan;
 };
 
 /**
@@ -122,10 +119,14 @@ export function enduranceFor(state: VueloState, now = new Date()): EnduranceView
     meals: meals ? foodCycle(meals).meals : [],
   };
   const peak = endurancePeak(input);
-  return {
-    ...peak,
-    nowMinute,
-    workout: workoutType(peak.kind, state.profile.goal, date),
-    level: enduranceLevel(peak.intensity),
-  };
+  const plan = workoutPlan({
+    readiness: enduranceReadiness(peak),
+    goal: state.profile.goal,
+    history: Object.entries(state.training).map(([day, load]) => ({ date: day, load })),
+    today: date,
+    age: profileAge(state.profile, now) ?? state.age,
+    restingHr: findDay(state.days, date)?.restingHr ?? null,
+    windowMin: peak.to - peak.from,
+  });
+  return { ...peak, nowMinute, plan };
 }

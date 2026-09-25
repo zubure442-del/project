@@ -6,17 +6,15 @@ import {
   ADVICE_LABEL,
   AUTOPHAGY_INFO,
   ENDURANCE_INFO,
-  LEVEL_TITLE,
   SLEEP_MODE_INFO,
   SLEEP_MODE_PHASE_TEXT,
-  WORKOUT_TITLE,
   coffeeClock,
   pluralRu,
-  type EnduranceLevel,
   type CoffeeWindow,
   type FoodCycle,
+  type HrZone,
   type SleepMode,
-  type WorkoutType,
+  type WorkoutPlan,
 } from '../domain';
 import type { AssistantSlide } from '../state/day';
 import type { EnduranceView } from '../state/endurance';
@@ -207,48 +205,68 @@ const inTime = (minutes: number) => {
   return h ? `через ${h} ч${m ? ` ${m} мин` : ''}` : `через ${m} мин`;
 };
 
-/** Значок тренировки: гантель — силовые, сердце с пульсом — кардио. */
-function WorkoutGlyph({ type }: { type: WorkoutType }) {
-  const p = { stroke: colors.accent, strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' };
+/**
+ * Шкала пяти пульсовых зон, как на часах: чем выше зона, тем плотнее цвет, целевая — выше
+ * остальных, залита акцентом и подписана.
+ */
+function ZoneScale({ zone, width }: { zone: HrZone; width: number }) {
+  const gap = 4;
+  const seg = (width - gap * 4) / 5;
+  const x = (z: number) => (z - 1) * (seg + gap);
   return (
-    <Svg width={26} height={26} viewBox="0 0 24 24">
-      {type === 'strength' ? (
-        <Path {...p} d="M3 10v4M6 7v10M18 7v10M21 10v4M6 12h12" />
-      ) : (
-        <>
-          <Path {...p} d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />
-          <Path {...p} d="M7.5 12h2.5l1-2 2 4 1-2h2.5" />
-        </>
-      )}
-    </Svg>
+    <View pointerEvents="none">
+      <Svg width={width} height={34}>
+        <SvgText x={x(zone) + seg / 2} y={11} fill={colors.accent} fontSize={11} textAnchor="middle">
+          {`Зона ${zone}`}
+        </SvgText>
+        {[1, 2, 3, 4, 5].map((z) =>
+          z === zone ? (
+            <Rect key={z} x={x(z)} y={16} width={seg} height={14} rx={4} fill={colors.accent} />
+          ) : (
+            <Rect key={z} x={x(z)} y={19} width={seg} height={8} rx={4} fill={withAlpha(colors.accent, 0.1 + 0.06 * z)} />
+          ),
+        )}
+      </Svg>
+    </View>
   );
 }
 
-/** Уровень нагрузки тремя столбиками: «Хард» — все три, «Средне» — два, «Лайт» — один. */
-function LevelMeter({ level }: { level: EnduranceLevel }) {
-  const filled = level === 'hard' ? 3 : level === 'medium' ? 2 : 1;
+const minutesText = (m: [number, number]) => (m[0] === m[1] ? `${m[0]} мин` : `${m[0]}–${m[1]} мин`);
+
+/** Тренировка дня: название, шкала зон с личным пульсом — у кардио, подходы × повторения — у силовых. */
+function WorkoutBlock({ plan, width }: { plan: WorkoutPlan; width: number }) {
   return (
-    <Svg width={26} height={26} viewBox="0 0 24 24">
-      {[0, 1, 2].map((i) => (
-        <Rect
-          key={i}
-          x={3 + i * 7}
-          y={16 - i * 6}
-          width={5}
-          height={5 + i * 6}
-          rx={1.5}
-          fill={i < filled ? colors.accent : colors.track}
-        />
-      ))}
-    </Svg>
+    <View style={styles.workout}>
+      <Text style={styles.workoutTitle}>{plan.title}</Text>
+      {plan.zone !== null ? (
+        <>
+          <ZoneScale zone={plan.zone} width={width} />
+          <Text style={styles.text}>
+            {plan.pulse ? `Пульс ${plan.pulse[0]}–${plan.pulse[1]} · ` : ''}
+            {minutesText(plan.minutes)}
+          </Text>
+        </>
+      ) : plan.sets ? (
+        <View style={styles.setsRow}>
+          <Text style={styles.sets}>{plan.sets.value}</Text>
+          <Text style={styles.setsCaption}>
+            {plan.sets.caption}
+            {'\n'}
+            {minutesText(plan.minutes)}
+          </Text>
+        </View>
+      ) : (
+        <Text style={styles.text}>{minutesText(plan.minutes)}</Text>
+      )}
+    </View>
   );
 }
 
 /**
- * «Пик выносливости»: окно крупно, под ним где мы сейчас, какую тренировку выбрать (по цели профиля)
- * и насколько интенсивно — значком. Как это считается, не объясняем: только общие слова в «i».
+ * «Пик выносливости»: окно крупно, под ним где мы сейчас и тренировка дня — по готовности организма,
+ * нагрузке последних недель и цели профиля. Как это считается, не объясняем: только общие слова в «i».
  */
-function EnduranceBody({ peak }: { peak: EnduranceView }) {
+function EnduranceBody({ peak, width }: { peak: EnduranceView; width: number }) {
   const status =
     peak.nowMinute < peak.from
       ? `Начнётся ${inTime(peak.from - peak.nowMinute)}`
@@ -257,18 +275,13 @@ function EnduranceBody({ peak }: { peak: EnduranceView }) {
         : 'Пик на сегодня прошёл';
   return (
     <View style={styles.bodyGap}>
-      <Text style={styles.peakTime}>
-        {coffeeClock(peak.from)}–{coffeeClock(peak.to)}
-      </Text>
-      <Text style={styles.text}>{status}</Text>
-      <View style={styles.workoutRow}>
-        <WorkoutGlyph type={peak.workout} />
-        <Text style={styles.workoutText}>{WORKOUT_TITLE[peak.workout]}</Text>
+      <View>
+        <Text style={styles.peakTime}>
+          {coffeeClock(peak.from)}–{coffeeClock(peak.to)}
+        </Text>
+        <Text style={styles.text}>{status}</Text>
       </View>
-      <View style={styles.workoutRow}>
-        <LevelMeter level={peak.level} />
-        <Text style={styles.workoutText}>{LEVEL_TITLE[peak.level]}</Text>
-      </View>
+      <WorkoutBlock plan={peak.plan} width={width} />
     </View>
   );
 }
@@ -422,7 +435,7 @@ export function AssistantCarousel({
               ) : card.key === 'sleepmode' ? (
                 sleepMode && <SleepModeBody plan={sleepMode} />
               ) : card.key === 'endurance' ? (
-                endurance && <EnduranceBody peak={endurance} />
+                endurance && <EnduranceBody peak={endurance} width={inner} />
               ) : (
                 coffee && <CoffeeBody coffee={coffee} nowMinute={coffee.nowMinute} width={inner} />
               )}
@@ -466,8 +479,11 @@ const styles = StyleSheet.create({
   mode: { color: colors.accent, fontSize: 16, fontWeight: '500' },
   peakTime: { color: colors.text, fontSize: 34, fontWeight: '200', fontVariant: ['tabular-nums'] },
   debt: { color: colors.negative, fontSize: 15, lineHeight: 21 },
-  workoutRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  workoutText: { color: colors.text, fontSize: 18, fontWeight: '300' },
+  workout: { gap: spacing.xs, marginTop: spacing.xs },
+  workoutTitle: { color: colors.text, fontSize: 22, fontWeight: '500' },
+  setsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  sets: { color: colors.accent, fontSize: 32, fontWeight: '200', fontVariant: ['tabular-nums'] },
+  setsCaption: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
   meals: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   meal: { gap: 1 },
   mealTitle: { color: colors.textFaint, fontSize: 12 },

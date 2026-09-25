@@ -6,6 +6,7 @@ import {
   type ComponentId,
   type CycleEnd,
   type CycleStart,
+  type DayLoad,
   type NightHr,
   type RelayLedger,
   type ReportMode,
@@ -50,6 +51,8 @@ export interface DaySnapshot {
   }[];
   /** Активные ккал за день по нашей минутной модели; null — нет биометрии. У старых сводок поля нет. */
   calories?: number | null;
+  /** Нагрузка дня по пульсовым зонам и главная тренировка (training.ts); null — возраст неизвестен. */
+  load?: DayLoad | null;
   /** Норма шагов дня. У старых сводок из кэша её может не быть — тогда 10 000. */
   stepNorm?: StoredNorm;
   /** Шаги по часам суток: ровно 24 числа. */
@@ -113,6 +116,8 @@ export interface VueloState {
   cycles: CycleSnapshot[];
   /** Кольцо снято сейчас: с этого момента (кольцевая метка) нет замеров. null — кольцо на руке. */
   ringOffSince: number | null;
+  /** Нагрузка по дням за весь кэш рядов (до 30 дней): для тренировки дня в «Пике выносливости». */
+  training: Record<string, DayLoad>;
   reports: StoredReport[];
   lastSyncAt: number | null;
   /** Заряд кольца на момент последней синхронизации. */
@@ -184,7 +189,7 @@ export const isProfileComplete = (p: Profile): boolean =>
   p.sex !== null && p.heightCm !== null && p.weightKg !== null && p.birthYear !== null;
 
 export const EMPTY_STATE: VueloState = {
-  days: [], cycles: [], ringOffSince: null, raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
+  days: [], cycles: [], ringOffSince: null, training: {}, raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false, hadCompleteDay: false,
   relay: EMPTY_RELAY,
 };

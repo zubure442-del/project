@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avoidMeals, enduranceLevel, endurancePeak, sustained, workoutType, type EnduranceInput } from './endurance';
+import { avoidMeals, endurancePeak, enduranceReadiness, sustained, type EnduranceInput } from './endurance';
 
 /** Подъём в 7:00, сон как обычно, замеры в норме, еды нет. */
 const base: EnduranceInput = {
@@ -94,25 +94,12 @@ describe('СИНТЕТИЧЕСКИЕ: «Пик выносливости»', () =
   });
 });
 
-describe('СИНТЕТИЧЕСКИЕ: тренировка и уровень вместо процента', () => {
-  it('тип по цели: набор массы — силовые, похудение — кардио, поддержание — через день', () => {
-    expect(workoutType('training', 'gain', '2026-09-26')).toBe('strength');
-    expect(workoutType('training', 'lose', '2026-09-26')).toBe('cardio');
-    const keep = [workoutType('training', 'keep', '2026-09-26'), workoutType('training', 'keep', '2026-09-27')];
-    expect(new Set(keep)).toEqual(new Set(['strength', 'cardio']));
-    expect(workoutType('training', null, '2026-09-26')).toBe(keep[0]);
-  });
 
-  it('по замерам лучше поберечься — восстановительное кардио при любой цели', () => {
-    for (const goal of ['gain', 'lose', 'keep', null] as const) {
-      expect(workoutType('recovery', goal, '2026-09-26')).toBe('recoveryCardio');
-    }
-  });
-
-  it('уровень: полная нагрузка — хард, после короткого сна — средне, перегрузка и восстановление — лайт', () => {
-    expect(enduranceLevel(100)).toBe('hard');
-    expect(enduranceLevel(80)).toBe('medium');
-    expect(enduranceLevel(50)).toBe('light');
-    expect(enduranceLevel(30)).toBe('light');
+describe('СИНТЕТИЧЕСКИЕ: готовность для тренировки дня', () => {
+  it('полная нагрузка — высокая, после короткого сна — средняя, перегрузка — низкая, замеры — восстановление', () => {
+    expect(enduranceReadiness({ kind: 'training', intensity: 100 })).toBe('high');
+    expect(enduranceReadiness({ kind: 'training', intensity: 80 })).toBe('moderate');
+    expect(enduranceReadiness({ kind: 'training', intensity: 50 })).toBe('low');
+    expect(enduranceReadiness({ kind: 'recovery', intensity: 30 })).toBe('recovery');
   });
 });

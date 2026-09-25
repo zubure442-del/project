@@ -1,4 +1,4 @@
-import type { ActivityGoal } from './calories';
+import type { Readiness } from './training';
 import { NOT_MEDICAL_DEVICE } from './texts';
 
 /**
@@ -13,8 +13,8 @@ import { NOT_MEDICAL_DEVICE } from './texts';
  *    тренировка в самое спокойное (по стрессу) время.
  * 5. Еда неприкосновенна: от начала приёма −45 минут до конца +120 минут тренировки нет.
  *    Окно сдвигается или урезается в свободный промежуток, лучше — после обеда, перед ужином.
- * 6. Итог: окно, интенсивность 0–100 % и причины сдвига. На экране интенсивность — уровнем
- *    («Хард», «Средне», «Лайт»), плюс тип тренировки по цели профиля; формулы, замеры и причины
+ * 6. Итог: окно, интенсивность 0–100 % и причины сдвига. На экране вместо процента — тренировка дня
+ *    (training.ts): по готовности, нагрузке последних недель и цели профиля; формулы, замеры и причины
  *    пользователю не показываем.
  * Все времена — минуты от полуночи даты начала цикла (после полуночи — больше 1440).
  */
@@ -279,36 +279,12 @@ export function endurancePeak(input: EnduranceInput): EnduranceResult {
   return { from: round5(window.from), to: round5(window.to), intensity: Math.round(intensity), kind, flags };
 }
 
-/** Насколько интенсивно заниматься — на карточке значком, без процентов. */
-export type EnduranceLevel = 'hard' | 'medium' | 'light';
-
-/** Какую тренировку выбрать. */
-export type WorkoutType = 'strength' | 'cardio' | 'recoveryCardio';
-
-/** Уровень по внутренней интенсивности: полная нагрузка — «Хард», после короткого сна — «Средне», иначе «Лайт». */
-export const enduranceLevel = (intensity: number): EnduranceLevel =>
-  intensity >= 90 ? 'hard' : intensity >= 65 ? 'medium' : 'light';
-
 /**
- * Тип тренировки по цели профиля: набор массы — силовые, похудение — кардио, поддержание формы
- * (и цель не выбрана) — через день: силовые, потом кардио. Если по замерам сегодня лучше
- * поберечься — восстановительное кардио при любой цели.
+ * Готовность организма сегодня для выбора тренировки (training.ts): по критическим замерам —
+ * восстановление, полная нагрузка — высокая, после короткого сна — средняя, при перегрузке — низкая.
  */
-export function workoutType(kind: EnduranceResult['kind'], goal: ActivityGoal | null, date: string): WorkoutType {
-  if (kind === 'recovery') return 'recoveryCardio';
-  if (goal === 'gain') return 'strength';
-  if (goal === 'lose') return 'cardio';
-  const day = Math.floor(Date.parse(`${date}T00:00:00Z`) / 86400000);
-  return day % 2 === 0 ? 'strength' : 'cardio';
-}
-
-export const WORKOUT_TITLE: Record<WorkoutType, string> = {
-  strength: 'Силовые',
-  cardio: 'Кардио',
-  recoveryCardio: 'Восстановительное кардио',
-};
-
-export const LEVEL_TITLE: Record<EnduranceLevel, string> = { hard: 'Хард', medium: 'Средне', light: 'Лайт' };
+export const enduranceReadiness = (peak: Pick<EnduranceResult, 'kind' | 'intensity'>): Readiness =>
+  peak.kind === 'recovery' ? 'recovery' : peak.intensity >= 90 ? 'high' : peak.intensity >= 65 ? 'moderate' : 'low';
 
 /** «i» в шапке карточки: общими словами, без того, как считается (владелец: расчёты — наш секрет). */
 export const ENDURANCE_INFO = {

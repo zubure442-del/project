@@ -7,7 +7,7 @@ import {
   formatCount,
   formatDistance,
   tabInfoText,
-  weekActivityLevel,
+  weekActivity,
 } from '../../domain';
 import { findDay, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
@@ -44,7 +44,7 @@ export default function ActivityTab() {
   const calories = day?.calories ?? null;
   const weekBars = week.map((w) => ({ date: w.date, value: w.day?.calories ?? null }));
   // Оценка недели: средний расход по завершённым дням против коридора от базового обмена и цели.
-  const level = weekActivityLevel({
+  const activity = weekActivity({
     days: weekBars,
     today: dayView.today,
     body: bodyOf(state.profile),
@@ -108,7 +108,7 @@ export default function ActivityTab() {
       </Card>
 
       {/* Расход за неделю меняется каждый день — на прошлых датах его нет. */}
-      {isToday ? <CaloriesWeekCard days={weekBars} width={chartWidth} level={level} /> : null}
+      {isToday ? <CaloriesWeekCard days={weekBars} width={chartWidth} activity={activity} /> : null}
     </Screen>
   );
 }

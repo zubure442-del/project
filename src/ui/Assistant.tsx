@@ -5,14 +5,15 @@ import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg
 import {
   ADVICE_LABEL,
   AUTOPHAGY_INFO,
+  EFFORT_TEXT,
   ENDURANCE_INFO,
   SLEEP_MODE_INFO,
   SLEEP_MODE_PHASE_TEXT,
   coffeeClock,
   pluralRu,
   type CoffeeWindow,
+  type Effort,
   type FoodCycle,
-  type HrZone,
   type SleepMode,
   type WorkoutPlan,
 } from '../domain';
@@ -206,58 +207,37 @@ const inTime = (minutes: number) => {
 };
 
 /**
- * Шкала пяти пульсовых зон, как на часах: чем выше зона, тем плотнее цвет, целевая — выше
- * остальных, залита акцентом и подписана.
+ * Уровень нагрузки: пять делений, залиты до нужного — как индикатор громкости.
+ * Без номеров зон и пульса: у кольца нет экрана, во время тренировки пульс не виден.
  */
-function ZoneScale({ zone, width }: { zone: HrZone; width: number }) {
-  const gap = 4;
-  const seg = (width - gap * 4) / 5;
-  const x = (z: number) => (z - 1) * (seg + gap);
+function EffortScale({ effort }: { effort: Effort }) {
   return (
-    <View pointerEvents="none">
-      <Svg width={width} height={34}>
-        <SvgText x={x(zone) + seg / 2} y={11} fill={colors.accent} fontSize={11} textAnchor="middle">
-          {`Зона ${zone}`}
-        </SvgText>
-        {[1, 2, 3, 4, 5].map((z) =>
-          z === zone ? (
-            <Rect key={z} x={x(z)} y={16} width={seg} height={14} rx={4} fill={colors.accent} />
-          ) : (
-            <Rect key={z} x={x(z)} y={19} width={seg} height={8} rx={4} fill={withAlpha(colors.accent, 0.1 + 0.06 * z)} />
-          ),
-        )}
-      </Svg>
+    <View style={styles.effort} pointerEvents="none">
+      {[1, 2, 3, 4, 5].map((level) => (
+        <View key={level} style={[styles.effortStep, level <= effort && styles.effortOn]} />
+      ))}
     </View>
   );
 }
 
-const minutesText = (m: [number, number]) => (m[0] === m[1] ? `${m[0]} мин` : `${m[0]}–${m[1]} мин`);
+const MINUTE_FORMS = ['минута', 'минуты', 'минут'] as const;
 
-/** Тренировка дня: название, шкала зон с личным пульсом — у кардио, подходы × повторения — у силовых. */
-function WorkoutBlock({ plan, width }: { plan: WorkoutPlan; width: number }) {
+/**
+ * Тренировка дня простыми словами: название, одной фразой — что делать и как это должно ощущаться,
+ * шкала нагрузки и сколько заниматься.
+ */
+function WorkoutBlock({ plan }: { plan: WorkoutPlan }) {
   return (
     <View style={styles.workout}>
       <Text style={styles.workoutTitle}>{plan.title}</Text>
-      {plan.zone !== null ? (
-        <>
-          <ZoneScale zone={plan.zone} width={width} />
-          <Text style={styles.text}>
-            {plan.pulse ? `Пульс ${plan.pulse[0]}–${plan.pulse[1]} · ` : ''}
-            {minutesText(plan.minutes)}
-          </Text>
-        </>
-      ) : plan.sets ? (
-        <View style={styles.setsRow}>
-          <Text style={styles.sets}>{plan.sets.value}</Text>
-          <Text style={styles.setsCaption}>
-            {plan.sets.caption}
-            {'\n'}
-            {minutesText(plan.minutes)}
-          </Text>
-        </View>
-      ) : (
-        <Text style={styles.text}>{minutesText(plan.minutes)}</Text>
-      )}
+      <Text style={styles.workoutHint}>{plan.hint}</Text>
+      <EffortScale effort={plan.effort} />
+      <View style={styles.effortRow}>
+        <Text style={styles.effortText}>{EFFORT_TEXT[plan.effort]}</Text>
+        <Text style={styles.workoutMinutes}>
+          {plan.minutes} {pluralRu(plan.minutes, MINUTE_FORMS)}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -266,7 +246,7 @@ function WorkoutBlock({ plan, width }: { plan: WorkoutPlan; width: number }) {
  * «Пик выносливости»: окно крупно, под ним где мы сейчас и тренировка дня — по готовности организма,
  * нагрузке последних недель и цели профиля. Как это считается, не объясняем: только общие слова в «i».
  */
-function EnduranceBody({ peak, width }: { peak: EnduranceView; width: number }) {
+function EnduranceBody({ peak }: { peak: EnduranceView }) {
   const status =
     peak.nowMinute < peak.from
       ? `Начнётся ${inTime(peak.from - peak.nowMinute)}`
@@ -281,7 +261,7 @@ function EnduranceBody({ peak, width }: { peak: EnduranceView; width: number }) 
         </Text>
         <Text style={styles.text}>{status}</Text>
       </View>
-      <WorkoutBlock plan={peak.plan} width={width} />
+      <WorkoutBlock plan={peak.plan} />
     </View>
   );
 }
@@ -307,7 +287,8 @@ function SleepModeBody({ plan }: { plan: SleepMode }) {
           {coffeeClock(plan.from)}–{coffeeClock(plan.to)}
         </Text>
       </View>
-      <Text style={styles.text}>{SLEEP_MODE_PHASE_TEXT[plan.phase]}</Text>
+      {/* Днём строки нет: «План на вечер» при сне в два часа ночи звучал нелепо. */}
+      {SLEEP_MODE_PHASE_TEXT[plan.phase] ? <Text style={styles.text}>{SLEEP_MODE_PHASE_TEXT[plan.phase]}</Text> : null}
       <View style={styles.meals}>
         <View style={styles.meal}>
           <Text style={styles.mealTitle}>Подъём</Text>
@@ -435,7 +416,7 @@ export function AssistantCarousel({
               ) : card.key === 'sleepmode' ? (
                 sleepMode && <SleepModeBody plan={sleepMode} />
               ) : card.key === 'endurance' ? (
-                endurance && <EnduranceBody peak={endurance} width={inner} />
+                endurance && <EnduranceBody peak={endurance} />
               ) : (
                 coffee && <CoffeeBody coffee={coffee} nowMinute={coffee.nowMinute} width={inner} />
               )}
@@ -481,9 +462,13 @@ const styles = StyleSheet.create({
   debt: { color: colors.negative, fontSize: 15, lineHeight: 21 },
   workout: { gap: spacing.xs, marginTop: spacing.xs },
   workoutTitle: { color: colors.text, fontSize: 22, fontWeight: '500' },
-  setsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  sets: { color: colors.accent, fontSize: 32, fontWeight: '200', fontVariant: ['tabular-nums'] },
-  setsCaption: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
+  workoutHint: { color: colors.textMuted, fontSize: 14, lineHeight: 20 },
+  effort: { flexDirection: 'row', gap: 4, marginTop: 2 },
+  effortStep: { flex: 1, height: 6, borderRadius: 3, backgroundColor: colors.track },
+  effortOn: { backgroundColor: colors.accent },
+  effortRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm },
+  effortText: { color: colors.textMuted, fontSize: 13 },
+  workoutMinutes: { color: colors.text, fontSize: 15, fontVariant: ['tabular-nums'] },
   meals: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   meal: { gap: 1 },
   mealTitle: { color: colors.textFaint, fontSize: 12 },

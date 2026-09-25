@@ -5,6 +5,9 @@ import { maxHeartRate } from './score';
 /**
  * Тренировка дня для «Пика выносливости» — по тому же принципу, что у Garmin (Daily Suggested
  * Workouts): готовность организма сегодня + баланс нагрузки последних недель + цель профиля.
+ * На экран — простыми словами (решение владельца 26.09): понятное название, что делать и как это
+ * должно ощущаться («можно разговаривать»), уровень нагрузки и одна длительность. Зон, пульса
+ * и диапазонов минут нет: у кольца нет экрана, пульс во время тренировки человек не видит.
  * - Нагрузка дня — TRIMP по Эдвардсу: минуты в каждой пульсовой зоне × номер зоны.
  * - Безопасный рост нагрузки — отношение средней нагрузки последней недели к привычной (4 недели):
  *   коридор 0.8–1.3 (Gabbett, 2016); выше — нагрузку не наращиваем.
@@ -21,11 +24,6 @@ export type HrZone = 1 | 2 | 3 | 4 | 5;
 export function pulseAtShare(share: number, age: number, restingHr: number | null): number {
   const max = maxHeartRate(age);
   return Math.round(restingHr === null ? share * max : restingHr + share * (max - restingHr));
-}
-
-/** Пульс «от–до» зоны. */
-export function zoneRange(zone: HrZone, age: number, restingHr: number | null): [number, number] {
-  return [pulseAtShare(HR_ZONE_BOUNDS[zone - 1], age, restingHr), pulseAtShare(HR_ZONE_BOUNDS[zone], age, restingHr)];
 }
 
 /** Номер зоны пульса; ниже первой — 0 (обычная жизнь, не тренировка). */
@@ -111,43 +109,53 @@ export interface WorkoutInput {
   /** Нагрузка прошлых дней (сегодня не входит), по датам. */
   history: readonly { date: string; load: DayLoad }[];
   today: string;
-  age: number | null;
-  restingHr: number | null;
   /** Длина окна пика, минуты: тренировка в него помещается. */
   windowMin: number;
 }
 
+/** Уровень нагрузки на экране: 1 — очень лёгкая … 5 — максимальная. */
+export type Effort = 1 | 2 | 3 | 4 | 5;
+
+export const EFFORT_TEXT: Record<Effort, string> = {
+  1: 'Очень лёгкая нагрузка',
+  2: 'Лёгкая нагрузка',
+  3: 'Средняя нагрузка',
+  4: 'Высокая нагрузка',
+  5: 'Максимальная нагрузка',
+};
+
 export interface WorkoutPlan {
   kind: WorkoutKind;
+  /** Название простыми словами: «Спокойное кардио», «Силовая». */
   title: string;
-  /** Целевая зона пульса — у кардио; у силовых и растяжки null. */
-  zone: HrZone | null;
-  /** Пульс «от–до» в целевой зоне; возраст неизвестен — null. */
-  pulse: [number, number] | null;
-  /** Длительность «от–до», минуты. */
-  minutes: [number, number];
-  /** Подходы и повторения у силовых: «3–4 × 8–12» и подпись. */
-  sets: { value: string; caption: string } | null;
+  /** Что делать и как это должно ощущаться — одной фразой, без терминов. */
+  hint: string;
+  effort: Effort;
+  /** Сколько заниматься, минуты: одно число, не больше окна пика. */
+  minutes: number;
 }
 
-export const WORKOUT: Record<
-  WorkoutKind,
-  { title: string; zone: HrZone | null; minutes: [number, number]; sets?: { value: string; caption: string } }
-> = {
-  recovery: { title: 'Восстановительная', zone: 1, minutes: [20, 30] },
-  base: { title: 'Базовая аэробная', zone: 2, minutes: [40, 60] },
-  tempo: { title: 'Темповая', zone: 3, minutes: [30, 45] },
-  threshold: { title: 'Пороговая', zone: 4, minutes: [30, 40] },
-  intervals: { title: 'Интервалы на МПК', zone: 5, minutes: [25, 35] },
-  strength: { title: 'Силовая', zone: null, minutes: [45, 60], sets: { value: '4–5 × 3–6', caption: 'подходы × повторения' } },
-  hypertrophy: {
-    title: 'Тренировка на массу',
-    zone: null,
-    minutes: [45, 60],
-    sets: { value: '3–4 × 8–12', caption: 'подходы × повторения' },
+/**
+ * Виды тренировок. Внутри — общепринятая классификация (восстановительная, базовая аэробная,
+ * темповая, пороговая, интервалы, силовая, на массу, круговая, мобильность), на экране — простые
+ * названия. Интенсивность кардио объясняется «тестом разговора» вместо пульсовых зон: так её
+ * понимает любой, и так её описывают для новичков (American Heart Association).
+ */
+export const WORKOUT: Record<WorkoutKind, { title: string; hint: string; effort: Effort; minutes: number }> = {
+  recovery: { title: 'Лёгкая прогулка', hint: 'Спокойным шагом, дыхание ровное', effort: 1, minutes: 25 },
+  base: {
+    title: 'Спокойное кардио',
+    hint: 'Бег трусцой, велосипед или быстрая ходьба — в темпе, когда можно разговаривать',
+    effort: 2,
+    minutes: 45,
   },
-  circuit: { title: 'Круговая', zone: null, minutes: [30, 40], sets: { value: '3 × 12–15', caption: 'круги × повторения' } },
-  mobility: { title: 'Мобильность и растяжка', zone: null, minutes: [15, 25] },
+  tempo: { title: 'Темповое кардио', hint: 'Бодрый темп: говорить получается только короткими фразами', effort: 3, minutes: 35 },
+  threshold: { title: 'Интенсивное кардио', hint: 'Тяжело, но ровно: на разговор хватает пары слов', effort: 4, minutes: 30 },
+  intervals: { title: 'Интервалы', hint: 'Короткие ускорения почти в полную силу, между ними — отдых шагом', effort: 5, minutes: 30 },
+  strength: { title: 'Силовая', hint: '4–5 подходов по 3–6 повторений с большим весом', effort: 4, minutes: 50 },
+  hypertrophy: { title: 'Силовая на массу', hint: '3–4 подхода по 8–12 повторений', effort: 4, minutes: 50 },
+  circuit: { title: 'Круговая', hint: 'Несколько упражнений по кругу почти без отдыха, 3 круга', effort: 3, minutes: 35 },
+  mobility: { title: 'Растяжка', hint: 'Спокойная растяжка и разминка суставов', effort: 1, minutes: 20 },
 };
 
 /** Нагрузка последней недели к привычной: коридор безопасного роста и его края. */
@@ -232,14 +240,7 @@ export function workoutPlan(input: WorkoutInput): WorkoutPlan {
   }
 
   const spec = WORKOUT[kind];
-  const hi = Math.max(10, Math.min(spec.minutes[1], input.windowMin));
-  const lo = Math.min(spec.minutes[0], hi);
-  return {
-    kind,
-    title: spec.title,
-    zone: spec.zone,
-    pulse: spec.zone !== null && input.age !== null ? zoneRange(spec.zone, input.age, input.restingHr) : null,
-    minutes: [lo, hi],
-    sets: spec.sets ?? null,
-  };
+  // Длительность — не больше окна пика, кратно 5 минутам.
+  const minutes = Math.max(10, Math.min(spec.minutes, Math.floor(input.windowMin / 5) * 5));
+  return { kind, title: spec.title, hint: spec.hint, effort: spec.effort, minutes };
 }

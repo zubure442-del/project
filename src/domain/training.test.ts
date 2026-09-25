@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayLoad, loadRatio, workoutPlan, zoneOf, zoneRange, type DayLoad, type WorkoutInput } from './training';
+import { WORKOUT, dayLoad, loadRatio, pulseAtShare, workoutPlan, zoneOf, type DayLoad, type WorkoutInput } from './training';
 
 const AGE = 30; // максимальный пульс 187
 const REST = 55;
@@ -26,8 +26,6 @@ const input = (over: Partial<WorkoutInput>): WorkoutInput => ({
   goal: 'keep',
   history: history(regular()),
   today: TODAY,
-  age: AGE,
-  restingHr: REST,
   windowMin: 120,
   ...over,
 });
@@ -35,11 +33,11 @@ const input = (over: Partial<WorkoutInput>): WorkoutInput => ({
 describe('СИНТЕТИЧЕСКИЕ: личные пульсовые зоны (Карвонен)', () => {
   it('зоны от пульса покоя и максимального', () => {
     // Резерв 187 − 55 = 132: зона 2 — 60–70 % резерва.
-    expect(zoneRange(2, AGE, REST)).toEqual([134, 147]);
+    expect([pulseAtShare(0.6, AGE, REST), pulseAtShare(0.7, AGE, REST)]).toEqual([134, 147]);
     expect(zoneOf(60, AGE, REST)).toBe(0);
     expect(zoneOf(150, AGE, REST)).toBe(3);
     // Без пульса покоя — доля максимального.
-    expect(zoneRange(2, AGE, null)).toEqual([112, 131]);
+    expect([pulseAtShare(0.6, AGE, null), pulseAtShare(0.7, AGE, null)]).toEqual([112, 131]);
   });
 });
 
@@ -74,11 +72,11 @@ describe('СИНТЕТИЧЕСКИЕ: тренировка дня — индив
     expect(loadRatio(history({ 1: load(50), 2: load(50) }), TODAY)).toBeNull();
   });
 
-  it('по замерам лучше поберечься — восстановительная, зона 1, с личным пульсом', () => {
+  it('по замерам лучше поберечься — лёгкая прогулка, самая лёгкая нагрузка', () => {
     const plan = workoutPlan(input({ readiness: 'recovery' }));
     expect(plan.kind).toBe('recovery');
-    expect(plan.zone).toBe(1);
-    expect(plan.pulse).toEqual(zoneRange(1, AGE, REST));
+    expect(plan.title).toBe('Лёгкая прогулка');
+    expect(plan.effort).toBe(1);
   });
 
   it('новичок без тренировок за две недели — кардио только базовое, даже при высокой готовности', () => {
@@ -103,6 +101,7 @@ describe('СИНТЕТИЧЕСКИЕ: тренировка дня — индив
   });
 
   const KEY = ['threshold', 'tempo', 'intervals', 'strength', 'hypertrophy'];
+  const CARDIO = ['recovery', 'base', 'tempo', 'threshold', 'intervals'];
 
   it('неделя в полтора раза тяжелее привычной — только лёгкая тренировка', () => {
     const heavy = { ...regular(), 1: load(300, 'cardio'), 2: load(250, 'cardio'), 3: load(250, 'cardio') };
@@ -116,8 +115,8 @@ describe('СИНТЕТИЧЕСКИЕ: тренировка дня — индив
 
   it('цель: набор массы — на массу, похудение — кардио, после вчерашней силовой — кардио', () => {
     expect(workoutPlan(input({ goal: 'gain' })).kind).toBe('hypertrophy');
-    expect(workoutPlan(input({ goal: 'gain', history: history({ ...regular(), 1: load(90, 'strength') }) })).zone).not.toBeNull();
-    expect(workoutPlan(input({ goal: 'lose', history: history(regular('strength')) })).zone).not.toBeNull();
+    expect(CARDIO).toContain(workoutPlan(input({ goal: 'gain', history: history({ ...regular(), 1: load(90, 'strength') }) })).kind);
+    expect(CARDIO).toContain(workoutPlan(input({ goal: 'lose', history: history(regular('strength')) })).kind);
   });
 
   it('похудение без силовых целую неделю — круговая, чтобы сохранить мышцы', () => {
@@ -129,7 +128,7 @@ describe('СИНТЕТИЧЕСКИЕ: тренировка дня — индив
     expect(workoutPlan(input({ goal: 'keep', history: cardioLast })).kind).toBe('hypertrophy');
     const strengthRegular = history({ ...regular('strength'), 1: load(40, 'cardio') });
     expect(workoutPlan(input({ goal: 'keep', history: strengthRegular })).kind).toBe('strength');
-    expect(workoutPlan(input({ goal: 'keep', history: history({ ...regular(), 2: load(90, 'strength') }) })).zone).not.toBeNull();
+    expect(CARDIO).toContain(workoutPlan(input({ goal: 'keep', history: history({ ...regular(), 2: load(90, 'strength') }) })).kind);
   });
 
   it('тренировок в данных нет — не одно и то же каждый день: чередование по цели', () => {
@@ -144,9 +143,17 @@ describe('СИНТЕТИЧЕСКИЕ: тренировка дня — индив
     expect(week('lose').filter((k) => k === 'base')).toHaveLength(4);
   });
 
-  it('у силовых — подходы и повторения, длительность не больше окна пика', () => {
+  it('у силовых — подходы и повторения словами, длительность одним числом и не больше окна пика', () => {
     const plan = workoutPlan(input({ goal: 'gain', windowMin: 45 }));
-    expect(plan.sets?.value).toBe('3–4 × 8–12');
-    expect(plan.minutes).toEqual([45, 45]);
+    expect(plan.hint).toBe('3–4 подхода по 8–12 повторений');
+    expect(plan.minutes).toBe(45);
+    expect(workoutPlan(input({ goal: 'gain', windowMin: 120 })).minutes).toBe(50);
+  });
+
+  it('на экране простые слова: без зон, пульса и терминов', () => {
+    for (const w of Object.values(WORKOUT)) {
+      const text = `${w.title} ${w.hint}`;
+      expect(text).not.toMatch(/зон|пульс|аэроб|МПК|порог|×/i);
+    }
   });
 });

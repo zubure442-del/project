@@ -9,7 +9,7 @@ import {
   type EnduranceResult,
   type WorkoutPlan,
 } from '../domain';
-import { profileAge, type CycleSnapshot, type DaySnapshot, type VueloState } from '../storage';
+import type { CycleSnapshot, DaySnapshot, VueloState } from '../storage';
 import { cycleClock } from './cycle';
 import { coffeeInput, findDay } from './day';
 import { foodInput } from './food';
@@ -124,8 +124,6 @@ export function enduranceFor(state: VueloState, now = new Date()): EnduranceView
     goal: state.profile.goal,
     history: Object.entries(state.training).map(([day, load]) => ({ date: day, load })),
     today: date,
-    age: profileAge(state.profile, now) ?? state.age,
-    restingHr: findDay(state.days, date)?.restingHr ?? null,
     windowMin: peak.to - peak.from,
   });
   return { ...peak, nowMinute, plan };

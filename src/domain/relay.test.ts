@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_RELAY, RELAY_DAY_REWARD, STREAK_LADDER, relayView, settleRelay, type RelayDay } from './relay';
+import {
+  EMPTY_RELAY,
+  RELAY_DAY_REWARD,
+  STREAK_LADDER,
+  ladderPosition,
+  nextRung,
+  relayView,
+  settleRelay,
+  type RelayDay,
+} from './relay';
 
 const NORM = 8000;
 const START = '2026-01-01';
@@ -114,5 +123,21 @@ describe('СИНТЕТИЧЕСКИЕ: серия и лестница', () => {
     const second = settleRelay(first, late, dateAt(6));
     expect(second.streak).toBe(6);
     expect(second.nuts).toBe(first.nuts + 5);
+  });
+
+  it('дорожка лестницы: ступени — целые позиции, между ними — доля пройденных дней', () => {
+    expect(ladderPosition(0)).toBe(0);
+    expect(ladderPosition(7)).toBe(1);
+    expect(ladderPosition(3.5)).toBeCloseTo(0.5);
+    // 7 → 30: пройдено 5 дней из 23
+    expect(ladderPosition(12)).toBeCloseTo(1 + 5 / 23);
+    expect(ladderPosition(365)).toBe(5);
+    expect(ladderPosition(400)).toBe(5);
+  });
+
+  it('следующая награда: сколько дней осталось и сколько орехов', () => {
+    expect(nextRung(0)).toEqual({ days: 7, left: 7, nuts: 50 });
+    expect(nextRung(12)).toEqual({ days: 30, left: 18, nuts: 500 });
+    expect(nextRung(365)).toBeNull();
   });
 });

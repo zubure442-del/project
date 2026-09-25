@@ -156,6 +156,11 @@ export interface VueloState {
   hadCompleteDay: boolean;
   /** «Эстафета»: баланс орехов, пометки «начислено», серия и выплаченные ступени лестницы. */
   relay: RelayLedger;
+  /**
+   * Последнее фоновое обновление (iOS разбудила приложение): когда и чем кончилось. Видно вверху
+   * «Сырого лога» — отладочный журнал живёт в памяти и мог пропасть, если iOS выгрузила приложение.
+   */
+  lastBackground: { at: number; note: string } | null;
   /** Состояние демо-режима: живёт только в памяти, `saveState` его не пишет. У настоящего поля нет. */
   demo?: true;
 }
@@ -191,7 +196,7 @@ export const isProfileComplete = (p: Profile): boolean =>
 export const EMPTY_STATE: VueloState = {
   days: [], cycles: [], ringOffSince: null, training: {}, raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false, hadCompleteDay: false,
-  relay: EMPTY_RELAY,
+  relay: EMPTY_RELAY, lastBackground: null,
 };
 /** Сколько дней показываем в неделе (полоса дней, календарь, карточки недели). */
 export const HISTORY_DAYS = 7;

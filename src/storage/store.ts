@@ -36,6 +36,7 @@ export async function loadState(): Promise<VueloState> {
       // Старый кэш флага не знал: полный день в сохранённых сводках — значит, пользователь уже не новый.
       hadCompleteDay: parsed.hadCompleteDay ?? (parsed.days ?? []).some((d) => d?.total !== null && d?.total !== undefined),
       relay: { ...EMPTY_RELAY, ...(parsed.relay ?? {}) },
+      lastBackground: parsed.lastBackground ?? null,
     };
   } catch {
     return EMPTY_STATE; // повреждённое хранилище не должно ломать запуск

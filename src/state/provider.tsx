@@ -11,7 +11,6 @@ import {
   logNote,
   runSync,
   type KnownRing,
-  type RingProfile,
 } from '../ble';
 import {
   EMPTY_STATE,
@@ -21,7 +20,6 @@ import {
   loadProfile,
   loadState,
   mergeRaw,
-  profileAge,
   saveState,
   splitByDay,
   type Profile,
@@ -44,6 +42,8 @@ import {
   foxThinking,
   withAiAdvice,
 } from './ai-advice';
+import { registerBackgroundSync } from './background-task';
+import { dropSessionRing, onBackgroundSync, ringSession, sessionRing, toRingProfile } from './ring-session';
 import { applySyncResult, newUserTodayOnly, planDays, rebuildDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -136,12 +136,6 @@ export function useVuelo(): Vuelo {
   return value;
 }
 
-const toRingProfile = (profile: Profile): RingProfile | null => {
-  const age = profileAge(profile);
-  if (!isProfileComplete(profile) || age === null) return null;
-  return { age, heightCm: profile.heightCm as number, weightKg: profile.weightKg as number, male: profile.sex === 'male' };
-};
-
 /** Дать экрану загрузки отрисовать новый этап перед тяжёлым расчётом. */
 const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 16));
 
@@ -159,8 +153,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
    */
   const [clockDay, setClockDay] = useState(() => todayKey());
   const lastLiveAt = useRef(0);
-  const ring = useRef<RingBle | null>(null);
-  const running = useRef(false);
+  // Кольцо и замок выгрузки — общие с фоновым обновлением (`ring-session.ts`).
   const latest = useRef(EMPTY_STATE);
   /** Живой замер идёт после загрузки; новая загрузка его прерывает и дожидается. */
   const liveTask = useRef<Promise<void>>(Promise.resolve());
@@ -266,7 +259,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
    */
   const sync = useCallback(
     (mode: SyncMode = 'launch') => {
-      if (running.current) return;
+      if (ringSession.running) {
+        // Идёт фоновая выгрузка (iOS разбудила приложение): не мешаем ей, показываем «Обновляем данные…».
+        if (ringSession.running === 'background') setPhase('background');
+        return;
+      }
       // В демо к кольцу не идём: демо работает и без кольца, а настоящие данные ждут выключения.
       if (demoOn.current) return;
       if (isFresh(latest.current)) {
@@ -275,7 +272,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         void refineAdvice();
         return;
       }
-      running.current = true;
+      ringSession.running = 'screen';
       stopLive.current = true;
       setError(null);
       setLoadingMode(mode);
@@ -300,8 +297,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         await liveTask.current;
         stopLive.current = false;
         const base = latest.current;
-        const device = ring.current ?? new RingBle(base.ring);
-        ring.current = device;
+        const device = sessionRing(base.ring);
         let known: KnownRing | null = null;
         device.onKnown = (k) => {
           known = k;
@@ -383,7 +379,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
             liveTask.current = maybeLiveMeasure(device);
           }
         } finally {
-          running.current = false;
+          ringSession.running = null;
         }
       })();
     },
@@ -408,9 +404,31 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       latest.current = cleaned;
       setState(cleaned);
       setReady(true);
-      if (cleaned.started) sync('launch');
+      // iOS подняла приложение в фоне ради фонового обновления: к кольцу сходит оно само
+      // (`background-sync.ts`), а обычная загрузка начнётся, когда человек откроет приложение.
+      if (cleaned.started && AppState.currentState !== 'background') sync('launch');
     });
   }, [sync]);
+
+  // Фоновое обновление: экран — хозяин состояния (фоновая выгрузка берёт его и отдаёт результат сюда),
+  // статус «Обновляем данные…», пока она идёт, и мнение Лиса после неё. Просим iOS будить приложение.
+  useEffect(() => {
+    if (!ready) return;
+    ringSession.host = { get: () => latest.current, apply: commit };
+    if (latest.current.started) void registerBackgroundSync();
+    const off = onBackgroundSync((event) => {
+      if (event.kind === 'started') {
+        setPhase((p) => (p === 'idle' ? 'background' : p));
+        return;
+      }
+      setPhase((p) => (p === 'background' && !ringSession.running ? 'idle' : p));
+      if (event.changed) void refineAdvice();
+    });
+    return () => {
+      off();
+      ringSession.host = null;
+    };
+  }, [ready, commit, refineAdvice]);
 
   // Возврат из фона: сверяем дату по часам и, если кэш устарел, идём к кольцу (правило 10 минут).
   // Вкладку и выбранный день не трогаем: на «Сегодня» перекидывает только приход новых данных
@@ -425,7 +443,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       setClockDay(todayKey());
       setDemoSession((prev) => prev && { ...prev, at: Date.now() });
       // Возврат из фона — тоже открытие: проверяем кэш на выполненные дни, даже если к кольцу не пойдём.
-      if (!running.current) {
+      if (!ringSession.running) {
         const settled = settleRelayState(latest.current);
         if (settled !== latest.current) commit(settled);
       }
@@ -452,13 +470,14 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       adviceSlotRef.current = slot;
       setAdviceSlot(slot);
       // Первая проверка после запуска не в счёт: там мнение и так просит выгрузка.
-      if (changed && slot && !running.current) void refineAdvice();
+      if (changed && slot && !ringSession.running) void refineAdvice();
     }, CLOCK_CHECK_MS);
     return () => clearInterval(timer);
   }, [refineAdvice]);
 
   const setDemo = useCallback((on: boolean) => {
     demoOn.current = on;
+    ringSession.demo = on;
     setPicked(null);
     // Новое зерно на каждое включение: каждый раз своя правдоподобная неделя.
     setDemoSession(on ? { seed: Date.now() % 2147483647, at: Date.now() } : null);
@@ -477,8 +496,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
 
   const forgetRing = useCallback(() => {
     void (async () => {
-      await ring.current?.disconnect();
-      ring.current = null;
+      await dropSessionRing();
       const cleared = await clearState();
       commit({ ...cleared, started: latest.current.started, profile: latest.current.profile });
       setPhase('idle');
@@ -494,6 +512,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         latest.current = next;
         setState(next);
         sync('launch');
+        void registerBackgroundSync();
       })();
     },
     [sync],
@@ -505,7 +524,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     void loadProfile().then((profile) => {
       // Пока читали, профиль успели поправить — прочитанное устарело, не возвращаем его.
       if (version !== profileVersion.current) return;
-      if (running.current || JSON.stringify(profile) === JSON.stringify(latest.current.profile)) return;
+      if (ringSession.running || JSON.stringify(profile) === JSON.stringify(latest.current.profile)) return;
       latest.current = { ...latest.current, profile };
       setState(latest.current);
     });
@@ -515,7 +534,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   // Выбор дня живёт до следующей выгрузки с экрана загрузки (счётчик homeRequest); фоновая его не сбрасывает.
   const selectDay = useCallback((date: string) => setPicked({ date, key: homeRequest }), [homeRequest]);
   const finishLoading = useCallback(() => {
-    if (!running.current) setPhase('idle');
+    if (!ringSession.running) setPhase('idle');
   }, []);
 
   const saveProfile = useCallback(
@@ -530,8 +549,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       clearTimeout(profilePush.current);
       profilePush.current = setTimeout(() => {
         const forRing = toRingProfile(latest.current.profile);
-        if (forRing && ring.current?.status === 'ready' && !running.current) {
-          void handshake(ring.current, forRing).catch(() => undefined);
+        const device = ringSession.ring;
+        if (forRing && device?.status === 'ready' && !ringSession.running) {
+          void handshake(device, forRing).catch(() => undefined);
         }
       }, PROFILE_PUSH_DELAY_MS);
     },

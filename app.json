@@ -42,6 +42,8 @@
           ]
         }
       ],
+      "expo-task-manager",
+      "expo-background-fetch",
       "./plugins/with-ios-scene-lifecycle",
       "./plugins/with-signing-team"
     ],

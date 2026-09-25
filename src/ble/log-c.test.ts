@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { dropGlucoseSpikes } from '../domain';
 import { weekDays } from '../state/day';
 import { applySyncResult, planDays } from '../state/sync-plan';
 import { EMPTY_STATE } from '../storage';
@@ -115,5 +116,24 @@ describe('РЕАЛЬНЫЙ ЛОГ c: сон в кэше и на экранах',
     expect(byDate('2026-09-21')?.total).not.toBeNull();
     // Сегодня полный — совет записан за сегодня, в дневном режиме.
     expect(state.reports.map((r) => [r.date, r.mode])).toEqual([['2026-09-21', 'day']]);
+  });
+});
+
+describe('РЕАЛЬНЫЙ ЛОГ c: выбросы глюкозы', () => {
+  it('из 111 замеров за неделю убираются только одиночные; пики после еды остаются', async () => {
+    const { result } = await replayWeek();
+    const after = dropGlucoseSpikes(result.summary);
+    const at = (r: { ts: number }) => new Date(r.ts * 1000).toISOString().slice(5, 16);
+    const readings = result.summary.filter((r) => r.glucose !== null);
+    const dropped = result.summary.filter((r, i) => r.glucose !== null && after[i].glucose === null).map(at);
+    expect(readings).toHaveLength(111);
+    expect(dropped).toEqual([
+      '09-19T09:45', // 6.8 → 7.7 → 6.7: одиночная точка
+      '09-20T13:45', // 7.8, соседи в двух и трёх часах: подтвердить нечем
+      '09-21T12:45', // 7.7 — последний замер выгрузки: ждёт следующего
+    ]);
+    // Завтрак и ужин: 7.8 → 7.3, 8.1 → 7.3, 7.9 → 7.4, 8.0 → 8.0 — на месте.
+    const keptAt = new Set(after.filter((r) => r.glucose !== null).map(at));
+    for (const peak of ['09-18T08:45', '09-19T19:15', '09-20T08:45', '09-20T19:15']) expect(keptAt).toContain(peak);
   });
 });

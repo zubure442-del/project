@@ -1,7 +1,7 @@
 import type { KnownRing } from '../ble/ring';
 import type { SyncResult } from '../ble/sync';
 import { dateForOffset, nowRingTs } from '../codec';
-import { bodyOf, buildTemplateReport } from '../domain';
+import { bodyOf, buildTemplateReport, dropGlucoseSpikes } from '../domain';
 import {
   CACHE_DAYS,
   addReport,
@@ -122,7 +122,10 @@ export function markSynced(
  * по текущему профилю. Вызывается после выгрузки и после правки профиля.
  */
 export function rebuildDays(state: VueloState, now = new Date(), horizon?: Date): VueloState {
-  const sync = toSyncResult(state.raw);
+  // Одиночные выбросы глюкозы вверх убираем до всех расчётов: ни график, ни «Организм»,
+  // ни «Цикл питания» их не видят. Сырые ряды не трогаем — подтверждение может прийти позже.
+  const raw = toSyncResult(state.raw);
+  const sync = { ...raw, summary: dropGlucoseSpikes(raw.summary) };
   const age = profileAge(state.profile, now) ?? state.age;
   const all = buildSnapshots(sync, age, state.stepNorms, bodyOf(state.profile, now), now);
   const days = keepLastDays(all);

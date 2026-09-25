@@ -133,3 +133,22 @@ describe('СИНТЕТИЧЕСКИЕ: обрыв связи', () => {
     expect(Object.keys(next.raw).length).toBe(1);
   });
 });
+
+describe('СИНТЕТИЧЕСКИЕ: выброс глюкозы не доходит до графика', () => {
+  it('одиночный скачок вверх убран из сводки дня, соседние замеры и давление того же замера на месте', () => {
+    const base = Date.parse('2026-09-21T06:00:00Z') / 1000;
+    const values = [6, 5.8, 6.2, 6, 5.9, 6.1, 6, 6.2, 13.5, 6, 5.9];
+    const sync = {
+      ...emptySyncResult(),
+      summary: values.map((glucose, i) => ({ ts: base + i * 1800, systolic: 118, diastolic: 76, stress: 20, glucose, hrv: 50 })),
+    };
+    const state = applySyncResult(EMPTY_STATE, sync, null, DAY);
+    const day = state.days.find((d) => d.date === '2026-09-21')!;
+    const spike = day.summaryPoints.find((p) => p.m === 6 * 60 + 8 * 30)!;
+    expect(spike.glucose).toBeNull();
+    expect(spike.systolic).toBe(118);
+    expect(day.summaryPoints.filter((p) => p.glucose !== null)).toHaveLength(values.length - 1);
+    // Сырые ряды не тронуты: подтверждение может прийти со следующим замером.
+    expect(state.raw['2026-09-21'].summary.some((r) => r[4] === 135)).toBe(true);
+  });
+});

@@ -86,6 +86,23 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(text).toContain('- [meal] до ужина в 18:45 обойтись без перекусов');
   });
 
+  it('другие дни из README дают другие истории: бокал-другой, работа допоздна, отличное восстановление', async () => {
+    const { readFileSync } = await import('node:fs');
+    const load = (name) => JSON.parse(readFileSync(new URL(`./${name}.json`, import.meta.url), 'utf8'));
+    const days = {
+      'sample-wine': [['bed-late', 'deep-low', 'night-pulse-up', 'hrv-down'], 'night-strain', 'бокал-другой вчера вечером или кофе после обеда'],
+      'sample-work': [['bed-late', 'sleep-short', 'deep-low', 'night-pulse-up', 'hrv-down', 'stress-up'], 'night-strain', 'напряжённый день — голова долго не отпускала дела'],
+      'sample-good': [['sleep-long', 'deep-high', 'night-pulse-down', 'hrv-up'], 'good-recovery', 'тело отлично восстановилось'],
+    };
+    for (const [name, [ids, guided, cause]] of Object.entries(days)) {
+      const payload = load(name);
+      expect(fn.validate(payload)).toBeNull();
+      expect(fn.signals(payload).flagged.map((s) => s.id)).toEqual(ids);
+      expect([fn.observe(payload).id, fn.observe(payload).cause]).toEqual([guided, cause]);
+    }
+    expect(fn.buildAnalysisText(load('sample-good'))).toContain('- [workout] интервалы с 17:30 до 19:00');
+  });
+
   it('у каждого наблюдения есть подходящие действия; «легли поздно — поешьте по графику» не пройдёт', async () => {
     const ids = new Set();
     const cases = [
@@ -118,15 +135,21 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(fn.parseAnalysis('Похоже, всё хорошо.')).toEqual({ focus: [], cause: null, action: null, text: null });
   });
 
-  it('правила ИИ-анализа: разобраться самому, одно главное, причина и действие — к нему; пример проходит проверку', () => {
+  it('правила ИИ-анализа: разобраться самому, одна смелая история, причина и действие — к ней; примеры проходят проверку', () => {
     expect(fn.ANALYSIS_PROMPT).toContain('Ты — Лис');
-    expect(fn.ANALYSIS_PROMPT).toContain('Разберись сам: какие наблюдения связаны между собой, что за ними стоит и что сейчас для человека главное');
-    expect(fn.ANALYSIS_PROMPT).toContain('Причина должна их объяснять, а действие — помогать именно с ними');
+    expect(fn.ANALYSIS_PROMPT).toContain('Разберись сам, как друг, который хорошо знает этого человека: что с ним происходит и из-за чего');
+    expect(fn.ANALYSIS_PROMPT).toContain('Выбери одну историю — самую важную сейчас, остальное оставь. Причина — одна и конкретная. Действие помогает именно с ней');
     expect(fn.ANALYSIS_PROMPT).toContain('Не называй показатели и числа из наблюдений');
     expect(fn.ANALYSIS_PROMPT).toContain('не больше 190 символов');
-    const example = fn.parseAnalysis(fn.ANALYSIS_PROMPT.slice(fn.ANALYSIS_PROMPT.indexOf('Пример ответа')));
-    const seen = { flagged: [{ id: 'late-meal', text: '' }, { id: 'hrv-down', text: '' }] };
-    expect(fn.analysisProblem(example, seen, { dinner: 'поужинать по графику Vuelo в 19:30' })).toBeNull();
+    expect(fn.ANALYSIS_PROMPT).toContain('Сложи из наблюдений одну живую историю и скажи её смело');
+    expect(fn.ANALYSIS_PROMPT).toContain('ничего из этого — скорее всего, вчера был бокал-другой или кофе после обеда');
+    expect(fn.ANALYSIS_PROMPT).toContain('позднее засыпание и стресс днём — засиделись с работой или делами допоздна');
+    const example = fn.parseAnalysis(fn.ANALYSIS_PROMPT.slice(fn.ANALYSIS_PROMPT.indexOf('Пример ответа'), fn.ANALYSIS_PROMPT.indexOf('Ещё примеры')));
+    const seen = { flagged: [{ id: 'night-pulse-up', text: '' }, { id: 'hrv-down', text: '' }] };
+    expect(fn.analysisProblem(example, seen, { bed: 'лечь между 22:45 и 23:15' })).toBeNull();
+    const more = [...fn.ANALYSIS_PROMPT.slice(fn.ANALYSIS_PROMPT.indexOf('Ещё примеры')).matchAll(/\nЛис: (.+)/g)].map((x) => x[1]);
+    expect(more).toHaveLength(5);
+    for (const line of more) expect(fn.answerProblem(line, line)).toBeNull();
   });
 
   it('запасной шаг: наблюдение дня выбирается по порядку важности и личным нормам', async () => {
@@ -148,7 +171,9 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect([stress.id, stress.cause]).toEqual(['stress-streak', 'вы давно без передышки — много дел, голова не отключается']);
 
     const wine = await id({ nightPulse: 61, hrv: 42 });
-    expect([wine.id, wine.cause, wine.action]).toEqual(['night-strain', 'бокал вина или кофе после обеда', 'кофе на сегодня уже хватит']);
+    expect([wine.id, wine.cause, wine.action]).toEqual(['night-strain', 'бокал-другой вчера вечером или кофе после обеда', 'лечь между 23:00 и 23:30']);
+    const morningWine = await id({ nightPulse: 61, hrv: 42 }, {}, { mode: 'morning', time: '10:00' });
+    expect(morningWine.action).toBe('последнюю чашку кофе — до 14:30');
     const tense = await id({ nightPulse: 61, hrv: 42 }, { 1: { stress: 45 } });
     expect([tense.id, tense.cause]).toEqual(['night-strain', 'напряжённый день — голова долго не отпускала дела']);
 

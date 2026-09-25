@@ -1,7 +1,7 @@
 import type { KnownRing } from '../ble/ring';
 import type { SyncResult } from '../ble/sync';
 import { dateForOffset, nowRingTs } from '../codec';
-import { bodyOf, buildTemplateReport, dropGlucoseSpikes } from '../domain';
+import { bodyOf, buildTemplateReport, dropGlucoseSpikes, isAiTemplate } from '../domain';
 import {
   CACHE_DAYS,
   addReport,
@@ -200,11 +200,14 @@ export function applySyncResult(
  * Совет пишем в историю только для цикла с итогом: текущего, а если у него итога нет —
  * последнего полного. Ключ — дата начала цикла. Шаблон подбираем без учёта прежнего совета
  * на тот же цикл и режим: пока слабая сторона та же, текст не прыгает от синхронизации к синхронизации.
+ * Совет от модели (`state/ai-advice.ts`) на тот же цикл и режим не заменяется.
  */
 function withAdvice(reports: VueloState['reports'], cycles: VueloState['cycles'], now: Date): VueloState['reports'] {
   const cycle = [...cycles].reverse().find((c) => c.total !== null);
   if (!cycle) return reports;
   const mode = cycle.end === null ? reportMode(now) : 'evening';
+  // Совет от модели на этот цикл и время суток уже есть — шаблоном его не затираем.
+  if (reports.some((r) => r.date === cycle.date && r.mode === mode && isAiTemplate(r.templateId))) return reports;
   const others = reports.filter((r) => !(r.date === cycle.date && r.mode === mode));
   const report = buildTemplateReport({ mode, score: cycleScoreOf(cycle), recentTemplateIds: recentTemplateIds(others) });
   return addReport(reports, { date: cycle.date, mode, templateId: report.templateId, text: report.text });

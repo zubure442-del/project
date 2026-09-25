@@ -21,3 +21,4 @@ export * from './endurance';
 export * from './sleep-mode';
 export * from './training';
 export * from './glucose';
+export * from './ai-advice';

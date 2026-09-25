@@ -31,6 +31,7 @@ import { DEMO_STATUS_TEXT, demoState } from './demo';
 import { loadPlan, loadProgress, recordDurations, runsInBackground, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withOnboarding } from './profile';
 import { settleRelayState } from './relay';
+import { aiAdviceConfig, aiAdviceRequest, fetchAiAdvice, withAiAdvice } from './ai-advice';
 import { applySyncResult, newUserTodayOnly, planDays, rebuildDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -161,6 +162,31 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
+   * «Мнение Лиса» от YandexGPT: после выгрузки, в фоне, ничего не ждёт и ничего не блокирует.
+   * Не вышло (нет сети, посредник не настроен, текст не прошёл проверку) — остаётся шаблонный совет.
+   * Один запрос за раз; совет от модели на цикл и время суток просим один раз (`aiAdviceRequest`).
+   */
+  const adviceBusy = useRef(false);
+  const refineAdvice = useCallback(async () => {
+    const config = aiAdviceConfig();
+    const request = config ? aiAdviceRequest(latest.current) : null;
+    if (!config || !request || adviceBusy.current) return;
+    adviceBusy.current = true;
+    try {
+      const result = await fetchAiAdvice(request.payload, config);
+      if ('error' in result) {
+        logNote(`мнение Лиса от модели: ${result.error}, остаётся шаблонное`);
+        return;
+      }
+      const next = withAiAdvice(latest.current, request, result.text);
+      if (next !== latest.current) commit(next);
+      logNote('мнение Лиса от модели получено');
+    } finally {
+      adviceBusy.current = false;
+    }
+  }, [commit]);
+
+  /**
    * Один живой замер, если кольцо давно ничего не мерило.
    * Работает только при открытом приложении: в фоне iOS такое не разрешает.
    */
@@ -204,6 +230,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       if (demoOn.current) return;
       if (isFresh(latest.current)) {
         setPhase('fresh');
+        // Кэш свежий, но прошлый запрос совета мог не удаться — пробуем ещё раз.
+        void refineAdvice();
         return;
       }
       running.current = true;
@@ -304,6 +332,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           // Новые данные пришли с экрана загрузки — возвращаемся на «Сегодня» и открываем карусель заново.
           // Фоновая догрузка вкладку, выбранный день и карусель не трогает: человек уже смотрит приложение.
           if (!background) goHome();
+          void refineAdvice();
           loadProgress.set({ finished: true, finishedAt: Date.now() });
           if (result.error) {
             setError('lost');
@@ -317,7 +346,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         }
       })();
     },
-    [commit, goHome, maybeLiveMeasure],
+    [commit, goHome, maybeLiveMeasure, refineAdvice],
   );
 
   // Вход в приложение. Самый первый запуск ждёт имя; дальше — правило 10 минут.

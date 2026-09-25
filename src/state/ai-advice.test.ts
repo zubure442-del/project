@@ -48,8 +48,9 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
     expect(p.plan.workout?.title).toBeTruthy();
     expect(p.plan.bedtime?.from).toMatch(/^\d\d:\d\d$/);
     expect(p.plan.meals.length).toBeGreaterThan(0);
-    // Наблюдения дня — строки для догадки Лиса (в демо-неделе их может и не быть).
-    expect(Array.isArray(p.insights)).toBe(true);
+    // Факты дня «сегодня — обычно» без выводов: сон, тело, шаги по часам и т. д.
+    expect(p.facts.some((f) => f.startsWith('Сон прошлой ночи: засыпание'))).toBe(true);
+    expect(p.facts.join(' ')).not.toMatch(/похоже|перекус|ужин/);
     // Значений глюкозы и давления в запросе нет: о еде Лис говорит через привычки.
     expect(JSON.stringify(p)).not.toMatch(/glucose|systolic|diastolic/);
   });

@@ -34,38 +34,39 @@ afterEach(() => {
 });
 
 describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнения Лиса»', () => {
-  it('запрос приложения проходит проверку функции; модель видит профиль, сон, замеры и план дня словами', () => {
+  it('запрос приложения проходит проверку функции; модель видит профиль, оценки, факты и план словами', () => {
     const payload = appPayload();
     expect(fn.validate(payload)).toBeNull();
     const text = fn.buildUserText(payload);
     expect(text).toContain('Сейчас: день');
     expect(text).toContain('Человек: женщина, 32 года, рост 168 см, вес 60 кг. Цель: поддерживать форму.');
-    expect(text).toMatch(/Сон: .*, с \d\d:\d\d до \d\d:\d\d\./);
-    expect(text).toContain('вариабельность');
-    expect(text).toContain('План приложения на сегодня:');
+    expect(text).toContain('Факты: сегодня против обычного для этого человека');
+    expect(text).toMatch(/- Сон прошлой ночи: засыпание \d\d:\d\d/);
+    expect(text).toContain('План приложения на сегодня (человек его уже видит, не пересказывай):');
     expect(text).toMatch(/- тренировка «.+», \d+ минут/);
-    expect(text).toMatch(/- сон: лечь с \d\d:\d\d до \d\d:\d\d/);
-    expect(text).not.toMatch(/из 100|Анна|глюкоз|давлен/);
+    expect(text).not.toMatch(/из 100|Анна|давлен/);
   });
 
-  it('правила для модели: говорит Лис, начинает с догадки, конкретика из данных, без банальностей и медицины, до 190 символов', () => {
+  it('правила для модели: говорит Лис, сам находит необычное и догадывается, конкретика из данных, без банальностей и медицины, до 190 символов', () => {
     expect(fn.SYSTEM_PROMPT).toContain('Ты — Лис');
     expect(fn.SYSTEM_PROMPT).toContain('от первого лица');
-    expect(fn.SYSTEM_PROMPT).toContain('Начни с догадки');
+    expect(fn.SYSTEM_PROMPT).toContain('как догадку');
+    expect(fn.SYSTEM_PROMPT).toContain('найди одно-два самых необычных отклонения');
     expect(fn.SYSTEM_PROMPT).toContain('новых не придумывай');
     expect(fn.SYSTEM_PROMPT).toContain('банальности');
     expect(fn.SYSTEM_PROMPT).toContain('Не больше 190 символов');
   });
 
-  it('пример из README (sample.json) проходит проверку; наблюдения попадают в текст для модели', async () => {
+  it('пример из README (sample.json) проходит проверку; факты попадают в текст для модели как есть', async () => {
     const { readFileSync } = await import('node:fs');
     const sample = JSON.parse(readFileSync(new URL('./sample.json', import.meta.url), 'utf8'));
     expect(fn.validate(sample)).toBeNull();
     const text = fn.buildUserText(sample);
-    expect(text).toContain('Наблюдения за человеком');
-    expect(text).toContain('- Вчера в 22:10 был подъём глюкозы');
-    expect(fn.validate({ ...sample, insights: undefined })).toBe('insights');
-    expect(fn.buildUserText({ ...sample, insights: [] })).toContain('Особых наблюдений нет');
+    expect(text).toContain('- Подъёмы глюкозы вчера: 08:20, 13:10, 19:40, 22:30.');
+    // Факты — без готовых выводов: ни «похоже», ни «перекусы» в данных нет.
+    expect(sample.facts.join(' ')).not.toMatch(/похоже|перекус|ужин|сидени/);
+    expect(fn.validate({ ...sample, facts: undefined })).toBe('facts');
+    expect(fn.buildUserText({ ...sample, facts: [] })).toContain('Фактов для сравнения пока мало');
   });
 
   it('лишние или кривые поля не пропускаем', () => {

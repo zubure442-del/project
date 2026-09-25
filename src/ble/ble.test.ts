@@ -161,7 +161,7 @@ describe('выгрузка с реальными пакетами 0x40 и под
     const withMarker = fakeRing((c) => (c[0] === 0x10 ? [command(0x10, 0x7c, 0xc1, 0xb1, 0x6a)] : []));
     const silent = fakeRing(() => []);
     const t0 = Date.now();
-    const withMarkerRun = runSync(withMarker.transport, { days: [0] });
+    const withMarkerRun = runSync(withMarker.transport, { days: [0], today: '2026-09-21' });
     await vi.runAllTimersAsync();
     await withMarkerRun;
     const fast = Date.now() - t0;
@@ -174,6 +174,46 @@ describe('выгрузка с реальными пакетами 0x40 и под
 
     expect(fast).toBeLessThan(slow);
     expect(withMarker.sent.filter((c) => c[0] === 0x10)).toHaveLength(1);
+  });
+
+  describe('маркер 23:45 закрывает только свой поток и свой день', () => {
+    const TODAY = '2026-09-25';
+    /** Метки 23:45 за 25.09 (7c 07 b7 6a) и за 24.09 (fc b5 b5 6a), как в логе 25.09. */
+    const end = (code: string, day: 'today' | 'yesterday') =>
+      hexToBytes(`${code} ${day === 'today' ? '7c 07 b7 6a' : 'fc b5 b5 6a'} 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00`);
+    const TODAY_SUMMARY = hexToBytes('55 04 bd b5 6a 6e 46 05 33 51 6e 46 05 33 51 6e 46 05 33 51');
+
+    it('маркер 0x55 за вчера не закрывает 0x55 за сегодня', async () => {
+      const notes: string[] = [];
+      const { transport } = fakeRing((c) =>
+        c[0] === 0x10 ? [end('10', 'today')]
+        : c[0] === 0x16 ? [command(0x16, 0xff)]
+        : c[0] === 0x55 ? [TODAY_SUMMARY, end('55', 'yesterday')]
+        : c[0] === 0x40 ? [end('40', 'today')]
+        : [],
+      );
+      const p = runSync(transport, { days: [0], today: TODAY, onNote: (n) => notes.push(n) });
+      await vi.runAllTimersAsync();
+      const r = await p;
+      expect(r.completeDays).toEqual([]);
+      expect(notes[0]).toContain('0x55 пауза');
+    });
+
+    it('свой маркер, пришедший в окне следующего запроса, засчитывается дню', async () => {
+      const notes: string[] = [];
+      const { transport } = fakeRing((c) =>
+        c[0] === 0x10 ? [end('10', 'today')]
+        : c[0] === 0x16 ? [command(0x16, 0xff)]
+        : c[0] === 0x55 ? [TODAY_SUMMARY]
+        : c[0] === 0x40 ? [end('55', 'today'), end('40', 'today')]
+        : [],
+      );
+      const p = runSync(transport, { days: [0], today: TODAY, onNote: (n) => notes.push(n) });
+      await vi.runAllTimersAsync();
+      const r = await p;
+      expect(r.completeDays).toEqual([0]);
+      expect(notes[0]).toContain('0x55 маркер позже');
+    });
   });
 
   it('пока кольцо отвечает, запрос не повторяется и не считается сбоем', async () => {

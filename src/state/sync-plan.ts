@@ -1,5 +1,6 @@
 import type { KnownRing } from '../ble/ring';
 import type { SyncResult } from '../ble/sync';
+import { dateForOffset } from '../codec';
 import { bodyOf, buildTemplateReport } from '../domain';
 import {
   CACHE_DAYS,
@@ -12,6 +13,7 @@ import {
   recentTemplateIds,
   splitByDay,
   toSyncResult,
+  type RawByDay,
   type VueloState,
 } from '../storage';
 import { DAY_START_HOUR, adviceMode, dayView, findDay, isCompleteDay, scoreOf, todayKey } from './day';
@@ -22,7 +24,8 @@ export const TOTAL_DAYS = 7;
 /**
  * День D финальный, если его последняя удачная выгрузка была не раньше полудня следующего дня:
  * startOfDay(D+1) + FINAL_AFTER_HOURS. К этому времени ночь кончилась и кольцо отдало весь сон.
- * Финальные дни больше не запрашиваем; сегодня — всегда.
+ * Раньше полудня — если ночь после D уже пришла (`nightAfterArrived`): тогда финальна первая
+ * же полная выгрузка D. Финальные дни больше не запрашиваем; сегодня — всегда.
  */
 export const FINAL_AFTER_HOURS = 12;
 /**
@@ -31,9 +34,7 @@ export const FINAL_AFTER_HOURS = 12;
  */
 export const NIGHT_SESSION_UNTIL_HOUR = DAY_START_HOUR;
 
-/** Календарная дата для смещения в днях назад от сегодняшней. */
-export const dateForOffset = (offset: number, today: string): string =>
-  new Date(Date.parse(`${today}T00:00:00Z`) - offset * 86400000).toISOString().slice(0, 10);
+export { dateForOffset };
 
 const short = (date: string) => `${date.slice(8, 10)}.${date.slice(5, 7)}`;
 
@@ -45,6 +46,15 @@ export function finalFrom(date: string): number {
 
 export const isFinalDay = (date: string, syncedAt: Readonly<Record<string, number>>) =>
   syncedAt[date] !== undefined && syncedAt[date] >= finalFrom(date);
+
+/**
+ * Ночь после дня D уже в кэше: у D+1 есть сон после полуночи. Кольцо отдаёт ночь целиком, когда
+ * она кончилась (днём, не ночью), а её вечерняя часть до полуночи приходит в окне дня D той же
+ * выгрузки. Значит, полная выгрузка D после этого — окончательная, ждать полудня незачем.
+ * Сон до полуночи сюда не считается: у D+1 так хранится и дневной сон после полудня D.
+ */
+export const nightAfterArrived = (date: string, raw: Readonly<RawByDay>): boolean =>
+  raw[dateForOffset(-1, date)]?.sleep.some(([minute]) => minute >= 0) ?? false;
 
 /**
  * «Новый пользователь»: удачная загрузка уже была, но ни одного полного дня (все три метрики)
@@ -86,16 +96,22 @@ export function planDays(
 /**
  * Записывает время выгрузки дней, пришедших целиком. В ночной сессии не пишем ничего:
  * кольцо тогда не отдаёт сон. Храним не больше CACHE_DAYS дат.
+ * `nightDone(date)` — ночь после дня уже пришла: такой день финальный сразу, и ему пишется
+ * момент финальности (полдень следующего дня), если он ещё не наступил.
  */
 export function markSynced(
   previous: Readonly<Record<string, number>>,
   completeDays: readonly number[],
   now = new Date(),
+  nightDone: (date: string) => boolean = () => false,
 ): Record<string, number> {
   if (now.getHours() < NIGHT_SESSION_UNTIL_HOUR) return { ...previous };
   const today = todayKey(now);
   const next: Record<string, number> = { ...previous };
-  for (const day of completeDays) next[dateForOffset(day, today)] = now.getTime();
+  for (const day of completeDays) {
+    const date = dateForOffset(day, today);
+    next[date] = day > 0 && nightDone(date) ? Math.max(now.getTime(), finalFrom(date)) : now.getTime();
+  }
   const kept = Object.keys(next).sort().slice(-CACHE_DAYS);
   return Object.fromEntries(kept.map((d) => [d, next[d]]));
 }
@@ -144,7 +160,7 @@ export function applySyncResult(
       ...base,
       lastSyncAt: now.getTime(),
       syncFailed: false,
-      syncedAt: markSynced(state.syncedAt, sync.completeDays, now),
+      syncedAt: markSynced(state.syncedAt, sync.completeDays, now, (date) => nightAfterArrived(date, raw)),
       reports: withAdvice(state.reports, days, now),
     },
     now,

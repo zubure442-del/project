@@ -14,6 +14,8 @@ import { resetLightThrottle, runSync, type SyncResult } from './sync';
  */
 const LOG = readFileSync('reference/logs/ring-log-2026-09-21-c.txt', 'utf8');
 const WEEK = [0, 1, 2, 3, 4, 5, 6];
+/** День сессии: маркер 23:45 сверяется с датой запрошенного дня. */
+const SESSION_DAY = '2026-09-21';
 /** Время телефона в конце выгрузки: 21.09 13:11 по местному времени. */
 const SYNC_END = new Date(2026, 8, 21, 13, 11, 47);
 
@@ -26,7 +28,7 @@ afterEach(() => vi.useRealTimers());
 async function replayWeek(): Promise<{ result: SyncResult; seconds: number; sent: string[] }> {
   const { transport, sent } = logRing(LOG);
   const started = Date.now();
-  const run = runSync(transport, { days: WEEK });
+  const run = runSync(transport, { days: WEEK, today: SESSION_DAY });
   await vi.runAllTimersAsync();
   const result = await run;
   return { result, seconds: (Date.now() - started) / 1000, sent };
@@ -94,7 +96,7 @@ describe('РЕАЛЬНЫЙ ЛОГ c: сон в кэше и на экранах',
   it('перезаход после полудня: только сегодня, около 10 с', async () => {
     const { transport } = logRing(LOG);
     const started = Date.now();
-    const run = runSync(transport, { days: [0] });
+    const run = runSync(transport, { days: [0], today: SESSION_DAY });
     await vi.runAllTimersAsync();
     const result = await run;
     const seconds = (Date.now() - started) / 1000;

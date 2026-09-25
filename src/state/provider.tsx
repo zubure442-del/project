@@ -208,7 +208,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       setLoadingMode(mode);
       // План дней известен сразу: от него зависят карточки и ожидаемая длительность частей загрузки.
       // Новый пользователь (полного дня ещё не было) после первой загрузки берёт только сегодня.
-      const plan = planDays(latest.current.syncedAt, new Date(), { todayOnly: newUserTodayOnly(latest.current) });
+      const planAt = new Date();
+      const plan = planDays(latest.current.syncedAt, planAt, { todayOnly: newUserTodayOnly(latest.current) });
       const slides = wantsSlides(latest.current.lastSyncAt === null, plan.days.length);
       const startedAt = Date.now();
       const measured: Partial<Record<SegmentKind, number[]>> = {};
@@ -263,6 +264,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           let packets = 0;
           const result = await runSync(device, {
             days: plan.days,
+            // Та же дата, что у плана: по ней маркер 23:45 сверяется с запрошенным днём.
+            today: todayKey(planAt),
             extras: true,
             hardCapMs: HARD_CAP_MS,
             onSegment: (kind, ms, real) => {

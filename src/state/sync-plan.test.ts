@@ -3,7 +3,15 @@ import { hexToBytes } from '../codec';
 import { emptySyncResult, resetLightThrottle, runSync } from '../ble/sync';
 import type { Transport } from '../ble/transport';
 import { EMPTY_STATE } from '../storage';
-import { FINAL_AFTER_HOURS, applySyncResult, finalFrom, isFinalDay, markSynced, planDays } from './sync-plan';
+import {
+  FINAL_AFTER_HOURS,
+  applySyncResult,
+  finalFrom,
+  isFinalDay,
+  markSynced,
+  nightAfterArrived,
+  planDays,
+} from './sync-plan';
 
 /** 21.09.2026 13:18 по местному времени — дневная сессия. */
 const DAY = new Date(2026, 8, 21, 13, 18);
@@ -52,6 +60,31 @@ describe('СИНТЕТИЧЕСКИЕ: время выгрузки дней', () 
 
   it('ночная сессия ничего не записывает: ночью кольцо не отдаёт сон', () => {
     expect(markSynced({ '2026-09-10': 1 }, [1, 2, 3], at(21, 1, 37))).toEqual({ '2026-09-10': 1 });
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: вчера финальный, как только пришла ночь', () => {
+  const day = (sleep: [number, number][]) => ({ date: '', steps: [], sleep, heart: [], summary: [], spo2: [] });
+
+  it('сон после полуночи у сегодняшнего дня — ночь пришла', () => {
+    expect(nightAfterArrived('2026-09-20', { '2026-09-21': day([[-60, 40], [30, 99]]) })).toBe(true);
+  });
+
+  it('только сон до полуночи (дневной сон вчера после полудня) — ночь ещё не пришла', () => {
+    expect(nightAfterArrived('2026-09-20', { '2026-09-21': day([[-600, 40]]) })).toBe(false);
+    expect(nightAfterArrived('2026-09-20', {})).toBe(false);
+  });
+
+  it('в 09:00 после ночи вчера сразу финальный, сегодня — нет', () => {
+    const synced = markSynced({}, [0, 1], at(21, 9), (date) => date === '2026-09-20');
+    expect(isFinalDay('2026-09-20', synced)).toBe(true);
+    expect(isFinalDay('2026-09-21', synced)).toBe(false);
+    expect(planDays(synced, at(21, 9, 30)).days).toEqual([0, 2, 3, 4, 5, 6]);
+  });
+
+  it('без ночи вчера до полудня по-прежнему запрашивается', () => {
+    const synced = markSynced({}, [0, 1], at(21, 9));
+    expect(isFinalDay('2026-09-20', synced)).toBe(false);
   });
 });
 

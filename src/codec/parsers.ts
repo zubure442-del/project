@@ -90,7 +90,7 @@ export function parseMinuteSeries(data: Uint8Array, kind: 'steps' | 'sleep'): Pa
   for (let i = 5; i < data.length; i++) {
     if (data[i] !== NO_DATA) samples.push({ ts: ts + (i - 5) * 60, value: data[i] });
   }
-  return { kind, isDayEnd: isDayEndTs(ts), samples };
+  return { kind, ts, isDayEnd: isDayEndTs(ts), samples };
 }
 
 /**
@@ -131,7 +131,7 @@ export function parseSummary(data: Uint8Array): Packet | null {
       records.push(rec);
     }
   });
-  return { kind: 'summary', isDayEnd: isDayEndTs(ts), records };
+  return { kind: 'summary', ts, isDayEnd: isDayEndTs(ts), records };
 }
 
 /** Разбор любого входящего пакета по коду в байте 0. Никогда не бросает исключений. */

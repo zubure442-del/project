@@ -42,8 +42,11 @@ export const DAY_END_GRACE_MS = 100;
 export const GAP_BETWEEN_REQUESTS_MS = 100;
 /** Сколько ждём разовый ответ на 0x03 и 0x0B. Кольцо отвечает за 30 мс. */
 export const EXTRA_REPLY_MS = 1000;
-/** Пауза после 0x13 перед первым запросом архива. */
-const PREPARE_PAUSE_MS = 300;
+/**
+ * Сколько ждём ответ на 0x13 перед первым запросом архива. Раньше это была пауза 0.3 с;
+ * кольцо отвечает за ~30 мс (лог 25.09), поэтому ждём ответа, а не таймер.
+ */
+const PREPARE_REPLY_MS = 300;
 /** Лёгкие запросы (0x13, 0x03, 0x0B) не чаще одного раза в это время. */
 export const LIGHT_REQUEST_MS = 5000;
 const lightSentAt = new Map<number, number>();
@@ -62,6 +65,33 @@ async function sendLight(t: Transport, packet: Uint8Array): Promise<boolean> {
 }
 const ACK_TIMEOUT_MS = 5000;
 const POLL_MS = 50;
+/**
+ * Подтверждения рукопожатия. Кольцо отвечает эхом за 1–30 мс (лог 25.09: 0x01 — 1 мс, 0x19 — 1 мс,
+ * 0x02 — 30 мс), а приложение раньше ждало по таймеру 1 с и 0.3 с — 3.2 с подготовки вместо ~0.1 с.
+ * Теперь ждём эха; нет его — ждём столько же, сколько раньше, и идём дальше.
+ */
+export const SET_TIME_ACK_MS = 1000;
+export const PROFILE_ACK_MS = 300;
+const ACK_POLL_MS = 10;
+
+/**
+ * Отправляет команду и ждёт ответа с одним из кодов (эхо команды или её «ошибка»), но не дольше
+ * `timeoutMs`. Подписка — до отправки: эхо приходит раньше, чем кончается запись.
+ */
+async function sendAndWait(t: Transport, packet: Uint8Array, replyCodes: readonly number[], timeoutMs: number): Promise<boolean> {
+  let got = false;
+  const off = t.onPacket((d) => {
+    if (replyCodes.includes(d[0])) got = true;
+  });
+  try {
+    await t.send(packet);
+    const started = Date.now();
+    while (!got && Date.now() - started < timeoutMs) await sleep(ACK_POLL_MS);
+  } finally {
+    off();
+  }
+  return got;
+}
 
 export type AutoMeasureResult = 'accepted' | 'rejected' | 'noreply';
 
@@ -83,8 +113,8 @@ export async function handshake(
   now = Date.now(),
   tzOffsetSeconds = -new Date().getTimezoneOffset() * 60,
 ) {
-  await t.send(setTimeCommand(now, tzOffsetSeconds));
-  await sleep(1000);
+  // 0x01 — эхо 0x01, отказ 0x81 (SDK).
+  await sendAndWait(t, setTimeCommand(now, tzOffsetSeconds), [0x01, 0x81], SET_TIME_ACK_MS);
   let result: AutoMeasureResult = 'noreply';
   for (let attempt = 0; attempt < 2 && result === 'noreply'; attempt++) {
     let ack: boolean | null = null;
@@ -94,14 +124,14 @@ export async function handshake(
     });
     await t.send(autoMeasureCommand(autoMeasureMin));
     const started = Date.now();
-    while (ack === null && Date.now() - started < ACK_TIMEOUT_MS) await sleep(POLL_MS);
+    while (ack === null && Date.now() - started < ACK_TIMEOUT_MS) await sleep(ACK_POLL_MS);
     off();
     if (ack !== null) result = ack ? 'accepted' : 'rejected';
   }
   // Профиль уходит после 0x01 и 0x19, как в официальном клиенте. Пустой профиль не отправляем.
   if (profile) {
-    await t.send(profileCommand(profile));
-    await sleep(300);
+    // 0x02 — эхо 0x02, отказ 0x82 (SDK).
+    await sendAndWait(t, profileCommand(profile), [0x02, 0x82], PROFILE_ACK_MS);
   }
   return { autoMeasure: result };
 }
@@ -357,8 +387,19 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
   const processed: { day: number; ends: StreamEnd[] }[] = [];
 
   try {
-    await sendLight(t, prepareArchiveCommand());
-    await sleep(PREPARE_PAUSE_MS);
+    // 0x13 — ждём ответа 0x13 (кольцо шлёт его и само), не дольше PREPARE_REPLY_MS.
+    let prepared = false;
+    const offPrepare = t.onPacket((d) => {
+      if (d[0] === 0x13) prepared = true;
+    });
+    try {
+      if (await sendLight(t, prepareArchiveCommand())) {
+        const started = Date.now();
+        while (!prepared && Date.now() - started < PREPARE_REPLY_MS) await sleep(ACK_POLL_MS);
+      }
+    } finally {
+      offPrepare();
+    }
     for (const day of days) {
       // 0x11 не запрашиваем: на него приходит только пустая заглушка,
       // а сам сон кольцо отдаёт в окне запроса шагов.

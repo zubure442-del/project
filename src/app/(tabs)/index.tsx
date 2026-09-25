@@ -16,7 +16,7 @@ export default function TodayTab() {
   const { width } = useWindowDimensions();
   const { date: picked, banner, isToday, today, hasData } = useTabDay();
   const day = findDay(state.days, picked);
-  // Рекомендации (совет, питание, кофейное окно, «Скоро») — только за сегодня; на прошлом дне блока нет вовсе.
+  // Рекомендации (совет, питание, пик выносливости, кофейное окно, режим сна) — только за сегодня; на прошлом дне блока нет вовсе.
   const recs = recommendationsFor(state, picked);
   const relay = relayFor(state);
 
@@ -48,6 +48,7 @@ export default function TodayTab() {
               coffee={recs.coffee}
               food={recs.food}
               endurance={recs.endurance}
+              sleepMode={recs.sleepMode}
             />
           ) : null}
         </>

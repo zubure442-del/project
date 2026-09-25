@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { wallClock } from '../codec';
-import { distanceMeters, formatCount, formatDistance } from '../domain';
+import { PAST_DAY_NOTE, distanceMeters, formatCount, formatDistance } from '../domain';
 import type { DaySnapshot } from '../storage';
 import { Ring } from './Ring';
 import { Card } from './Screen';
@@ -84,14 +84,18 @@ export function DayFacts({ day, heightCm }: { day: DaySnapshot; heightCm: number
     day.sleep && { label: 'Сон', value: hhmm(day.sleep.totalMin) },
   ].filter((row): row is { label: string; value: string } => Boolean(row));
   return (
-    <Card>
-      {rows.map((row) => (
-        <View key={row.label} style={styles.row}>
-          <Text style={styles.rowLabel}>{row.label}</Text>
-          <Text style={styles.rowValue}>{row.value}</Text>
-        </View>
-      ))}
-    </Card>
+    <>
+      {/* Почему здесь нет итога: он считается по циклам, а прошлый день — это только замеры. */}
+      <Text style={styles.pastNote}>{PAST_DAY_NOTE}</Text>
+      <Card>
+        {rows.map((row) => (
+          <View key={row.label} style={styles.row}>
+            <Text style={styles.rowLabel}>{row.label}</Text>
+            <Text style={styles.rowValue}>{row.value}</Text>
+          </View>
+        ))}
+      </Card>
+    </>
   );
 }
 
@@ -111,6 +115,15 @@ const styles = StyleSheet.create({
   ringValue: { color: colors.text, fontSize: 30, fontWeight: '200' },
   label: { color: colors.textMuted, fontSize: 15 },
   steps: { color: colors.text, fontSize: 17 },
+  pastNote: {
+    color: colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingVertical: spacing.xs },
   rowLabel: { color: colors.textMuted, fontSize: 15 },
   rowValue: { color: colors.text, fontSize: 22, fontWeight: '200', fontVariant: ['tabular-nums'] },

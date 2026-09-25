@@ -11,4 +11,5 @@ export * from './trend';
 export * from './sleep-hr';
 export * from './food';
 export * from './endurance';
+export * from './sleep-mode';
 export * from './refresh';

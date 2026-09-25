@@ -80,17 +80,20 @@ export default function SleepTab() {
           {/* Два числа ночи и отклонение каждого от своей нормы; ниже — вывод по категории. */}
           <HrRow label="Минимальный" value={sleepHr.night.min} delta={sleepHr.deltaMin} />
           <HrRow label="Средний" value={sleepHr.night.avg} delta={sleepHr.deltaAvg} />
-          {/* Вывод читается по цвету точки: зелёная — ночь как обычно или лучше, красная — есть отклонение. */}
-          <View style={styles.hrVerdict}>
-            <View
-              style={[
-                styles.hrDot,
-                sleepHr.tone === 'good' && styles.hrDotGood,
-                sleepHr.tone === 'alert' && styles.hrDotAlert,
-              ]}
-            />
-            <Text style={styles.hrText}>{sleepHr.text}</Text>
-          </View>
+          {/* Вывод читается по цвету точки: зелёная — ночь как обычно или лучше, красная — есть отклонение.
+              Только за сегодня: на прошлых датах — одни замеры, без выводов. */}
+          {isToday ? (
+            <View style={styles.hrVerdict}>
+              <View
+                style={[
+                  styles.hrDot,
+                  sleepHr.tone === 'good' && styles.hrDotGood,
+                  sleepHr.tone === 'alert' && styles.hrDotAlert,
+                ]}
+              />
+              <Text style={styles.hrText}>{sleepHr.text}</Text>
+            </View>
+          ) : null}
         </Card>
       ) : null}
     </Screen>

@@ -7,9 +7,12 @@ import {
   AUTOPHAGY_INFO,
   ENDURANCE_FLAG_TEXT,
   ENDURANCE_INFO,
+  SLEEP_MODE_INFO,
+  SLEEP_MODE_PHASE_TEXT,
   coffeeClock,
   type CoffeeWindow,
   type FoodCycle,
+  type SleepMode,
 } from '../domain';
 import type { AssistantSlide } from '../state/day';
 import type { EnduranceView } from '../state/endurance';
@@ -235,14 +238,55 @@ function EnduranceBody({ peak, width }: { peak: EnduranceView; width: number }) 
   );
 }
 
+/** «8 ч 05 мин», «45 мин». */
+const duration = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  return h ? `${h} ч ${String(m).padStart(2, '0')} мин` : `${m} мин`;
+};
+
+/**
+ * «Режим сна»: окно отхода ко сну крупно, под ним где мы сейчас, подъём и сколько сна нужно;
+ * ниже — долг сна и когда сбавить темп. Без формул: как считается — в «i».
+ */
+function SleepModeBody({ plan }: { plan: SleepMode }) {
+  return (
+    <View style={styles.bodyGap}>
+      <View>
+        <Text style={styles.mealTitle}>Лечь спать</Text>
+        <Text style={styles.peakTime}>
+          {coffeeClock(plan.from)}–{coffeeClock(plan.to)}
+        </Text>
+      </View>
+      <Text style={styles.text}>{SLEEP_MODE_PHASE_TEXT[plan.phase]}</Text>
+      <View style={styles.meals}>
+        <View style={styles.meal}>
+          <Text style={styles.mealTitle}>Подъём</Text>
+          <Text style={styles.mealTime}>{coffeeClock(plan.wake)}</Text>
+        </View>
+        <View style={styles.meal}>
+          <Text style={styles.mealTitle}>Нужно сна</Text>
+          <Text style={styles.mealTime}>{duration(plan.needMin)}</Text>
+        </View>
+      </View>
+      <Text style={styles.small}>
+        {plan.debtMin > 0
+          ? `Долг сна ${duration(plan.debtMin)}${plan.debtCarriesOver ? ' — вернём за несколько ночей' : ''}`
+          : 'Долга сна нет'}
+      </Text>
+      {plan.phase === 'day' ? (
+        <Text style={styles.small}>С {coffeeClock(plan.windDown)} — меньше света и экранов</Text>
+      ) : null}
+    </View>
+  );
+}
+
 interface Slide {
   key: Exclude<AssistantSlide, 'advice'>;
   title: string;
   glyph: Glyph;
   /** «i» в шапке карточки: объяснение простыми словами. */
   info?: { title: string; text: string };
-  /** Заглушка «Скоро» с одной декоративной строкой. */
-  soon?: string;
 }
 
 const SLIDES: Slide[] = [
@@ -251,7 +295,7 @@ const SLIDES: Slide[] = [
   // «Пик выносливости» — перед кофейным окном.
   { key: 'endurance', title: 'Пик выносливости', glyph: 'bolt', info: ENDURANCE_INFO },
   { key: 'coffee', title: 'Кофейное окно', glyph: 'coffee' },
-  { key: 'sleepmode', title: 'Режим сна', glyph: 'moon', soon: 'Поможет держать ровное время отхода ко сну.' },
+  { key: 'sleepmode', title: 'Режим сна', glyph: 'moon', info: SLEEP_MODE_INFO },
 ];
 
 /**
@@ -271,6 +315,7 @@ export function AssistantCarousel({
   coffee,
   food,
   endurance = null,
+  sleepMode = null,
 }: {
   slides: readonly AssistantSlide[];
   advice: string | null;
@@ -278,6 +323,7 @@ export function AssistantCarousel({
   coffee: (CoffeeWindow & { nowMinute: number }) | null;
   food: FoodCycle | null;
   endurance?: EnduranceView | null;
+  sleepMode?: SleepMode | null;
 }) {
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
@@ -287,7 +333,8 @@ export function AssistantCarousel({
       slides.includes(card.key) &&
       (card.key !== 'coffee' || coffee) &&
       (card.key !== 'food' || food) &&
-      (card.key !== 'endurance' || endurance),
+      (card.key !== 'endurance' || endurance) &&
+      (card.key !== 'sleepmode' || sleepMode),
   );
   const pages = 1 + shown.length;
 
@@ -330,12 +377,11 @@ export function AssistantCarousel({
                 <CardGlyph name={card.glyph} />
                 <Text style={styles.title}>{card.title}</Text>
                 {card.info ? <InfoButton title={card.info.title} text={card.info.text} /> : null}
-                {card.soon ? <Text style={styles.soon}>Скоро</Text> : null}
               </View>
-              {card.soon ? (
-                <Text style={styles.text}>{card.soon}</Text>
-              ) : card.key === 'food' ? (
+              {card.key === 'food' ? (
                 food && <FoodBody food={food} />
+              ) : card.key === 'sleepmode' ? (
+                sleepMode && <SleepModeBody plan={sleepMode} />
               ) : card.key === 'endurance' ? (
                 endurance && <EnduranceBody peak={endurance} width={inner} />
               ) : (
@@ -360,15 +406,6 @@ const styles = StyleSheet.create({
   card: { height: ASSISTANT_HEIGHT, backgroundColor: colors.card, borderRadius: radius.card, padding: spacing.md, gap: spacing.sm },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   title: { color: colors.text, fontSize: 17, fontWeight: '500', flex: 1 },
-  soon: {
-    color: colors.textMuted,
-    fontSize: 12,
-    backgroundColor: colors.track,
-    borderRadius: radius.pill,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    overflow: 'hidden',
-  },
   advice: {
     backgroundColor: 'rgba(242, 169, 59, 0.10)',
     borderRadius: radius.card,

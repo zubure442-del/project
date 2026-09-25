@@ -10,10 +10,12 @@ import {
   type FoodCycle,
   type Report,
   type ReportMode,
+  type SleepMode,
 } from '../domain';
 import { recentTemplateIds, type CycleSnapshot, type DaySnapshot, type VueloState } from '../storage';
 import { currentCycle, cycleClock } from './cycle';
 import { enduranceFor, type EnduranceView } from './endurance';
+import { sleepModeFor } from './sleep-mode';
 import { foodInput } from './food';
 
 /** Если данные свежее десяти минут, к кольцу не идём. */
@@ -166,10 +168,8 @@ export function coffeeInput(state: Pick<VueloState, 'cycles' | 'ringOffSince' | 
 
 /** Рекомендательные карточки «Сегодня» в карусели «AI Ассистент», по порядку. */
 export type AssistantSlide = 'advice' | 'food' | 'coffee' | 'endurance' | 'sleepmode';
-/** Карточки «Скоро»: показываются вместе с остальными рекомендациями. */
-export const SOON_SLIDES = ['sleepmode'] as const;
 
-/** Рекомендательный слой «Сегодня»: совет, цикл питания, пик выносливости, кофейное окно и «Скоро». */
+/** Рекомендательный слой «Сегодня»: совет, цикл питания, пик выносливости, кофейное окно и режим сна. */
 export interface Recommendations {
   advice: Report | null;
   /** null — оценки сна за сегодня нет, карточки нет. */
@@ -178,13 +178,15 @@ export interface Recommendations {
   food: FoodCycle | null;
   /** «Пик выносливости» — перед кофейным окном; null — у текущего цикла нет сна. */
   endurance: EnduranceView | null;
+  /** «Режим сна» — последняя карточка; null — у текущего цикла нет сна. */
+  sleepMode: SleepMode | null;
   slides: AssistantSlide[];
 }
 
 /**
  * Рекомендации осмысленны только для текущего цикла, то есть для сегодняшней даты в календаре.
  * Для любого прошлого дня — null: скрываются все карточки-рекомендации целиком
- * (совет, кофейное окно, «Скоро»), а данные и графики дня остаются.
+ * (совет, питание, пик выносливости, кофейное окно, режим сна), а данные и графики дня остаются.
  */
 export function recommendationsFor(state: VueloState, date: string, now = new Date()): Recommendations | null {
   if (date !== todayKey(now)) return null;
@@ -193,17 +195,19 @@ export function recommendationsFor(state: VueloState, date: string, now = new Da
   const meals = foodInput(state, now);
   const food = meals ? foodCycle(meals) : null;
   const endurance = enduranceFor(state, now);
+  const sleepMode = sleepModeFor(state, now);
   return {
     advice: adviceFor(state, now),
     coffee,
     food,
     endurance,
+    sleepMode,
     slides: [
       'advice',
       ...(food ? (['food'] as const) : []),
       ...(endurance ? (['endurance'] as const) : []),
       ...(coffee ? (['coffee'] as const) : []),
-      ...SOON_SLIDES,
+      ...(sleepMode ? (['sleepmode'] as const) : []),
     ],
   };
 }

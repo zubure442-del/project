@@ -18,3 +18,4 @@ export * from './sleep-hr';
 export * from './flask';
 export * from './cycles';
 export * from './endurance';
+export * from './sleep-mode';

@@ -1,7 +1,17 @@
 import type { AutoMeasurePeriod } from '../codec';
 import type { KnownRing } from '../ble';
 import type { RawByDay } from './raw';
-import { EMPTY_RELAY, type ComponentId, type RelayLedger, type ReportMode, type SleepStage, type StoredNorm } from '../domain';
+import {
+  EMPTY_RELAY,
+  type ComponentId,
+  type CycleEnd,
+  type CycleStart,
+  type NightHr,
+  type RelayLedger,
+  type ReportMode,
+  type SleepStage,
+  type StoredNorm,
+} from '../domain';
 
 /** Одна точка графика: секунды от начала дня + значение. Так день хранится компактно. */
 export interface DayPoint {
@@ -58,6 +68,38 @@ export interface DaySnapshot {
   };
 }
 
+/**
+ * Цикл бодрствования — единица аналитики: итог, сон, активность и организм считаются по нему,
+ * а не по календарным суткам (domain/cycles.ts). Метки — кольцевые секунды.
+ */
+export interface CycleSnapshot {
+  /** Календарная дата начала цикла: по ней цикл попадает в историю. */
+  date: string;
+  start: number;
+  /** null — цикл идёт сейчас. */
+  end: number | null;
+  startedBy: CycleStart;
+  endedBy: CycleEnd | null;
+  /** Что было перед циклом: сон или время без кольца. */
+  before: { from: number; to: number } | null;
+  /** Итог — только когда посчитаны все три составляющие; у цикла без сна его нет. */
+  total: number | null;
+  scores: Record<ComponentId, number | null>;
+  /** Шаги внутри цикла после шумоподавления: от них считается индекс активности. */
+  steps: number;
+  /** Сон, которым начался цикл. */
+  sleep: { start: number; end: number; totalMin: number; deepMin: number; lightMin: number } | null;
+  /** Гипнограмма этого сна: минуты от полуночи даты цикла, вечер накануне — отрицательные. */
+  sleepSegments: { from: number; to: number; stage: SleepStage }[];
+  /** Пульс во сне этого цикла: минимальный и средний. */
+  nightHr: NightHr | null;
+  /**
+   * Ряды для графика «День» вдоль цикла — только у текущего. Минуты от полуночи даты цикла:
+   * после полуночи — больше 1440, график идёт непрерывно.
+   */
+  chart: { from: number; to: number; heart: DayPoint[]; steps: DayPoint[]; restingHr: number | null } | null;
+}
+
 export interface StoredReport {
   date: string;
   mode: ReportMode;
@@ -67,6 +109,10 @@ export interface StoredReport {
 
 export interface VueloState {
   days: DaySnapshot[];
+  /** Циклы бодрствования последних двух недель; последний с `end: null` — текущий. */
+  cycles: CycleSnapshot[];
+  /** Кольцо снято сейчас: с этого момента (кольцевая метка) нет замеров. null — кольцо на руке. */
+  ringOffSince: number | null;
   reports: StoredReport[];
   lastSyncAt: number | null;
   /** Заряд кольца на момент последней синхронизации. */
@@ -138,7 +184,7 @@ export const isProfileComplete = (p: Profile): boolean =>
   p.sex !== null && p.heightCm !== null && p.weightKg !== null && p.birthYear !== null;
 
 export const EMPTY_STATE: VueloState = {
-  days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
+  days: [], cycles: [], ringOffSince: null, raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false, hadCompleteDay: false,
   relay: EMPTY_RELAY,
 };

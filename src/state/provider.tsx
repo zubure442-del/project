@@ -28,7 +28,7 @@ import {
 } from '../storage';
 import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
 import { DEMO_STATUS_TEXT, demoState } from './demo';
-import { loadPlan, loadProgress, recordDurations, wantsSlides, type SegmentKind } from './loading';
+import { loadPlan, loadProgress, recordDurations, runsInBackground, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withOnboarding } from './profile';
 import { settleRelayState } from './relay';
 import { applySyncResult, newUserTodayOnly, planDays, rebuildDays } from './sync-plan';
@@ -48,9 +48,12 @@ export const LIVE_MEASURE_COOLDOWN_MS = 30 * 60 * 1000;
 
 /**
  * idle — ничего не идёт; loading — открыт экран загрузки; done — загрузка кончилась;
- * failed — связь не установилась, на экране загрузки текст ошибки; fresh — данные свежие, к кольцу не идём.
+ * failed — связь не установилась, на экране загрузки текст ошибки; fresh — данные свежие, к кольцу не идём;
+ * background — кэш есть, кольцо догружает сегодня в фоне, экран загрузки не открыт.
  */
-export type Phase = 'idle' | 'loading' | 'done' | 'failed' | 'fresh';
+export type Phase = 'idle' | 'loading' | 'done' | 'failed' | 'fresh' | 'background';
+/** Статус в шапке, пока идёт фоновая догрузка. */
+export const BACKGROUND_STATUS_TEXT = 'Обновляем данные…';
 /** Три разные беды, о которых говорим по-разному. */
 export type SyncError = 'not-found' | 'lost' | 'slow';
 /** Откуда запущена синхронизация. Любой запуск идёт через экран загрузки. */
@@ -124,7 +127,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [loadingMode, setLoadingMode] = useState<SyncMode>('launch');
   const [error, setError] = useState<SyncError | null>(null);
-  /** Выбор в календаре. Сбрасывается после каждой синхронизации (ключ — время синхронизации). */
+  /** Выбор в календаре. Сбрасывается после выгрузки с экрана загрузки (ключ — счётчик homeRequest). */
   const [picked, setPicked] = useState<{ date: string; key: number } | null>(null);
   /**
    * Сегодняшняя дата по часам телефона. Раньше «сегодня» пересчитывалось только при новых данных:
@@ -189,9 +192,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   );
 
   /**
-   * Единственный путь к кольцу за данными. Любой запуск (вход, возврат из фона,
-   * pull-to-refresh, «Повторить») открывает экран загрузки; по ходу выгрузки
-   * состояние не трогаем — оно применяется один раз в конце.
+   * Единственный путь к кольцу за данными (вход, возврат из фона, pull-to-refresh, «Повторить»).
+   * Первый запуск и долгая загрузка идут через экран загрузки; если кэш есть и грузить немного —
+   * в фоне, без экрана (`runsInBackground`). По ходу выгрузки состояние не трогаем —
+   * оно применяется один раз в конце.
    */
   const sync = useCallback(
     (mode: SyncMode = 'launch') => {
@@ -211,6 +215,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       const planAt = new Date();
       const plan = planDays(latest.current.syncedAt, planAt, { todayOnly: newUserTodayOnly(latest.current) });
       const slides = wantsSlides(latest.current.lastSyncAt === null, plan.days.length);
+      // Кэш есть и грузить немного — приложение открыто сразу, выгрузка идёт в фоне.
+      const background = runsInBackground(latest.current.lastSyncAt === null, plan.days.length, latest.current.days.length > 0);
       const startedAt = Date.now();
       const measured: Partial<Record<SegmentKind, number[]>> = {};
       loadProgress.reset({
@@ -219,7 +225,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         plan: loadPlan(plan.days.length, latest.current.requestDurations),
         segmentStartedAt: startedAt,
       });
-      setPhase('loading');
+      setPhase(background ? 'background' : 'loading');
 
       void (async () => {
         await liveTask.current;
@@ -252,7 +258,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
             setError(kind);
             loadProgress.set({ finished: true, finishedAt: Date.now() });
             // Экран ошибки — только если связи не было вовсе или показывать нечего.
-            setPhase(connected && next.days.length ? 'done' : 'failed');
+            // В фоне экрана нет: остаётся плашка «Не все данные загружены · Повторить».
+            setPhase(background ? 'idle' : connected && next.days.length ? 'done' : 'failed');
             return;
           }
 
@@ -294,15 +301,15 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           await saveState(next);
           latest.current = next;
           setState(next);
-          // Новые данные пришли — возвращаемся на «Сегодня» и открываем карусель заново.
-          // Короткое сворачивание приложения без выгрузки вкладку больше не сбрасывает.
-          goHome();
+          // Новые данные пришли с экрана загрузки — возвращаемся на «Сегодня» и открываем карусель заново.
+          // Фоновая догрузка вкладку, выбранный день и карусель не трогает: человек уже смотрит приложение.
+          if (!background) goHome();
           loadProgress.set({ finished: true, finishedAt: Date.now() });
           if (result.error) {
             setError('lost');
-            setPhase(next.days.length ? 'done' : 'failed');
+            setPhase(background ? 'idle' : next.days.length ? 'done' : 'failed');
           } else {
-            setPhase('done');
+            setPhase(background ? 'idle' : 'done');
             liveTask.current = maybeLiveMeasure(device);
           }
         } finally {
@@ -321,7 +328,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     booted.current = true;
     void loadState().then((loaded) => {
       // Автоочистка кэша при запуске: дальше CACHE_DAYS хранить незачем.
-      const trimmed = { ...loaded, raw: keepRecentDays(loaded.raw) };
+      const kept = { ...loaded, raw: keepRecentDays(loaded.raw) };
+      // Кэш до циклов бодрствования: циклы собираются из рядов сразу, не дожидаясь выгрузки.
+      const trimmed = kept.cycles.length || !Object.keys(kept.raw).length ? kept : rebuildDays(kept);
       // «Эстафета»: орехи за вчерашние и прошлые дни с нормой — по кэшу, сразу при открытии.
       const cleaned = settleRelayState(trimmed);
       if (cleaned !== trimmed) void saveState(cleaned);
@@ -420,7 +429,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const dismissFresh = useCallback(() => setPhase('idle'), []);
-  const selectDay = useCallback((date: string) => setPicked({ date, key: latest.current.lastSyncAt ?? 0 }), []);
+  // Выбор дня живёт до следующей выгрузки с экрана загрузки (счётчик homeRequest); фоновая его не сбрасывает.
+  const selectDay = useCallback((date: string) => setPicked({ date, key: homeRequest }), [homeRequest]);
   const finishLoading = useCallback(() => {
     if (!running.current) setPhase('idle');
   }, []);
@@ -460,12 +470,12 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       ready,
       week,
       dayView: view,
-      selectedDate: selectedDay(picked, view, week.map((w) => w.date), shown.lastSyncAt ?? 0),
+      selectedDate: selectedDay(picked, view, week.map((w) => w.date), homeRequest),
       selectDay,
       phase,
       loadingMode,
       error,
-      statusText: demo ? DEMO_STATUS_TEXT : syncStatusText(shown),
+      statusText: demo ? DEMO_STATUS_TEXT : phase === 'background' ? BACKGROUND_STATUS_TEXT : syncStatusText(shown),
       profileReady: isProfileComplete(shown.profile),
       goalReady: isGoalSet(shown.profile),
       syncFailed: shown.syncFailed && shown.started,

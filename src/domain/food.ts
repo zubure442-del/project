@@ -98,34 +98,54 @@ export function foodMode(input: { sleepScore: number; glucose: number | null; ba
 
 export interface FoodMeal {
   title: string;
-  /** Минуты от полуночи сегодняшнего дня. */
+  /** Минуты от полуночи сегодняшнего дня: время на карточке. */
   minute: number;
+  /** Начало и конец приёма: по ним «Пик выносливости» обходит еду. */
+  from: number;
+  to: number;
 }
+
+/**
+ * Сколько длится приём, если в расписании одно время (владелец: 30–60 минут), — берём час,
+ * время на карточке — его середина. В «Режиме восстановления» начало и конец заданы диапазоном.
+ */
+export const FOOD_MEAL_DURATION_MIN = 60;
 
 const mid = (range: readonly [number, number]) => (range[0] + range[1]) / 2;
 const hoursAfter = (minute: number, hours: number) => Math.round(minute + hours * 60);
+/** Приём с одним временем: час с серединой в этой минуте. */
+const single = (title: string, minute: number): FoodMeal => ({
+  title,
+  minute,
+  from: minute - FOOD_MEAL_DURATION_MIN / 2,
+  to: minute + FOOD_MEAL_DURATION_MIN / 2,
+});
+/** Приём с диапазоном «через N–M часов после подъёма». */
+const ranged = (title: string, wakeMinute: number, range: readonly [number, number]): FoodMeal => ({
+  title,
+  minute: hoursAfter(wakeMinute, mid(range)),
+  from: hoursAfter(wakeMinute, range[0]),
+  to: hoursAfter(wakeMinute, range[1]),
+});
 
 /** Расписание приёмов пищи от пробуждения. */
 export function foodMeals(mode: FoodMode, wakeMinute: number): FoodMeal[] {
   if (mode === 'recovery') {
     const r = FOOD_SCHEDULE.recovery;
     return [
-      { title: 'Завтрак', minute: hoursAfter(wakeMinute, mid(r.first)) },
-      { title: 'Обед', minute: hoursAfter(wakeMinute, mid(r.lunch)) },
-      { title: 'Ужин', minute: hoursAfter(wakeMinute, mid(r.dinner)) },
+      ranged('Завтрак', wakeMinute, r.first),
+      ranged('Обед', wakeMinute, r.lunch),
+      ranged('Ужин', wakeMinute, r.dinner),
     ];
   }
   if (mode === 'hyper') {
     return [
-      { title: 'Первый приём', minute: hoursAfter(wakeMinute, FOOD_SCHEDULE.hyper.first) },
-      { title: 'Второй приём', minute: hoursAfter(wakeMinute, FOOD_SCHEDULE.hyper.second) },
+      single('Первый приём', hoursAfter(wakeMinute, FOOD_SCHEDULE.hyper.first)),
+      single('Второй приём', hoursAfter(wakeMinute, FOOD_SCHEDULE.hyper.second)),
     ];
   }
   const first = hoursAfter(wakeMinute, FOOD_SCHEDULE.base.first);
-  return [
-    { title: 'Первый приём', minute: first },
-    { title: 'Второй приём', minute: hoursAfter(first, FOOD_SCHEDULE.base.gapAfterFirst) },
-  ];
+  return [single('Первый приём', first), single('Второй приём', hoursAfter(first, FOOD_SCHEDULE.base.gapAfterFirst))];
 }
 
 export interface FoodInput {

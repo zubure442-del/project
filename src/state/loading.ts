@@ -115,6 +115,16 @@ export function recordDurations(history: DurationHistory, measured: Partial<Reco
 /** Карточки — при первом запуске или если предстоит загрузить от SLIDES_MIN_DAYS дней. */
 export const wantsSlides = (firstRun: boolean, dayCount: number) => firstRun || dayCount >= SLIDES_MIN_DAYS;
 
+/**
+ * Фоновая догрузка: кэш уже есть, а грузить немного (сегодня, иногда вчера). Экран загрузки
+ * тогда не открываем — приложение сразу показывает сохранённые данные, кольцо догружает
+ * сегодняшний день, и результат применяется один раз в конце. Часть дня у кольца запросить
+ * нельзя (команда знает только «день назад», свежие минуты приходят последними), поэтому
+ * ускорить можно только ожидание, а не саму выгрузку.
+ */
+export const runsInBackground = (firstRun: boolean, dayCount: number, hasCache: boolean) =>
+  hasCache && !wantsSlides(firstRun, dayCount);
+
 /** Какая карточка «положена» по проценту: 1 — 0–25 %, 2 — 25–50 %, 3 — 50–75 %, 4 — 75–100 %. */
 export const slideForPercent = (percent: number) => Math.min(SLIDE_COUNT, Math.floor(percent * SLIDE_COUNT) + 1);
 

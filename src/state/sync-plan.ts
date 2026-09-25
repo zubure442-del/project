@@ -1,10 +1,11 @@
 import type { KnownRing } from '../ble/ring';
 import type { SyncResult } from '../ble/sync';
-import { dateForOffset } from '../codec';
+import { dateForOffset, nowRingTs } from '../codec';
 import { bodyOf, buildTemplateReport } from '../domain';
 import {
   CACHE_DAYS,
   addReport,
+  buildCycleSnapshots,
   buildSnapshots,
   collectStepNorms,
   keepLastDays,
@@ -16,7 +17,7 @@ import {
   type RawByDay,
   type VueloState,
 } from '../storage';
-import { DAY_START_HOUR, adviceMode, dayView, findDay, isCompleteDay, scoreOf, todayKey } from './day';
+import { DAY_START_HOUR, cycleScoreOf, isCompleteDay, reportMode, todayKey } from './day';
 import { settleRelayState } from './relay';
 
 /** Глубина выгрузки: кольцо хранит неделю. */
@@ -120,16 +121,36 @@ export function markSynced(
  * Сводки дней заново из рядов: оценки, норма шагов (сохранённая не меняется) и калории
  * по текущему профилю. Вызывается после выгрузки и после правки профиля.
  */
-export function rebuildDays(state: VueloState, now = new Date()): VueloState {
-  const days = keepLastDays(
-    buildSnapshots(toSyncResult(state.raw), profileAge(state.profile, now) ?? state.age, state.stepNorms, bodyOf(state.profile, now), now),
-  );
+export function rebuildDays(state: VueloState, now = new Date(), horizon?: Date): VueloState {
+  const sync = toSyncResult(state.raw);
+  const age = profileAge(state.profile, now) ?? state.age;
+  const days = keepLastDays(buildSnapshots(sync, age, state.stepNorms, bodyOf(state.profile, now), now));
+  const { cycles, ringOffSince } = buildCycleSnapshots(sync, age, days, dataHorizon(state, sync, horizon));
   return {
     ...state,
     days,
+    cycles,
+    ringOffSince,
     stepNorms: collectStepNorms(state.stepNorms, days),
-    hadCompleteDay: state.hadCompleteDay || days.some(isCompleteDay),
+    hadCompleteDay: state.hadCompleteDay || days.some(isCompleteDay) || cycles.some((c) => c.total !== null),
   };
+}
+
+const ringTsOf = (at: Date) => nowRingTs(at.getTime(), -at.getTimezoneOffset() * 60);
+
+/**
+ * До какого момента есть данные — конец текущего цикла и точка отсчёта «кольцо снято».
+ * После выгрузки это её время; иначе — последняя удачная выгрузка или самый поздний замер
+ * (живой замер бывает позже выгрузки). Текущее время не годится: между выгрузками
+ * замеров нет не потому, что кольцо сняли, а потому, что их ещё не забрали.
+ */
+function dataHorizon(state: VueloState, sync: SyncResult, horizon?: Date): number {
+  if (horizon) return ringTsOf(horizon);
+  const latest = Math.max(
+    0,
+    ...[sync.heart, sync.spo2, sync.summary, sync.steps].map((list) => (list.length ? list[list.length - 1].ts : 0)),
+  );
+  return Math.max(latest, state.lastSyncAt === null ? 0 : ringTsOf(new Date(state.lastSyncAt)));
 }
 
 /**
@@ -145,8 +166,7 @@ export function applySyncResult(
   now = new Date(),
 ): VueloState {
   const raw = mergeRaw(state.raw, splitByDay(sync));
-  const rebuilt = rebuildDays({ ...state, raw }, now);
-  const days = rebuilt.days;
+  const rebuilt = rebuildDays({ ...state, raw }, now, now);
   const base: VueloState = {
     ...rebuilt,
     ring: known ?? state.ring,
@@ -161,23 +181,22 @@ export function applySyncResult(
       lastSyncAt: now.getTime(),
       syncFailed: false,
       syncedAt: markSynced(state.syncedAt, sync.completeDays, now, (date) => nightAfterArrived(date, raw)),
-      reports: withAdvice(state.reports, days, now),
+      reports: withAdvice(state.reports, rebuilt.cycles, now),
     },
     now,
   );
 }
 
 /**
- * Совет пишем в историю только для полного дня: сегодня, если он полный, иначе последний полный.
- * Шаблон подбираем без учёта прежнего совета на тот же день и режим: пока слабая сторона
- * та же, текст не прыгает от синхронизации к синхронизации.
+ * Совет пишем в историю только для цикла с итогом: текущего, а если у него итога нет —
+ * последнего полного. Ключ — дата начала цикла. Шаблон подбираем без учёта прежнего совета
+ * на тот же цикл и режим: пока слабая сторона та же, текст не прыгает от синхронизации к синхронизации.
  */
-function withAdvice(reports: VueloState['reports'], days: VueloState['days'], now: Date): VueloState['reports'] {
-  const date = dayView(days, now).lastComplete;
-  const day = date ? findDay(days, date) : null;
-  if (!date || !day) return reports;
-  const mode = adviceMode(date, now);
-  const others = reports.filter((r) => !(r.date === date && r.mode === mode));
-  const report = buildTemplateReport({ mode, score: scoreOf(day), recentTemplateIds: recentTemplateIds(others) });
-  return addReport(reports, { date, mode, templateId: report.templateId, text: report.text });
+function withAdvice(reports: VueloState['reports'], cycles: VueloState['cycles'], now: Date): VueloState['reports'] {
+  const cycle = [...cycles].reverse().find((c) => c.total !== null);
+  if (!cycle) return reports;
+  const mode = cycle.end === null ? reportMode(now) : 'evening';
+  const others = reports.filter((r) => !(r.date === cycle.date && r.mode === mode));
+  const report = buildTemplateReport({ mode, score: cycleScoreOf(cycle), recentTemplateIds: recentTemplateIds(others) });
+  return addReport(reports, { date: cycle.date, mode, templateId: report.templateId, text: report.text });
 }

@@ -3,14 +3,20 @@ import type { SyncResult } from '../ble/sync';
 import {
   CONSISTENCY_WINDOW_DAYS,
   PERSONAL_BASELINE_DAYS,
+  STEPS_DEFAULT_NORM,
   STEP_HISTORY_DAYS,
+  WEIGHTS,
   activeCalories,
+  activityScore,
   applyStepNoise,
+  buildCycles,
   dayOrganism,
   organismSamples,
   personalBaseline,
   wakeMinuteOf,
+  type Baseline,
   type Body,
+  type ComponentId,
   buildSleepSessions,
   cleanHeart,
   computeDayScore,
@@ -28,7 +34,7 @@ import {
   stepsByHour,
   type StoredNorm,
 } from '../domain';
-import { CACHE_DAYS, SNAPSHOT_DAYS, type DayPoint, type DaySnapshot } from './types';
+import { CACHE_DAYS, SNAPSHOT_DAYS, type CycleSnapshot, type DayPoint, type DaySnapshot } from './types';
 
 const minuteOfDay = (ts: number) => {
   const w = wallClock(ts);
@@ -58,6 +64,29 @@ function average(values: number[]): number | null {
 
 const shiftDate = (date: string, days: number) =>
   new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+
+/**
+ * Личный ориентир «Организма» на дату: по семи прошлым дням — средняя вариабельность
+ * и минимальный пульс за день. Сам день не входит.
+ */
+function organismBaselines(
+  summaryByDate: Map<string, SummaryRecord[]>,
+  heartByDate: Map<string, Sample[]>,
+): (date: string) => Baseline {
+  const dailyHrv = new Map(
+    [...summaryByDate].map(([date, list]) => {
+      const values = list.map((r) => r.hrv).filter((v): v is number => v !== null);
+      return [date, values.length ? values.reduce((a, b) => a + b, 0) / values.length : null] as const;
+    }),
+  );
+  const dailyPulse = new Map([...heartByDate].map(([date, list]) => [date, Math.min(...list.map((s) => s.value))] as const));
+  return (date: string) =>
+    personalBaseline(
+      Array.from({ length: PERSONAL_BASELINE_DAYS }, (_, i) => shiftDate(date, -(PERSONAL_BASELINE_DAYS - i)))
+        .map((d) => ({ hrv: dailyHrv.get(d) ?? null, pulse: dailyPulse.get(d) ?? null }))
+        .filter((d) => d.hrv !== null || d.pulse !== null),
+    );
+}
 
 /**
  * Превращает выгрузку в сводки по дням. Чистая функция: расчёты те же, что на экране.
@@ -93,20 +122,7 @@ export function buildSnapshots(
     Array.from({ length: STEP_HISTORY_DAYS }, (_, i) => totals.get(shiftDate(date, -(STEP_HISTORY_DAYS - i))))
       .filter((v): v is number => v !== undefined);
 
-  // Личный ориентир «Организма»: по прошлым дням — средняя вариабельность и минимальный пульс за день.
-  const dailyHrv = new Map(
-    [...summaryByDate].map(([date, list]) => {
-      const values = list.map((r) => r.hrv).filter((v): v is number => v !== null);
-      return [date, values.length ? values.reduce((a, b) => a + b, 0) / values.length : null] as const;
-    }),
-  );
-  const dailyPulse = new Map([...heartByDate].map(([date, list]) => [date, Math.min(...list.map((s) => s.value))] as const));
-  const baselineFor = (date: string) =>
-    personalBaseline(
-      Array.from({ length: PERSONAL_BASELINE_DAYS }, (_, i) => shiftDate(date, -(PERSONAL_BASELINE_DAYS - i)))
-        .map((d) => ({ hrv: dailyHrv.get(d) ?? null, pulse: dailyPulse.get(d) ?? null }))
-        .filter((d) => d.hrv !== null || d.pulse !== null),
-    );
+  const baselineFor = organismBaselines(summaryByDate, heartByDate);
   const nowTs = nowRingTs(now.getTime(), -now.getTimezoneOffset() * 60);
   const today = dateKey(nowTs);
   const nowMinute = minuteOfDay(nowTs);
@@ -205,6 +221,132 @@ export function buildSnapshots(
     });
   }
   return snapshots.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Циклы бодрствования и их оценки (domain/cycles.ts). Аналитика — по циклу, а не по суткам:
+ * - сон — сессия, которой цикл начался (та же модель, что у дня: длительность, глубина, подъём,
+ *   бонус за активность прошлого цикла, коэффициент ночного пульса против своей нормы за 7 дней);
+ * - организм — замеры от засыпания до конца цикла (или до «сейчас»): ночь и текущее состояние;
+ * - активность — шаги (после шумоподавления) и пульс внутри цикла против нормы шагов даты начала.
+ * У цикла без сна (после таймаута, снятого кольца или до первого сна) итога нет.
+ * `horizon` — кольцевая метка, до которой есть данные: конец текущего цикла.
+ */
+export function buildCycleSnapshots(
+  sync: SyncResult,
+  age: number | null,
+  days: readonly DaySnapshot[],
+  horizon: number,
+): { cycles: CycleSnapshot[]; ringOffSince: number | null } {
+  const sessions = buildSleepSessions(sync.sleep);
+  const { clean } = cleanHeart(sync.heart);
+  const measurements = [...sync.heart.map((s) => s.ts), ...sync.spo2.map((s) => s.ts), ...sync.summary.map((r) => r.ts)];
+  const starts = [...measurements, ...sync.steps.map((s) => s.ts), ...sessions.map((s) => s.start)];
+  const dataStart = starts.length ? Math.min(...starts) : null;
+  const { cycles, ringOffSince } = buildCycles({ sessions, measurements, dataStart, horizon });
+
+  const baselineFor = organismBaselines(groupByDate(sync.summary), groupByDate(clean));
+  const dayOf = (date: string) => days.find((d) => d.date === date) ?? null;
+  const within = <T extends { ts: number }>(items: readonly T[], from: number, to: number) =>
+    items.filter((x) => x.ts >= from && x.ts <= to);
+
+  const out: CycleSnapshot[] = [];
+  for (const cycle of cycles) {
+    const until = cycle.end ?? horizon;
+    const date = dateKey(cycle.start);
+    const base = midnightTs(date);
+    const night = cycle.sleep;
+    const previous = out[out.length - 1] ?? null;
+    const weekBefore = out.filter((c) => c.date < date && c.date >= shiftDate(date, -SLEEP_HR_BASELINE_DAYS));
+
+    // Сон цикла.
+    const nightHr = night ? nightHrOf(within(clean, night.start, night.end).map((s) => s.value)) : null;
+    const baselineHr = sleepHrBaseline(weekBefore.map((c) => c.nightHr).filter((v): v is NightHr => v !== null));
+    const category =
+      nightHr && baselineHr ? sleepHrCategory(nightHr.min - baselineHr.min, nightHr.avg - baselineHr.avg) : null;
+    // Постоянство подъёма — по главному сну каждого из прошлых дней (самому длинному), без дневной дрёмы.
+    const mainWake = new Map<string, { minutes: number; wake: number }>();
+    for (const c of out) {
+      if (!c.sleep || c.date >= date || c.date < shiftDate(date, -CONSISTENCY_WINDOW_DAYS)) continue;
+      const known = mainWake.get(c.date);
+      if (!known || c.sleep.totalMin > known.minutes) {
+        mainWake.set(c.date, { minutes: c.sleep.totalMin, wake: minuteOfDay(c.sleep.end) });
+      }
+    }
+    const sleep = sleepScore(night, {
+      previousWakes: [...mainWake.values()].map((w) => w.wake),
+      yesterdayActivity: previous?.scores.activity ?? null,
+      nightHrFactor: sleepHrFactor(category),
+    });
+
+    // Организм: от засыпания до конца цикла — ночь и текущее состояние.
+    const from = night ? night.start : cycle.start;
+    const rel = (ts: number) => (ts - from) / 60;
+    const heartWindow = within(clean, from, until);
+    const samples = organismSamples(
+      within(sync.summary, from, until).map((r) => ({
+        m: rel(r.ts), systolic: r.systolic, diastolic: r.diastolic, glucose: r.glucose, hrv: r.hrv,
+      })),
+      heartWindow.map((s) => ({ m: rel(s.ts), v: s.value })),
+      within(sync.spo2, from, until).map((s) => ({ m: rel(s.ts), v: s.value })),
+    );
+    const organism = dayOrganism(samples, baselineFor(date), rel(until)).score;
+
+    // Активность: шаги и пульс внутри цикла против нормы шагов даты начала.
+    const stepsInside = within(sync.steps, cycle.start, until);
+    const steps = applyStepNoise(stepsInside.reduce((sum, s) => sum + s.value, 0));
+    const heartInside = within(clean, cycle.start, until);
+    const activity = activityScore(steps, heartInside, age, dayOf(date)?.stepNorm?.value ?? STEPS_DEFAULT_NORM);
+
+    const scores: Record<ComponentId, number | null> = {
+      sleep: sleep === null ? null : Math.round(sleep),
+      activity: activity === null ? null : Math.round(activity),
+      state: organism === null ? null : Math.round(organism),
+    };
+    const ids = Object.keys(WEIGHTS) as ComponentId[];
+    const weightSum = ids.reduce((sum, k) => sum + WEIGHTS[k], 0);
+    const total = ids.every((k) => scores[k] !== null)
+      ? Math.round(ids.reduce((sum, k) => sum + WEIGHTS[k] * (scores[k] as number), 0) / weightSum)
+      : null;
+    const minuteOf = (ts: number) => Math.round((ts - base) / 60);
+
+    out.push({
+      date,
+      start: cycle.start,
+      end: cycle.end,
+      startedBy: cycle.startedBy,
+      endedBy: cycle.endedBy,
+      before: cycle.before,
+      total,
+      scores,
+      steps,
+      sleep: night
+        ? { start: night.start, end: night.end, totalMin: sleepMinutes(night), deepMin: night.deepMin, lightMin: night.lightMin }
+        : null,
+      sleepSegments: night
+        ? hypnogramSegments(within(sync.sleep, night.start, night.end)).map((seg) => ({
+            from: (seg.from - base) / 60,
+            to: (seg.to - base) / 60,
+            stage: seg.stage,
+          }))
+        : [],
+      nightHr,
+      chart:
+        cycle.end === null
+          ? {
+              from: minuteOf(cycle.start),
+              to: minuteOf(until),
+              heart: heartInside.map((s) => ({ m: minuteOf(s.ts), v: s.value })),
+              steps: stepsInside.map((s) => ({ m: minuteOf(s.ts), v: s.value })),
+              restingHr: dayOf(date)?.restingHr ?? null,
+            }
+          : null,
+    });
+  }
+  // Храним две недели, как и сводки дней: для динамики и истории.
+  const newest = out.length ? out[out.length - 1].date : null;
+  const kept = newest ? out.filter((c) => c.date >= shiftDate(newest, -(SNAPSHOT_DAYS - 1))) : out;
+  return { cycles: kept, ringOffSince };
 }
 
 /** Кэш хранит две последние недели сводок: неделя на экране и неделя для сравнения. */

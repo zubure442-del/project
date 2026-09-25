@@ -28,6 +28,7 @@ export function demoState(real: VueloState, seed: number, now = new Date()): Vue
       relay: EMPTY_RELAY,
     },
     now,
+    now,
   );
   return settleRelayState(rebuilt, now);
 }

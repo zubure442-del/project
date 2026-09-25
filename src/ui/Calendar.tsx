@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
-import { isCompleteDay, shortDate, useVuelo } from '../state';
+import { dayHasAnything, shortDate, useVuelo } from '../state';
 import { Sheet } from './Sheet';
 import { colors, radius, spacing } from './theme';
 
@@ -52,8 +52,8 @@ export function CalendarButton() {
                     {Number(date.slice(8, 10))}
                   </Text>
                 </View>
-                {/* Точка — у дня есть Итог (все три метрики). */}
-                <View style={[styles.dot, !isCompleteDay(day) && styles.dotEmpty]} />
+                {/* Точка — за день есть данные. Итога у прошлых дат на экране нет: он считается по циклам. */}
+                <View style={[styles.dot, !dayHasAnything(day) && styles.dotEmpty]} />
               </Pressable>
             );
           })}

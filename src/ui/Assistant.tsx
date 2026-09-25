@@ -2,8 +2,17 @@ import { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { ADVICE_LABEL, AUTOPHAGY_INFO, coffeeClock, type CoffeeWindow, type FoodCycle } from '../domain';
+import {
+  ADVICE_LABEL,
+  AUTOPHAGY_INFO,
+  ENDURANCE_FLAG_TEXT,
+  ENDURANCE_INFO,
+  coffeeClock,
+  type CoffeeWindow,
+  type FoodCycle,
+} from '../domain';
 import type { AssistantSlide } from '../state/day';
+import type { EnduranceView } from '../state/endurance';
 import { Flask } from './Flask';
 import { InfoButton } from './Sheet';
 import { SparkIcon } from './TabIcons';
@@ -184,6 +193,48 @@ function FoodBody({ food }: { food: FoodCycle }) {
   );
 }
 
+/** «Через 2 ч 10 мин», «через 25 мин». */
+const inTime = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  return h ? `через ${h} ч${m ? ` ${m} мин` : ''}` : `через ${m} мин`;
+};
+
+/**
+ * «Пик выносливости»: окно крупно, под ним интенсивность полоской и одна строка о том,
+ * где мы сейчас относительно окна. Ниже — короткие причины сдвига, без показателей и формул.
+ */
+function EnduranceBody({ peak, width }: { peak: EnduranceView; width: number }) {
+  const status =
+    peak.nowMinute < peak.from
+      ? `Начнётся ${inTime(peak.from - peak.nowMinute)}`
+      : peak.nowMinute < peak.to
+        ? 'Сейчас лучшее время'
+        : 'Пик на сегодня прошёл';
+  return (
+    <View style={styles.bodyGap}>
+      <Text style={styles.peakTime}>
+        {coffeeClock(peak.from)}–{coffeeClock(peak.to)}
+      </Text>
+      <Text style={styles.text}>{status}</Text>
+      <View pointerEvents="none">
+        <Svg width={width} height={10}>
+          <Rect x={0} y={2} width={width} height={6} rx={3} fill={colors.track} />
+          <Rect x={0} y={2} width={(width * peak.intensity) / 100} height={6} rx={3} fill={colors.accent} />
+        </Svg>
+      </View>
+      <Text style={styles.text}>
+        {peak.kind === 'recovery' ? 'Восстановительная · ' : ''}интенсивность {peak.intensity} %
+      </Text>
+      {peak.flags.map((flag) => (
+        <Text key={flag} style={styles.small}>
+          {ENDURANCE_FLAG_TEXT[flag]}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
 interface Slide {
   key: Exclude<AssistantSlide, 'advice'>;
   title: string;
@@ -197,8 +248,9 @@ interface Slide {
 const SLIDES: Slide[] = [
   // «Цикл питания» стоит раньше кофейного окна.
   { key: 'food', title: 'Цикл питания', glyph: 'food', info: AUTOPHAGY_INFO },
+  // «Пик выносливости» — перед кофейным окном.
+  { key: 'endurance', title: 'Пик выносливости', glyph: 'bolt', info: ENDURANCE_INFO },
   { key: 'coffee', title: 'Кофейное окно', glyph: 'coffee' },
-  { key: 'endurance', title: 'Пик выносливости', glyph: 'bolt', soon: 'Покажет время дня, когда тренировки даются легче.' },
   { key: 'sleepmode', title: 'Режим сна', glyph: 'moon', soon: 'Поможет держать ровное время отхода ко сну.' },
 ];
 
@@ -218,18 +270,24 @@ export function AssistantCarousel({
   adviceLabel,
   coffee,
   food,
+  endurance = null,
 }: {
   slides: readonly AssistantSlide[];
   advice: string | null;
   adviceLabel: string;
   coffee: (CoffeeWindow & { nowMinute: number }) | null;
   food: FoodCycle | null;
+  endurance?: EnduranceView | null;
 }) {
   const { width } = useWindowDimensions();
   const [page, setPage] = useState(0);
   const inner = width - spacing.md * 4;
   const shown = SLIDES.filter(
-    (card) => slides.includes(card.key) && (card.key !== 'coffee' || coffee) && (card.key !== 'food' || food),
+    (card) =>
+      slides.includes(card.key) &&
+      (card.key !== 'coffee' || coffee) &&
+      (card.key !== 'food' || food) &&
+      (card.key !== 'endurance' || endurance),
   );
   const pages = 1 + shown.length;
 
@@ -278,6 +336,8 @@ export function AssistantCarousel({
                 <Text style={styles.text}>{card.soon}</Text>
               ) : card.key === 'food' ? (
                 food && <FoodBody food={food} />
+              ) : card.key === 'endurance' ? (
+                endurance && <EnduranceBody peak={endurance} width={inner} />
               ) : (
                 coffee && <CoffeeBody coffee={coffee} nowMinute={coffee.nowMinute} width={inner} />
               )}
@@ -328,6 +388,7 @@ const styles = StyleSheet.create({
   bodyGap: { gap: spacing.sm },
   foodBody: { flex: 1, gap: spacing.sm },
   mode: { color: colors.accent, fontSize: 16, fontWeight: '500' },
+  peakTime: { color: colors.text, fontSize: 34, fontWeight: '200', fontVariant: ['tabular-nums'] },
   meals: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   meal: { gap: 1 },
   mealTitle: { color: colors.textFaint, fontSize: 12 },

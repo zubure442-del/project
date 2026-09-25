@@ -16,3 +16,5 @@ export * from './relay';
 export * from './trend';
 export * from './sleep-hr';
 export * from './flask';
+export * from './cycles';
+export * from './endurance';

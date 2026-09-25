@@ -31,8 +31,11 @@ const HERO_RING = 150;
 export default function ActivityTab() {
   const { week, state, statusText, sync, dayView } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner } = useTabDay();
+  const { date: picked, banner, isToday, today } = useTabDay();
   const day = findDay(state.days, picked);
+  // Сегодня график «День» идёт вдоль текущего цикла (от пробуждения, через полночь), прошлые дни — 0–24.
+  const cycle = isToday ? today?.cycle ?? null : null;
+  const chart = cycle?.chart ?? null;
   const age = profileAge(state.profile);
   const hours = day?.stepsByHour ?? [];
   const best = day ? busiestHour(hours, day.heart.map((p) => ({ m: p.m, v: p.v })), age) : null;
@@ -61,7 +64,8 @@ export default function ActivityTab() {
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
-        <HeroRing value={day?.scores.activity ?? null} size={HERO_RING} />
+        {/* Индекс активности — по текущему циклу и только за сегодня; шаги, дистанция и калории — за сутки. */}
+        {isToday ? <HeroRing value={cycle?.scores.activity ?? null} size={HERO_RING} /> : null}
         <View style={styles.heroSide}>
           {day?.steps != null ? (
             <View>
@@ -76,7 +80,17 @@ export default function ActivityTab() {
       </View>
 
       <Card title="День">
-        {day ? (
+        {chart ? (
+          <DayActivityChart
+            heart={chart.heart}
+            width={chartWidth}
+            age={age}
+            steps={chart.steps}
+            restingHr={chart.restingHr}
+            from={chart.from}
+            to={chart.to}
+          />
+        ) : day ? (
           <DayActivityChart
             heart={day.heart}
             width={chartWidth}
@@ -93,7 +107,8 @@ export default function ActivityTab() {
         </View>
       </Card>
 
-      <CaloriesWeekCard days={weekBars} width={chartWidth} level={level} />
+      {/* Расход за неделю меняется каждый день — на прошлых датах его нет. */}
+      {isToday ? <CaloriesWeekCard days={weekBars} width={chartWidth} level={level} /> : null}
     </Screen>
   );
 }

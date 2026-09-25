@@ -188,12 +188,12 @@ function generateDay(seed: number, date: string, until: number): DayRaw {
   const day: DayRaw = { date, steps: [], sleep: [], heart: [], summary: [], spo2: [] };
 
   // Сон: ночь целиком в дне пробуждения, минуты до полуночи — отрицательные (как в кэше кольца).
-  plan.blocks.forEach((state, i) => {
-    for (let k = 0; k < BLOCK_MIN; k++) {
-      const m = plan.bedtime + i * BLOCK_MIN + k;
-      if (m <= until) day.sleep.push([m, state]);
-    }
-  });
+  // Кольцо отдаёт ночь только целиком, когда человек проснулся: незаконченной ночи в демо нет.
+  if (plan.bedtime + plan.blocks.length * BLOCK_MIN <= until) {
+    plan.blocks.forEach((state, i) => {
+      for (let k = 0; k < BLOCK_MIN; k++) day.sleep.push([plan.bedtime + i * BLOCK_MIN + k, state]);
+    });
+  }
 
   // Шаги: прогулки и тренировка поминутно, остальное — мелкими движениями в часы бодрствования.
   const stepsRng = rngFor(seed, date, 1);

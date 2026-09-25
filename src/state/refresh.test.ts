@@ -13,6 +13,7 @@ const EXPECTED: Record<Phase, 'loading' | 'idle'> = {
   done: 'idle',
   failed: 'idle',
   fresh: 'idle',
+  background: 'loading',
 };
 
 /** Пути, которыми загрузка заканчивается на самом деле (см. sync в provider.tsx). */
@@ -22,6 +23,7 @@ const PATHS: Record<string, Phase[]> = {
   'кольцо не нашлось (таймаут 10 + 10 с)': ['idle', 'loading', 'failed', 'idle'],
   'связь оборвалась на середине': ['idle', 'loading', 'done', 'idle'],
   'обрыв без единого дня в кэше': ['idle', 'loading', 'failed', 'idle'],
+  'фоновая догрузка при заполненном кэше': ['idle', 'background', 'idle'],
 };
 
 describe('СИНТЕТИЧЕСКИЕ: индикатор обновления не залипает ни на одном пути завершения', () => {
@@ -41,10 +43,10 @@ describe('СИНТЕТИЧЕСКИЕ: индикатор обновления н
       expect(keys[keys.length - 1]).toBe('idle');
       // На каждом шаге после загрузки ключ уже сменился — не дожидаясь прокрутки экрана.
       path.forEach((phase, i) => {
-        if (phase !== 'loading') expect(keys[i]).toBe('idle');
+        if (phase !== 'loading' && phase !== 'background') expect(keys[i]).toBe('idle');
       });
       // Загрузка была — значит ключ менялся, и нативный контрол собран заново.
-      if (path.includes('loading')) expect(new Set(keys).size).toBe(2);
+      if (path.includes('loading') || path.includes('background')) expect(new Set(keys).size).toBe(2);
     });
   }
 });

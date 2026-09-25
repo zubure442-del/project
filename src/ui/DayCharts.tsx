@@ -42,12 +42,20 @@ export function DayActivityChart({
   age,
   steps = [],
   restingHr = null,
+  from = 0,
+  to = 1440,
 }: {
   heart: DayPoint[];
   width: number;
   age: number | null;
   steps?: { m: number; v: number }[];
   restingHr?: number | null;
+  /**
+   * Отрезок оси X в минутах от полуночи. По умолчанию сутки 0–24 (прошлые дни); у текущего цикла —
+   * от пробуждения до «сейчас», после полуночи минуты идут дальше 1440 и линия не рвётся.
+   */
+  from?: number;
+  to?: number;
 }) {
   const smooth = smoothHeart(heart.map((p) => ({ ts: p.m * 60, value: p.v })));
   const zones = loadIntervals(heart.map((p) => ({ m: p.m, v: p.v })), age, steps, restingHr);
@@ -60,7 +68,8 @@ export function DayActivityChart({
   const yMax = Math.ceil((Math.max(...values) + 20) / PULSE_STEP) * PULSE_STEP;
   const gutter = 34;
   const plot = width - gutter;
-  const x = (m: number) => gutter + (m / 1440) * plot;
+  const span = Math.max(1, to - from);
+  const x = (m: number) => gutter + ((m - from) / span) * plot;
   // Область графика и запас внутри неё в полквадратика: центр квадратика на линии всегда помещается.
   const area = { top: 10, bottom: HEIGHT - 22 };
   const pad = LOAD_BOX_H_FLOOR / 2;
@@ -120,16 +129,16 @@ export function DayActivityChart({
           ),
         )}
 
-        {[0, 360, 720, 1080, 1440].map((m) => (
+        {axisTicks(from, to).map((m) => (
           <SvgText
             key={m}
             x={x(m)}
             y={HEIGHT - 2}
             fill={colors.textFaint}
             fontSize={11}
-            textAnchor={m === 0 ? 'start' : m === 1440 ? 'end' : 'middle'}
+            textAnchor={m === from ? 'start' : m === to ? 'end' : 'middle'}
           >
-            {formatMinute(m)}
+            {from === 0 && to === 1440 ? formatMinute(m) : formatMinute(m % 1440)}
           </SvgText>
         ))}
       </Svg>
@@ -148,6 +157,21 @@ export function DayActivityChart({
       </View>
     </View>
   );
+}
+
+/**
+ * Подписи часов на оси: у суток — 0, 6, 12, 18, 24; у цикла — круглые часы с шагом 2–6 ч
+ * (не больше пяти подписей), края — начало и конец цикла.
+ */
+export function axisTicks(from: number, to: number): number[] {
+  if (from === 0 && to === 1440) return [...DAY_HOUR_TICKS];
+  const span = to - from;
+  const step = [120, 180, 240, 360].find((s) => span / s <= 4) ?? 360;
+  const inner: number[] = [];
+  for (let m = Math.ceil(from / step) * step; m < to; m += step) {
+    if (m - from >= step / 2 && to - m >= step / 2) inner.push(m);
+  }
+  return [from, ...inner, to];
 }
 
 /** Пауза, после которой линию не тянем: не меньше 90 минут и не меньше трёх обычных интервалов. */

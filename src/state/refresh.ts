@@ -16,7 +16,8 @@ import type { Phase } from './provider';
  */
 export type RefreshKey = 'loading' | 'idle';
 
-export const refreshControlKey = (phase: Phase): RefreshKey => (phase === 'loading' ? 'loading' : 'idle');
+export const refreshControlKey = (phase: Phase): RefreshKey =>
+  phase === 'loading' || phase === 'background' ? 'loading' : 'idle';
 
 /** Показывать ли спиннер прямо сейчас. Всегда нет: прогресс живёт на экране загрузки. */
 export const refreshIndicatorVisible = (): boolean => false;

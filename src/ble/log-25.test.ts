@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dateKey } from '../codec';
+import { dropGlucoseSpikes } from '../domain';
 import { applySyncResult, finalFrom, planDays } from '../state/sync-plan';
 import { EMPTY_STATE } from '../storage';
 import { logRing } from './log-replay';
@@ -101,5 +102,17 @@ describe('РЕАЛЬНЫЙ ЛОГ 25.09: вчера финальный, как �
     expect(afterSecond.raw[TODAY].sleep.length).toBeGreaterThan(0);
     // 11:50 — ещё до полудня, но ночь уже пришла, и вчера выгружен целиком после неё.
     expect(planDays(afterSecond.syncedAt, new Date(2026, 8, 25, 11, 50)).days).toEqual([0]);
+  });
+});
+
+describe('РЕАЛЬНЫЙ ЛОГ 25.09: выбросы глюкозы', () => {
+  it('ночные скачки 5.1 → 6.9 → 5.4 и 5.6 → 6.6 → 5.1 убраны, завтрак 6.7 → 7.0 → 7.4 → 6.7 на месте', async () => {
+    const { result } = await SECOND();
+    const after = dropGlucoseSpikes(result.summary);
+    const at = (r: { ts: number }) => new Date(r.ts * 1000).toISOString().slice(5, 16);
+    const dropped = result.summary.filter((r, i) => r.glucose !== null && after[i].glucose === null).map(at);
+    expect(dropped).toEqual(['09-24T16:45', '09-25T00:45', '09-25T03:15']);
+    const keptAt = new Set(after.filter((r) => r.glucose !== null).map(at));
+    for (const meal of ['09-25T07:45', '09-25T08:45', '09-25T09:15', '09-25T09:45', '09-24T13:15']) expect(keptAt).toContain(meal);
   });
 });

@@ -3,8 +3,10 @@
 /**
  * Облачная функция Yandex Cloud — посредник между приложением Vuelo и YandexGPT.
  *
- * Приложение присылает обезличенные числа дня (без имени, возраста, веса и роста), функция
- * пишет из них запрос к модели по правилам продукта и возвращает { text } — «Мнение Лиса».
+ * Приложение присылает всё, что знает о дне, кроме имени (решение владельца 26.09): профиль
+ * (пол, возраст, рост, вес, цель), сон и пульс во сне, шаги и калории, замеры «Организма»
+ * (без глюкозы и давления) и план дня из своих карточек. Функция пишет из этого запрос к модели
+ * по правилам продукта и возвращает { text } — «Мнение Лиса».
  * Ключей API здесь нет: функция ходит в YandexGPT от имени своего сервисного аккаунта
  * (роль ai.languageModels.user), токен выдаёт сама платформа (context.token).
  * Яндексу передаётся x-data-logging-enabled: false — запросы не сохраняются у него для обучения.
@@ -20,77 +22,225 @@
 const { Buffer } = require('node:buffer');
 
 const API_URL = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion';
-const MAX_BODY_CHARS = 4000;
+const MAX_BODY_CHARS = 8000;
 const LLM_TIMEOUT_MS = 12000;
 
 const MODE_TEXT = {
   morning: 'утро — говори о прошедшей ночи и о том, как начать день',
-  day: 'день — говори о том, что происходит сейчас и что ещё можно успеть сегодня',
-  evening: 'вечер — подведи итог дня и подскажи, как его спокойно завершить',
+  day: 'день — говори о том, что ещё можно успеть сегодня',
+  evening: 'вечер — подскажи, как спокойно закончить день и подготовиться ко сну',
 };
 const GOAL_TEXT = { lose: 'снизить вес', keep: 'поддерживать форму', gain: 'набрать мышечную массу' };
 const PART_TEXT = { sleep: 'сон', activity: 'активность', state: 'организм (восстановление по замерам кольца)' };
+const SEX_TEXT = { male: 'мужчина', female: 'женщина' };
 
-const SYSTEM_PROMPT = [
-  'Ты — Лис, дружелюбный помощник приложения к умному кольцу. По показателям дня пользователя ты пишешь короткое мнение с одним советом.',
-  'Правила:',
-  '- По-русски, на «вы», тёплым спокойным тоном. 2–3 коротких предложения, не больше 280 символов.',
-  '- Опирайся на самую слабую составляющую дня, если она указана; если всё хорошо — коротко поддержи.',
-  '- Дай один конкретный и простой совет на сегодня: прогулка, лечь пораньше, спокойный темп, вода, перерыв.',
-  '- Учитывай цель пользователя, но не дави.',
-  '- Никаких медицинских утверждений: не называй болезни и диагнозы, не упоминай лекарства, лечение и врачей, не обещай результата.',
-  '- Не пиши про глюкозу, сахар в крови и давление.',
-  '- Не называй оценки числами «из 100» и не объясняй, как они считаются.',
-  '- Не упоминай другие приложения, бренды и компании, не называй себя моделью.',
-  '- Без эмодзи, списков, заголовков, кавычек и разметки. Не повторяй недавние советы.',
-].join('\n');
+const SYSTEM_PROMPT = `Ты — Лис, личный помощник в приложении к умному кольцу. По данным дня ты пишешь «мнение» — 2–3 коротких предложения для главного экрана.
 
+Как писать:
+1. Найди в данных связь двух фактов и выведи из неё одно действие на ближайшие часы. Например: глубокого сна меньше обычного, а вариабельность ниже — значит, сегодня тренировка полегче.
+2. Обязательно используй конкретику из данных: время («до 23:10», «в 18:00–19:00»), количество, длительность. Все числа и время бери только из данных, новых не придумывай. Можно простой пересчёт: 1 000 шагов — около 10 минут ходьбы.
+3. Опирайся на план приложения (тренировка, кофе, еда, время сна): не спорь с ним, а объясни, почему сегодня он особенно важен.
+4. Учитывай пол, возраст, рост, вес и цель, чтобы совет был посильным, но не называй их и не оценивай фигуру и вес.
+5. Если всё хорошо — скажи, за счёт чего, и как это удержать.
+
+Нельзя:
+- банальности без конкретики: «ложитесь пораньше», «пейте больше воды», «больше отдыхайте», «прислушивайтесь к организму», «берегите себя»;
+- приветствия, прощания, пожелания удачи, вопросы;
+- болезни, диагнозы, лекарства, врачи, обещания результата;
+- глюкоза, сахар в крови, давление;
+- оценки числами «из 100» и объяснения, как они считаются;
+- другие приложения, бренды, компании; не называй себя моделью;
+- эмодзи, списки, кавычки, разметка.
+
+Пиши по-русски, на «вы», спокойно и по-дружески, не больше 180 символов.
+
+Примеры тона (не повторяй их дословно):
+Глубокого сна меньше обычного, и вариабельность просела — вместо интервалов сегодня подойдёт спокойное кардио в 18:00. Лягте между 23:00 и 23:30, чтобы долг сна начал уменьшаться.
+До нормы 1 800 шагов — это минут 20 ходьбы. Пройдитесь после обеда, около 14:00: кофе после 14:30 сегодня лучше не пить, а прогулка взбодрит не хуже.`;
+
+const has = (obj, key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(obj, key);
+const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isScore = (v) => v === null || (typeof v === 'number' && v >= 0 && v <= 100);
-const isCount = (v, max) => v === null || (typeof v === 'number' && v >= 0 && v <= max);
+const isNum = (v, min, max) => v === null || (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max);
+const isClock = (v) => typeof v === 'string' && /^\d\d:\d\d$/.test(v);
+const isClockOrNull = (v) => v === null || isClock(v);
+/** Короткая подпись из приложения («Спокойное кардио», «Обед»): без переводов строк и разметки. */
+const isLabel = (v, max = 40) => typeof v === 'string' && v.length > 0 && v.length <= max && !/[\n\r<>{}]/.test(v);
+
+function validateProfile(p) {
+  return (
+    isObject(p) &&
+    (p.sex === null || has(SEX_TEXT, p.sex)) &&
+    isNum(p.age, 5, 120) &&
+    isNum(p.heightCm, 50, 260) &&
+    isNum(p.weightKg, 20, 350) &&
+    (p.goal === null || has(GOAL_TEXT, p.goal))
+  );
+}
+
+function validateSleep(s) {
+  if (!isObject(s)) return false;
+  const pulseOk =
+    s.pulse === null ||
+    (isObject(s.pulse) &&
+      typeof s.pulse.min === 'number' &&
+      typeof s.pulse.avg === 'number' &&
+      isNum(s.pulse.min, 20, 220) &&
+      isNum(s.pulse.avg, 20, 220) &&
+      isNum(s.pulse.vsNormMin, -150, 150) &&
+      isNum(s.pulse.vsNormAvg, -150, 150));
+  return (
+    isScore(s.score) &&
+    isNum(s.minutes, 0, 1440) &&
+    isNum(s.deepMinutes, 0, 1440) &&
+    isNum(s.lightMinutes, 0, 1440) &&
+    isClockOrNull(s.asleep) &&
+    isClockOrNull(s.awake) &&
+    pulseOk
+  );
+}
+
+function validatePlan(plan) {
+  if (!isObject(plan) || typeof plan.noCoffee !== 'boolean') return false;
+  const w = plan.workout;
+  const workoutOk =
+    w === null ||
+    (isObject(w) && isLabel(w.title) && isLabel(w.effort) && typeof w.minutes === 'number' && isNum(w.minutes, 0, 300) &&
+      isClock(w.from) && isClock(w.to));
+  const c = plan.coffee;
+  const coffeeOk = c === null || (isObject(c) && isClock(c.from) && isClock(c.until) && isNum(c.cups, 0, 10));
+  const mealsOk =
+    Array.isArray(plan.meals) && plan.meals.length <= 6 && plan.meals.every((m) => isObject(m) && isLabel(m.title, 20) && isClock(m.time));
+  const b = plan.bedtime;
+  const bedtimeOk =
+    b === null ||
+    (isObject(b) && isClock(b.from) && isClock(b.to) && isClock(b.wake) &&
+      typeof b.needMinutes === 'number' && isNum(b.needMinutes, 0, 1440) &&
+      typeof b.debtMinutes === 'number' && isNum(b.debtMinutes, 0, 3000));
+  return workoutOk && coffeeOk && mealsOk && bedtimeOk;
+}
 
 /** Проверка тела запроса: только ожидаемые поля и разумные значения. Возвращает причину отказа или null. */
 function validate(p) {
-  if (!p || typeof p !== 'object') return 'body';
-  if (!Object.prototype.hasOwnProperty.call(MODE_TEXT, p.mode)) return 'mode';
-  if (p.goal !== null && !Object.prototype.hasOwnProperty.call(GOAL_TEXT, p.goal)) return 'goal';
-  if (p.weakest !== null && !Object.prototype.hasOwnProperty.call(PART_TEXT, p.weakest)) return 'weakest';
+  if (!isObject(p)) return 'body';
+  if (!has(MODE_TEXT, p.mode)) return 'mode';
+  if (!isClock(p.time)) return 'time';
+  if (!validateProfile(p.profile)) return 'profile';
   if (!isScore(p.total)) return 'total';
-  if (!p.sleep || !isScore(p.sleep.score) || !isCount(p.sleep.minutes, 1440) || !isCount(p.sleep.deepMinutes, 1440)) {
-    return 'sleep';
-  }
-  if (!p.activity || !isScore(p.activity.score) || !isCount(p.activity.steps, 200000) || !isCount(p.activity.norm, 50000)) {
+  if (p.weakest !== null && !has(PART_TEXT, p.weakest)) return 'weakest';
+  if (!validateSleep(p.sleep)) return 'sleep';
+  const a = p.activity;
+  if (!isObject(a) || !isScore(a.score) || !isNum(a.steps, 0, 200000) || !isNum(a.norm, 0, 50000) || !isNum(a.caloriesToday, 0, 20000)) {
     return 'activity';
   }
-  if (!p.organism || !isScore(p.organism.score)) return 'organism';
+  const o = p.organism;
+  if (
+    !isObject(o) || !isScore(o.score) || !isNum(o.hrv, 0, 400) || !isNum(o.restingPulse, 20, 220) ||
+    !isNum(o.spo2, 50, 100) || !isNum(o.stress, 0, 100)
+  ) {
+    return 'organism';
+  }
+  if (!validatePlan(p.plan)) return 'plan';
   if (!Array.isArray(p.recent) || p.recent.length > 5 || p.recent.some((t) => typeof t !== 'string' || t.length > 400)) {
     return 'recent';
   }
   return null;
 }
 
-const duration = (min) => `${Math.floor(min / 60)} ч ${String(Math.round(min % 60)).padStart(2, '0')} мин`;
+const plural = (n, forms) => {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  return forms[a > 10 && a < 20 ? 2 : b === 1 ? 0 : b >= 2 && b <= 4 ? 1 : 2];
+};
+const count = (n) => Math.round(n).toLocaleString('ru-RU');
+const signed = (n) => (n > 0 ? `+${n}` : `${n}`);
+const duration = (min) => {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return h ? `${h} ч ${String(m).padStart(2, '0')} мин` : `${m} мин`;
+};
 /** Оценка словами: модели так проще, и чисел «из 100» в ответе не будет. */
 const level = (score) =>
   score === null ? 'нет данных' : score >= 80 ? 'хорошо' : score >= 60 ? 'средне' : score >= 40 ? 'ниже обычного' : 'низко';
+const joined = (parts) => parts.filter(Boolean).join(', ');
+
+/** Человек: пол, возраст, рост, вес и цель — только то, что заполнено в профиле. */
+function personLine(pr) {
+  const person = joined([
+    pr.sex && SEX_TEXT[pr.sex],
+    pr.age !== null && `${pr.age} ${plural(pr.age, ['год', 'года', 'лет'])}`,
+    pr.heightCm !== null && `рост ${pr.heightCm} см`,
+    pr.weightKg !== null && `вес ${pr.weightKg} кг`,
+  ]);
+  return `Человек: ${person || 'профиль не заполнен'}. Цель: ${pr.goal ? GOAL_TEXT[pr.goal] : 'не указана'}.`;
+}
+
+function planLines(plan) {
+  const lines = [];
+  const w = plan.workout;
+  if (w) lines.push(`- тренировка «${w.title}», ${w.minutes} минут, ${w.effort.toLowerCase()}, лучшее время ${w.from}–${w.to};`);
+  if (plan.coffee) {
+    const c = plan.coffee;
+    const cups = c.cups !== null ? `, не больше ${c.cups} ${plural(c.cups, ['чашки', 'чашек', 'чашек'])}` : '';
+    lines.push(`- кофе: с ${c.from} до ${c.until}${cups};`);
+  } else if (plan.noCoffee) {
+    lines.push('- кофе сегодня лучше не пить;');
+  }
+  if (plan.meals.length) lines.push(`- еда: ${plan.meals.map((m) => `${m.title.toLowerCase()} ${m.time}`).join(', ')};`);
+  const b = plan.bedtime;
+  if (b) {
+    const debt = b.debtMinutes > 0 ? `, накопился долг сна ${duration(b.debtMinutes)}` : ', долга сна нет';
+    lines.push(`- сон: лечь с ${b.from} до ${b.to}, подъём ${b.wake}, нужно сна ${duration(b.needMinutes)}${debt}.`);
+  }
+  return lines.length ? ['План приложения на сегодня:', ...lines] : ['Плана на сегодня пока нет.'];
+}
 
 /** Показатели дня текстом для модели. */
 function buildUserText(p) {
+  const s = p.sleep;
+  const a = p.activity;
+  const o = p.organism;
+  const sleepDetails = joined([
+    s.deepMinutes !== null && `глубокий ${duration(s.deepMinutes)}`,
+    s.lightMinutes !== null && `лёгкий ${duration(s.lightMinutes)}`,
+  ]);
+  const sleepLine =
+    `Сон: ${level(s.score)}` +
+    (s.minutes !== null ? ` — ${duration(s.minutes)}${sleepDetails ? ` (${sleepDetails})` : ''}` : '') +
+    (s.asleep && s.awake ? `, с ${s.asleep} до ${s.awake}` : '') +
+    '.';
+  const pulse = s.pulse
+    ? `Пульс во сне: минимальный ${s.pulse.min}, средний ${s.pulse.avg}` +
+      (s.pulse.vsNormMin !== null && s.pulse.vsNormAvg !== null
+        ? `; к своей норме ${signed(s.pulse.vsNormMin)} и ${signed(s.pulse.vsNormAvg)} уд/мин.`
+        : '; своей нормы ещё нет.')
+    : null;
+  const left = a.steps !== null && a.norm !== null ? a.norm - a.steps : null;
+  const activityLine =
+    `Активность: ${level(a.score)}` +
+    (a.steps !== null ? ` — ${count(a.steps)} шагов` : '') +
+    (a.norm !== null ? ` при личной норме ${count(a.norm)}` : '') +
+    (left !== null ? (left > 0 ? ` (осталось ${count(left)})` : ' (норма выполнена)') : '') +
+    (a.caloriesToday !== null ? `, активных калорий сегодня ${count(a.caloriesToday)}` : '') +
+    '.';
+  const organismDetails = joined([
+    o.hrv !== null && `вариабельность ${o.hrv} мс`,
+    o.restingPulse !== null && `пульс покоя ${o.restingPulse}`,
+    o.spo2 !== null && `кислород ${o.spo2} %`,
+    o.stress !== null && `стресс ${o.stress} по шкале 0–100`,
+  ]);
   const lines = [
-    `Время суток: ${MODE_TEXT[p.mode]}.`,
-    `Цель пользователя: ${p.goal ? GOAL_TEXT[p.goal] : 'не указана'}.`,
+    `Сейчас: ${MODE_TEXT[p.mode]}. Время ${p.time}.`,
+    personLine(p.profile),
     `День в целом: ${level(p.total)}.`,
-    `Сон: ${level(p.sleep.score)}` +
-      (p.sleep.minutes !== null ? `, спал ${duration(p.sleep.minutes)}` : '') +
-      (p.sleep.deepMinutes !== null ? `, из них глубокий сон ${duration(p.sleep.deepMinutes)}` : '') +
-      '.',
-    `Активность: ${level(p.activity.score)}` +
-      (p.activity.steps !== null ? `, шагов ${p.activity.steps}` : '') +
-      (p.activity.norm !== null ? ` при личной норме ${p.activity.norm}` : '') +
-      '.',
-    `Организм: ${level(p.organism.score)}.`,
-    `Самая слабая составляющая: ${p.weakest ? PART_TEXT[p.weakest] : 'нет, всё хорошо'}.`,
-  ];
-  if (p.recent.length) lines.push(`Недавние советы (не повторяй их): ${p.recent.map((t) => `— ${t}`).join(' ')}`);
+    sleepLine,
+    pulse,
+    activityLine,
+    `Организм: ${level(o.score)}${organismDetails ? ` — ${organismDetails}` : ''}.`,
+    `Самая слабая сторона: ${p.weakest ? PART_TEXT[p.weakest] : 'нет, всё хорошо'}.`,
+    ...planLines(p.plan),
+  ].filter(Boolean);
+  if (p.recent.length) lines.push(`Недавние мнения (не повторяй их): ${p.recent.map((t) => `— ${t}`).join(' ')}`);
   return lines.join('\n');
 }
 
@@ -140,7 +290,7 @@ async function handler(event, context) {
       },
       body: JSON.stringify({
         modelUri: `gpt://${folder}/${model}/latest`,
-        completionOptions: { stream: false, temperature: 0.5, maxTokens: '300' },
+        completionOptions: { stream: false, temperature: 0.6, maxTokens: '300' },
         messages: [
           { role: 'system', text: SYSTEM_PROMPT },
           { role: 'user', text: buildUserText(payload) },

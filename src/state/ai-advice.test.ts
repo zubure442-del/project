@@ -18,7 +18,7 @@ function stateWithTemplate(): VueloState {
   expect(cycle.total).not.toBeNull();
   return {
     ...built,
-    profile: { ...built.profile, name: 'Анна', goal: 'lose' },
+    profile: { name: 'Анна', sex: 'male', heightCm: 180, weightKg: 82, birthYear: 1990, goal: 'lose' },
     reports: [
       { date: '2026-09-24', mode: 'evening', templateId: 'e-good-1', text: 'День получился сбалансированным.' },
       { date: cycle.date, mode: reportMode(NOW), templateId: 'd-act-mid-1', text: 'Шаги пока набираются.' },
@@ -31,15 +31,25 @@ const okFetch = (body: unknown, status = 200): typeof fetch =>
 const CONFIG = { url: 'https://example.test/advice', key: 'k' };
 
 describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT', () => {
-  it('просим совет на текущий цикл и время суток; уходят только числа дня и цель — без имени', () => {
+  it('просим совет на текущий цикл и время суток; уходит всё о дне, кроме имени', () => {
     const state = stateWithTemplate();
     const request = aiAdviceRequest(state, NOW)!;
+    const p = request.payload;
     expect(request.mode).toBe('day');
     expect(request.templateId).toBe('d-act-mid-1');
-    expect(request.payload.goal).toBe('lose');
-    expect(request.payload.recent).toEqual(['День получился сбалансированным.']);
-    expect(JSON.stringify(request.payload)).not.toContain('Анна');
-    expect(Object.keys(request.payload).sort()).toEqual(['activity', 'goal', 'mode', 'organism', 'recent', 'sleep', 'total', 'weakest']);
+    expect(p.time).toBe('15:00');
+    expect(p.profile).toEqual({ sex: 'male', age: 36, heightCm: 180, weightKg: 82, goal: 'lose' });
+    expect(p.recent).toEqual(['День получился сбалансированным.']);
+    expect(JSON.stringify(p)).not.toContain('Анна');
+    // Сон с временем засыпания и подъёма, замеры «Организма» и план дня из карточек.
+    expect(p.sleep.asleep).toMatch(/^\d\d:\d\d$/);
+    expect(p.sleep.minutes).toBeGreaterThan(0);
+    expect(p.organism.hrv).not.toBeNull();
+    expect(p.plan.workout?.title).toBeTruthy();
+    expect(p.plan.bedtime?.from).toMatch(/^\d\d:\d\d$/);
+    expect(p.plan.meals.length).toBeGreaterThan(0);
+    // Глюкозы и давления в запросе нет: по ним выводов не делаем.
+    expect(JSON.stringify(p)).not.toMatch(/glucose|systolic|diastolic/);
   });
 
   it('совет от модели заменяет шаблонный и больше не запрашивается; в демо не просим', () => {

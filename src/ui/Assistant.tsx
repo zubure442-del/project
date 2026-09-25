@@ -30,6 +30,18 @@ import { colors, radius, spacing, withAlpha } from './theme';
  * на экране вместе с маскотом: заходишь в приложение — и листать вниз не нужно.
  */
 export const ASSISTANT_HEIGHT = 300;
+/**
+ * Шрифт «Мнения Лиса» по длине текста: карточка фиксированной высоты, а совет от модели длиннее
+ * шаблонного. На ширине iPhone SE в неё помещается 5 строк по 18 pt (≈ 130 знаков) или 6 строк
+ * по 16 и 15 pt (≈ 175 и 200 знаков). Больше шести строк — многоточие, но модель просим короче.
+ */
+export const ADVICE_MAX_LINES = 6;
+export function adviceFontSize(text: string): { fontSize: number; lineHeight: number } {
+  if (text.length <= 130) return { fontSize: 18, lineHeight: 27 };
+  if (text.length <= 175) return { fontSize: 16, lineHeight: 23 };
+  return { fontSize: 15, lineHeight: 21 };
+}
+
 /** Подпись-подсказка в правом нижнем углу карточки: дальше по свайпу — готовые подсказки. */
 export const LIFEHACKS_LABEL = 'Лайфхаки';
 /** Один проход волны по шевронам. */
@@ -389,7 +401,9 @@ export function AssistantCarousel({
               <>
                 <Text style={styles.small}>{adviceLabel}</Text>
                 <View style={styles.advice}>
-                  <Text style={styles.adviceText}>{advice}</Text>
+                  <Text style={[styles.adviceText, adviceFontSize(advice)]} numberOfLines={ADVICE_MAX_LINES} ellipsizeMode="tail">
+                    {advice}
+                  </Text>
                 </View>
               </>
             ) : (

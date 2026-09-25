@@ -3,8 +3,10 @@ import type { ComponentId } from './score';
 
 /**
  * «Мнение Лиса» от YandexGPT. Приложение отправляет своему посреднику (облачная функция
- * `server/advice`) только обезличенные числа дня — без имени, возраста, веса и роста — и получает
- * две-три фразы. Текст проверяется здесь: не прошёл — остаётся шаблонный совет.
+ * `server/advice`) всё, что знает о дне, кроме имени (решение владельца 26.09): профиль, сон,
+ * пульс во сне, активность, замеры «Организма» (без глюкозы и давления — по ним выводов не делаем)
+ * и план дня из карточек карусели. Получает две-три фразы. Текст проверяется здесь: не прошёл —
+ * остаётся шаблонный совет.
  */
 
 /** Пометка совета от модели в истории: такой совет на тот же цикл и время суток больше не запрашиваем. */
@@ -12,33 +14,68 @@ export const AI_TEMPLATE_ID = 'ai:yandexgpt';
 
 export const isAiTemplate = (templateId: string) => templateId.startsWith('ai:');
 
-/** Что уходит посреднику. Только числа дня и цель — ничего, по чему можно узнать человека. */
+/** Что уходит посреднику. Всё о дне, кроме имени. Времена — «ЧЧ:ММ» по местному времени. */
 export interface AdvicePayload {
   mode: ReportMode;
-  goal: 'lose' | 'keep' | 'gain' | null;
+  /** Местное время запроса. */
+  time: string;
+  profile: {
+    sex: 'male' | 'female' | null;
+    age: number | null;
+    heightCm: number | null;
+    weightKg: number | null;
+    goal: 'lose' | 'keep' | 'gain' | null;
+  };
   total: number | null;
-  sleep: { score: number | null; minutes: number | null; deepMinutes: number | null };
-  activity: { score: number | null; steps: number | null; norm: number | null };
-  organism: { score: number | null };
   /** Самая слабая составляющая (как у шаблона); null — всё хорошо. */
   weakest: ComponentId | null;
+  sleep: {
+    score: number | null;
+    minutes: number | null;
+    deepMinutes: number | null;
+    lightMinutes: number | null;
+    asleep: string | null;
+    awake: string | null;
+    /** Пульс во сне и отклонение от своей нормы; нормы ещё нет — отклонений нет. */
+    pulse: { min: number; avg: number; vsNormMin: number | null; vsNormAvg: number | null } | null;
+  };
+  activity: { score: number | null; steps: number | null; norm: number | null; caloriesToday: number | null };
+  organism: {
+    score: number | null;
+    hrv: number | null;
+    restingPulse: number | null;
+    spo2: number | null;
+    stress: number | null;
+  };
+  /** План дня из карточек карусели: модель объясняет его, а не спорит с ним. */
+  plan: {
+    workout: { title: string; effort: string; minutes: number; from: string; to: string } | null;
+    coffee: { from: string; until: string; cups: number | null } | null;
+    /** Сегодня окна для кофе нет. */
+    noCoffee: boolean;
+    meals: { title: string; time: string }[];
+    bedtime: { from: string; to: string; wake: string; needMinutes: number; debtMinutes: number } | null;
+  };
   /** Последние выданные советы: чтобы модель не повторялась. */
   recent: string[];
 }
 
-/** Длина совета: короче — это не совет, длиннее — не помещается в карточку. */
+/**
+ * Длина совета: короче — это не совет, длиннее — не помещается в карточку даже мелким шрифтом
+ * (модель просим не больше 180 символов, здесь — с запасом; размер шрифта — `adviceFontSize`).
+ */
 export const AI_ADVICE_MIN_CHARS = 20;
-export const AI_ADVICE_MAX_CHARS = 320;
+export const AI_ADVICE_MAX_CHARS = 220;
 
 /**
  * Чего в совете быть не должно (правила продукта): диагнозы, болезни, лечение и врачи,
- * выводы по глюкозе и давлению, обещания результата, чужие приложения и бренды, разметка.
- * Сравнение — по началу слова без учёта регистра.
+ * выводы по глюкозе и давлению, оценки фигуры, обещания результата, чужие приложения и бренды,
+ * разметка. Сравнение — по началу слова без учёта регистра.
  */
 export const AI_ADVICE_FORBIDDEN = [
   'диагноз', 'болезн', 'заболева', 'диабет', 'гипертон', 'гипотон', 'гипогликем', 'гипергликем', 'инсульт', 'инфаркт',
   'лечени', 'лечит', 'вылеч', 'лекарств', 'таблетк', 'препарат', 'врач', 'доктор', 'медицин',
-  'глюкоз', 'давлени', 'пройдёт', 'пройдет', 'гарантир',
+  'глюкоз', 'давлени', 'пройдёт', 'пройдет', 'гарантир', 'ожирен', 'имт', 'полнот',
   'whoop', 'oura', 'garmin', 'fitbit', 'apple', 'samsung', 'xiaomi', 'huawei', 'yandex', 'яндекс', 'алиса', 'gpt',
 ] as const;
 

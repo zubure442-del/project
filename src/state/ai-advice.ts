@@ -11,7 +11,7 @@ import {
 import { addReport, profileAge, type VueloState } from '../storage';
 import { adviceDaysFor } from './advice-days';
 import { currentCycle } from './cycle';
-import { recommendationsFor, reportMode, todayKey } from './day';
+import { adviceModeNow, recommendationsFor, todayKey } from './day';
 
 /**
  * Адрес посредника и ключ приложения — из файла `.env` в корне проекта (в git не попадает):
@@ -31,19 +31,35 @@ export function aiAdviceConfig(): { url: string; key: string } | null {
 export const AI_ADVICE_TIMEOUT_MS = 15000;
 /** Сколько последних советов отдаём модели, чтобы она не повторялась. */
 export const AI_ADVICE_RECENT = 3;
+/** Запрос на тот же цикл и отрезок не удался — снова не раньше чем через столько (не тратим деньги впустую). */
+export const AI_ADVICE_RETRY_MS = 30 * 60 * 1000;
+
+/** Отрезок словами — для отладочного лога. */
+export const AI_ADVICE_SLOT_TEXT: Record<ReportMode, string> = { morning: 'после пробуждения', day: 'днём', evening: 'перед сном' };
+
+/** Ключ отрезка: дата начала цикла и отрезок («2026-09-25 morning»). */
+export const aiAdviceKey = (request: Pick<AiAdviceRequest, 'date' | 'mode'>) => `${request.date} ${request.mode}`;
+
+/** Можно ли просить снова: по этому отрезку не спрашивали или прошлая попытка была давно. */
+export const aiAdviceDue = (lastTry: number | undefined, now = Date.now()) =>
+  lastTry === undefined || now - lastTry >= AI_ADVICE_RETRY_MS;
 
 export interface AiAdviceRequest {
   date: string;
   mode: ReportMode;
-  /** Шаблонный совет, который заменяем: если к ответу он уже другой — ответ не применяем. */
-  templateId: string;
+  /**
+   * Шаблонный совет, который заменяем; null — в истории на этот отрезок ещё ничего нет (отрезок
+   * сменился между выгрузками). Если к ответу там уже другое — ответ не применяем.
+   */
+  templateId: string | null;
   payload: AdvicePayload;
 }
 
 /**
  * Какой совет попросить у модели. Тот же, что показывает «Сегодня» (`adviceFor`): текущий цикл
- * с итогом и время суток. Совет от модели на этот цикл и время суток уже есть — не просим:
- * текст не должен меняться от синхронизации к синхронизации, и лишние запросы стоят денег.
+ * с итогом и его отрезок — после пробуждения, днём или перед сном (`adviceModeNow`). Совет от модели
+ * на этот цикл и отрезок уже есть — не просим: текст не должен меняться от синхронизации
+ * к синхронизации, и лишние запросы стоят денег. Так за цикл выходит не больше трёх запросов.
  * В демо-режиме к модели не ходим.
  *
  * Модели отдаём всё, кроме имени (решение владельца 26.09): профиль, оценки, таблицу чисел
@@ -56,9 +72,9 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
   if (state.demo) return null;
   const cycle = currentCycle(state);
   if (!cycle || cycle.total === null) return null;
-  const mode = reportMode(now);
-  const stored = state.reports.find((r) => r.date === cycle.date && r.mode === mode);
-  if (!stored || isAiTemplate(stored.templateId)) return null;
+  const mode = adviceModeNow(state, now);
+  const stored = state.reports.find((r) => r.date === cycle.date && r.mode === mode) ?? null;
+  if (stored && isAiTemplate(stored.templateId)) return null;
 
   const today = todayKey(now);
   const rec = recommendationsFor(state, today, now);
@@ -71,7 +87,7 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
   return {
     date: cycle.date,
     mode,
-    templateId: stored.templateId,
+    templateId: stored?.templateId ?? null,
     payload: {
       mode,
       time: coffeeClock(now.getHours() * 60 + now.getMinutes()),
@@ -119,10 +135,14 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
   };
 }
 
-/** Совет от модели вместо шаблонного — только если шаблонный за время запроса не сменился. */
+/**
+ * Совет от модели вместо шаблонного — только если шаблонный за время запроса не сменился
+ * (шаблона не было, а выгрузка успела его записать, — не смена: мнение модели его и заменяет).
+ */
 export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: string): VueloState {
   const stored = state.reports.find((r) => r.date === request.date && r.mode === request.mode);
-  if (!stored || stored.templateId !== request.templateId) return state;
+  const same = stored === undefined || stored.templateId === request.templateId || (request.templateId === null && !isAiTemplate(stored.templateId));
+  if (!same) return state;
   return { ...state, reports: addReport(state.reports, { date: request.date, mode: request.mode, templateId: AI_TEMPLATE_ID, text }) };
 }
 

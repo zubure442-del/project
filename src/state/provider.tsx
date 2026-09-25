@@ -26,12 +26,13 @@ import {
   type Profile,
   type VueloState,
 } from '../storage';
-import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
+import { currentCycle } from './cycle';
+import { CACHE_FRESH_MS, adviceModeNow, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
 import { DEMO_STATUS_TEXT, demoState } from './demo';
 import { loadPlan, loadProgress, recordDurations, runsInBackground, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withOnboarding } from './profile';
 import { settleRelayState } from './relay';
-import { aiAdviceConfig, aiAdviceRequest, fetchAiAdvice, withAiAdvice } from './ai-advice';
+import { AI_ADVICE_SLOT_TEXT, aiAdviceConfig, aiAdviceDue, aiAdviceKey, aiAdviceRequest, fetchAiAdvice, withAiAdvice } from './ai-advice';
 import { applySyncResult, newUserTodayOnly, planDays, rebuildDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -99,6 +100,11 @@ interface Vuelo {
    * карусель ассистента, чтобы она открылась на первой карточке.
    */
   homeRequest: number;
+  /**
+   * Текущий отрезок мнения Лиса («2026-09-25 day»): после пробуждения, днём или перед сном.
+   * Меняется, пока приложение открыто, — «Сегодня» перерисовывает совет под новый отрезок.
+   */
+  adviceSlot: string;
   /** Демо-режим включён: экраны показывают синтетические показатели, посчитанные реальными формулами. */
   demo: boolean;
   /** Включить или выключить демо-режим (меню разработчика). Реальное состояние и хранилище не трогаются. */
@@ -162,25 +168,36 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
-   * «Мнение Лиса» от YandexGPT: после выгрузки, в фоне, ничего не ждёт и ничего не блокирует.
-   * Не вышло (нет сети, посредник не настроен, текст не прошёл проверку) — остаётся шаблонный совет.
-   * Один запрос за раз; совет от модели на цикл и время суток просим один раз (`aiAdviceRequest`).
+   * «Мнение Лиса» от YandexGPT: после выгрузки, при свежем кэше и при смене отрезка (после
+   * пробуждения → днём → перед сном), в фоне, ничего не ждёт и ничего не блокирует.
+   * Не вышло (нет сети, посредник не настроен, текст не прошёл проверку) — остаётся шаблонный совет,
+   * а тот же отрезок спрашиваем снова не раньше чем через 30 минут (`aiAdviceDue`).
+   * Один запрос за раз; совет от модели на цикл и отрезок просим один раз (`aiAdviceRequest`).
    */
   const adviceBusy = useRef(false);
+  const adviceTried = useRef(new Map<string, number>());
   const refineAdvice = useCallback(async () => {
     const config = aiAdviceConfig();
     const request = config ? aiAdviceRequest(latest.current) : null;
     if (!config || !request || adviceBusy.current) return;
+    const key = aiAdviceKey(request);
+    if (!aiAdviceDue(adviceTried.current.get(key))) return;
+    adviceTried.current.set(key, Date.now());
     adviceBusy.current = true;
+    const slot = AI_ADVICE_SLOT_TEXT[request.mode];
     try {
       const result = await fetchAiAdvice(request.payload, config);
       if ('error' in result) {
-        logNote(`мнение Лиса от модели: ${result.error}, остаётся шаблонное`);
+        logNote(`мнение Лиса (${slot}) от модели: ${result.error}, остаётся шаблонное`);
         return;
       }
       const next = withAiAdvice(latest.current, request, result.text);
-      if (next !== latest.current) commit(next);
-      logNote('мнение Лиса от модели получено');
+      if (next === latest.current) {
+        logNote(`мнение Лиса (${slot}) от модели получено, но пока ждали, совет сменился — не применяем`);
+        return;
+      }
+      commit(next);
+      logNote(`мнение Лиса (${slot}) от модели получено`);
     } finally {
       adviceBusy.current = false;
     }
@@ -394,15 +411,27 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   }, [commit, sync]);
 
   // Полночь, пока приложение открыто: дата «сегодня» сменится сама.
+  // Смена отрезка мнения Лиса (после пробуждения → днём → перед сном): «Сегодня» перерисуется,
+  // и для нового отрезка попросим мнение у модели — без похода к кольцу.
+  const [adviceSlot, setAdviceSlot] = useState('');
+  const adviceSlotRef = useRef('');
   useEffect(() => {
     const timer = setInterval(() => {
       const day = todayKey();
       setClockDay((prev) => (prev === day ? prev : day));
       // Демо после полуночи строится заново: у нового «сегодня» тоже есть данные.
       setDemoSession((prev) => (prev && todayKey(new Date(prev.at)) !== day ? { ...prev, at: Date.now() } : prev));
+      const cycle = currentCycle(latest.current);
+      const slot = cycle ? `${cycle.date} ${adviceModeNow(latest.current)}` : '';
+      if (slot === adviceSlotRef.current) return;
+      const changed = adviceSlotRef.current !== '';
+      adviceSlotRef.current = slot;
+      setAdviceSlot(slot);
+      // Первая проверка после запуска не в счёт: там мнение и так просит выгрузка.
+      if (changed && slot && !running.current) void refineAdvice();
     }, CLOCK_CHECK_MS);
     return () => clearInterval(timer);
-  }, []);
+  }, [refineAdvice]);
 
   const setDemo = useCallback((on: boolean) => {
     demoOn.current = on;
@@ -518,10 +547,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       reloadProfile,
       clearData,
       homeRequest,
+      adviceSlot,
       demo: demo !== null,
       setDemo,
     };
-  }, [clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, homeRequest, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
+  }, [adviceSlot, clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, homeRequest, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

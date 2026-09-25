@@ -1,6 +1,7 @@
 import { dateKey, nowRingTs } from '../codec';
 import {
   ADVICE_LABEL,
+  adviceSlot,
   buildTemplateReport,
   coffeeWindow,
   foodCycle,
@@ -27,7 +28,10 @@ export const BATTERY_STALE_MS = 30 * 60 * 1000;
 export const isFresh = (state: VueloState, now = Date.now()) =>
   state.lastSyncAt !== null && !state.syncFailed && now - state.lastSyncAt < CACHE_FRESH_MS;
 
-/** До 11:00 — про ночь, до 18:00 — про текущий день, позже — итог дня. */
+/**
+ * Запасное деление по часам — когда у цикла нет сна и подъёма (совета такому циклу всё равно
+ * не показываем): до 11:00 — утро, до 18:00 — день, позже — вечер.
+ */
 export const reportMode = (now: Date): ReportMode =>
   now.getHours() < 11 ? 'morning' : now.getHours() < 18 ? 'day' : 'evening';
 
@@ -240,9 +244,16 @@ export const scoreOf = (day: DaySnapshot) => ({
   restingHr: day.restingHr === null ? null : { value: day.restingHr, source: day.restingHrSource ?? ('day' as const) },
 });
 
-/** Режим совета для дня: сегодня — по времени суток, прошедший день — «как прошёл день». */
-export const adviceMode = (date: string, now = new Date()): ReportMode =>
-  date === todayKey(now) ? reportMode(now) : 'evening';
+/**
+ * Какое мнение Лиса сейчас у текущего цикла: после пробуждения, днём или перед сном (`adviceSlot`) —
+ * от подъёма этого цикла и окна «Режима сна». Нет сна у цикла — по часам (`reportMode`).
+ */
+export function adviceModeNow(state: VueloState, now = new Date()): ReportMode {
+  const input = coffeeInput(state, now);
+  if (!input) return reportMode(now);
+  const bedtime = sleepModeFor(state, now)?.from ?? null;
+  return adviceSlot({ wakeMinute: input.wakeMinute, bedtimeMinute: bedtime, nowMinute: input.nowMinute });
+}
 
 /** Оценки цикла в виде, который понимает генератор советов. */
 export const cycleScoreOf = (cycle: CycleSnapshot) => ({
@@ -255,13 +266,14 @@ export const cycleScoreOf = (cycle: CycleSnapshot) => ({
 
 /**
  * Совет — по текущему циклу и только когда у него есть итог: по неполному данных не хватает,
- * и совет вышел бы случайным. Уже выданный совет берём из истории (ключ — дата начала цикла
- * и режим), чтобы при перезапуске текст не менялся.
+ * и совет вышел бы случайным. Три совета за цикл — после пробуждения, днём и перед сном
+ * (`adviceModeNow`). Уже выданный совет берём из истории (ключ — дата начала цикла и режим),
+ * чтобы при перезапуске текст не менялся.
  */
 export function adviceFor(state: VueloState, now = new Date()): Report | null {
   const cycle = currentCycle(state);
   if (!cycle || cycle.total === null) return null;
-  const mode = reportMode(now);
+  const mode = adviceModeNow(state, now);
   const stored = state.reports.find((r) => r.date === cycle.date && r.mode === mode);
   if (stored) return { text: stored.text, focus: null, templateId: stored.templateId };
   return buildTemplateReport({ mode, score: cycleScoreOf(cycle), recentTemplateIds: recentTemplateIds(state.reports) });

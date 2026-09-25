@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { AI_TEMPLATE_ID } from '../domain';
 import { EMPTY_STATE, type VueloState } from '../storage';
 import { emptySyncResult } from '../ble/sync';
-import { aiAdviceRequest, fetchAiAdvice, withAiAdvice } from './ai-advice';
+import { AI_ADVICE_RETRY_MS, aiAdviceDue, aiAdviceKey, aiAdviceRequest, fetchAiAdvice, withAiAdvice } from './ai-advice';
 import { currentCycle } from './cycle';
-import { reportMode } from './day';
+import { adviceFor, adviceModeNow, coffeeInput } from './day';
+import { sleepModeFor } from './sleep-mode';
 import { demoState } from './demo';
 import { applySyncResult } from './sync-plan';
 
@@ -22,8 +23,19 @@ function stateWithTemplate(): VueloState {
     profile: { name: 'Анна', sex: 'male', heightCm: 180, weightKg: 82, birthYear: 1990, goal: 'lose' },
     reports: [
       { date: '2026-09-24', mode: 'evening', templateId: 'e-good-1', text: 'День получился сбалансированным.' },
-      { date: cycle.date, mode: reportMode(NOW), templateId: 'd-act-mid-1', text: 'Шаги пока набираются.' },
+      { date: cycle.date, mode: adviceModeNow(built, NOW), templateId: 'd-act-mid-1', text: 'Шаги пока набираются.' },
     ],
+  };
+}
+
+/** Подъём текущего цикла и начало окна сна — минуты от полуночи даты цикла; `when` — время по этим минутам. */
+function rhythm(state: VueloState, now = NOW) {
+  const cycle = currentCycle(state)!;
+  const [y, m, d] = cycle.date.split('-').map(Number);
+  return {
+    when: (minute: number) => new Date(y, m - 1, d, 0, minute),
+    wake: coffeeInput(state, now)!.wakeMinute,
+    bed: sleepModeFor(state, now)!.from,
   };
 }
 
@@ -81,6 +93,50 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
       reports: state.reports.map((r) => (r.templateId === 'd-act-mid-1' ? { ...r, templateId: 'd-act-low-1' } : r)),
     };
     expect(withAiAdvice(changed, request, 'Сегодня хороший день для прогулки после обеда.')).toBe(changed);
+  });
+
+  it('три отрезка за цикл — по подъёму этого цикла и окну «Режима сна», а не по часам', () => {
+    const state = stateWithTemplate();
+    const { when, wake, bed } = rhythm(state);
+    expect(wake + 300).toBeLessThan(bed - 180);
+    expect(adviceModeNow(state, when(wake + 30))).toBe('morning');
+    expect(adviceModeNow(state, when(wake + 300))).toBe('day');
+    expect(adviceModeNow(state, when(bed - 60))).toBe('evening');
+  });
+
+  it('отрезок сменился между выгрузками: шаблона в истории ещё нет — мнение всё равно просим и записываем', () => {
+    const state = stateWithTemplate();
+    const { when, bed } = rhythm(state);
+    const evening = when(bed - 60);
+    const request = aiAdviceRequest(state, evening)!;
+    expect([request.mode, request.templateId]).toEqual(['evening', null]);
+    const next = withAiAdvice(state, request, 'Похоже, день вышел долгим. Сегодня лягте в окно Vuelo.');
+    const stored = next.reports.find((r) => r.date === request.date && r.mode === 'evening')!;
+    expect(stored.templateId).toBe(AI_TEMPLATE_ID);
+    expect(adviceFor(next, evening)?.text).toBe('Похоже, день вышел долгим. Сегодня лягте в окно Vuelo.');
+    // Пока ждали ответа, выгрузка записала на вечер шаблон — мнение модели всё равно его заменяет.
+    const withTemplate = { ...state, reports: [...state.reports, { date: request.date, mode: 'evening' as const, templateId: 'e-good-1', text: 'Шаблон.' }] };
+    expect(withAiAdvice(withTemplate, request, 'Похоже, день вышел долгим. Сегодня лягте в окно Vuelo.')).not.toBe(withTemplate);
+    // Дневное мнение осталось своим, на вечер больше не просим.
+    expect(next.reports.find((r) => r.date === request.date && r.mode === 'day')?.templateId).toBe('d-act-mid-1');
+    expect(aiAdviceRequest(next, evening)).toBeNull();
+  });
+
+  it('выгрузка пишет шаблон своего отрезка: в 18:30 до окна сна ещё далеко — «днём», а не «вечер» по часам', () => {
+    const evening = new Date(2026, 8, 25, 18, 30);
+    const built: VueloState = { ...demoState(EMPTY_STATE, 7, evening), demo: undefined, reports: [] };
+    const { bed } = rhythm(built, evening);
+    expect(bed - 180).toBeGreaterThan(18 * 60 + 30);
+    const after = applySyncResult(built, emptySyncResult(), null, evening);
+    const cycle = currentCycle(after)!;
+    expect(after.reports.filter((r) => r.date === cycle.date).map((r) => r.mode)).toEqual(['day']);
+  });
+
+  it('неудачный запрос на тот же отрезок повторяем не раньше чем через 30 минут', () => {
+    expect(aiAdviceKey({ date: '2026-09-25', mode: 'evening' })).toBe('2026-09-25 evening');
+    expect(aiAdviceDue(undefined, 0)).toBe(true);
+    expect(aiAdviceDue(0, AI_ADVICE_RETRY_MS - 1)).toBe(false);
+    expect(aiAdviceDue(0, AI_ADVICE_RETRY_MS)).toBe(true);
   });
 
   it('ответ посредника: хороший текст — берём; ошибка, пустой ответ, запретный текст, нет сети — шаблон', async () => {

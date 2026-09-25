@@ -17,7 +17,7 @@ import {
   type RawByDay,
   type VueloState,
 } from '../storage';
-import { DAY_START_HOUR, cycleScoreOf, isCompleteDay, reportMode, todayKey } from './day';
+import { DAY_START_HOUR, adviceModeNow, cycleScoreOf, isCompleteDay, todayKey } from './day';
 import { settleRelayState } from './relay';
 
 /** Глубина выгрузки: кольцо хранит неделю. */
@@ -190,7 +190,7 @@ export function applySyncResult(
       lastSyncAt: now.getTime(),
       syncFailed: false,
       syncedAt: markSynced(state.syncedAt, sync.completeDays, now, (date) => nightAfterArrived(date, raw)),
-      reports: withAdvice(state.reports, rebuilt.cycles, now),
+      reports: withAdvice(state.reports, rebuilt, now),
     },
     now,
   );
@@ -202,10 +202,11 @@ export function applySyncResult(
  * на тот же цикл и режим: пока слабая сторона та же, текст не прыгает от синхронизации к синхронизации.
  * Совет от модели (`state/ai-advice.ts`) на тот же цикл и режим не заменяется.
  */
-function withAdvice(reports: VueloState['reports'], cycles: VueloState['cycles'], now: Date): VueloState['reports'] {
-  const cycle = [...cycles].reverse().find((c) => c.total !== null);
+function withAdvice(reports: VueloState['reports'], rebuilt: VueloState, now: Date): VueloState['reports'] {
+  const cycle = [...rebuilt.cycles].reverse().find((c) => c.total !== null);
   if (!cycle) return reports;
-  const mode = cycle.end === null ? reportMode(now) : 'evening';
+  // Текущий цикл — по ритму человека (после пробуждения / днём / перед сном), закончившийся — вечерний.
+  const mode = cycle.end === null ? adviceModeNow(rebuilt, now) : 'evening';
   // Совет от модели на этот цикл и время суток уже есть — шаблоном его не затираем.
   if (reports.some((r) => r.date === cycle.date && r.mode === mode && isAiTemplate(r.templateId))) return reports;
   const others = reports.filter((r) => !(r.date === cycle.date && r.mode === mode));

@@ -43,36 +43,34 @@ afterEach(() => {
 });
 
 describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнения Лиса»', () => {
-  it('запрос приложения проходит проверку; модели уходит сырой JSON рядов без выводов и связок', () => {
+  it('запрос приложения проходит проверку; модели уходит текущее время, сырые ряды и уже данные советы', () => {
     const payload = appPayload();
     expect(fn.validate(payload)).toBeNull();
     const input = fn.modelInput(payload);
-    expect(Object.keys(input)).toEqual(['now', 'person', 'days', 'today_by_hour', 'previous_opinions', 'previously_suggested_actions']);
-    expect(input.person).toEqual({ sex: 'женщина', age: 32, height_cm: 168, weight_kg: 60, goal: 'поддерживать форму' });
+    expect(Object.keys(input)).toEqual(['current_time', 'person', 'days', 'today_by_hour', 'previously_suggested_actions']);
+    expect(input.current_time).toBe('15:00');
+    expect(input.person).toEqual({ sex: 'женщина', age: 32, goal: 'поддерживать форму' });
     expect(Object.keys(input.days[0])).toEqual([
-      'ago', 'asleep', 'awake', 'sleep_min', 'deep_min', 'night_pulse', 'hrv_ms', 'resting_pulse', 'spo2', 'day_stress',
-      'steps', 'step_norm', 'active_kcal', 'training_load', 'workout', 'meal_times',
+      'ago', 'asleep', 'awake', 'sleep_min', 'deep_min', 'night_pulse', 'hrv_ms', 'day_stress', 'steps', 'step_norm', 'workout', 'meal_times',
     ]);
-    // Дни по порядку: от старых к сегодня; сегодняшний стресс по часам тоже уходит.
     expect(input.days.map((d) => d.ago)).toEqual([...input.days.map((d) => d.ago)].sort((a, b) => b - a));
     expect(input.today_by_hour.stress).toHaveLength(input.today_by_hour.steps.length);
     expect(JSON.stringify(input)).not.toMatch(/Анна|давлен|glucose|systolic/);
   });
 
-  it('системный запрос: только ход рассуждения — без связок «показатель → действие» и без примеров', () => {
+  it('системный запрос: короткий ответ, «офисная нормальность», время суток, стоп-лист', () => {
     const prompt = fn.SYSTEM_PROMPT;
+    expect(prompt).toContain('current_time');
+    expect(prompt).toContain('не длиннее 130 символов (до 20 слов), ровно два коротких предложения');
+    expect(prompt).toContain('простое действие на 30 секунд, которое можно сделать сидя за столом, в транспорте или на ходу');
+    expect(prompt).toContain('до 12:00 — мягкий разгон дня');
+    expect(prompt).toContain('с 12:00 до 20:00 — удержать фокус, разгрузить шею и глаза, снять фоновый зажим. Ночной сон и прошлую ночь не упоминай');
+    expect(prompt).toContain('с 20:00 и ночью — подготовка к отдыху: приглушить свет, убрать яркие экраны');
+    expect(prompt).toContain('дыхательные упражнения любого вида');
     expect(prompt).toContain('previously_suggested_actions');
-    expect(prompt).toContain('расхождения между рядами');
-    expect(prompt).toContain('зайди через другой физиологический рычаг');
-    expect(prompt).toContain('проприоцепцию, сенсорные триггеры, чередование фаз напряжения и расслабления, положение и опору тела, температурный режим');
-    expect(prompt).toContain('капитанские бытовые советы: погулять, пройтись, отдохнуть, выпить воды, подышать');
-    expect(prompt).toContain('Ответ — ровно два предложения');
-    // Ни примеров ответа, ни готовых связок.
-    expect(prompt).not.toMatch(/Пример|Например|например|Лис: |→/);
-    expect(prompt).not.toMatch(/если [а-яё ]*(выше|ниже|упал|вырос)/i);
   });
 
-  it('прежние мнения и уже предложенные действия — из недели приложения или, у старых сборок, из recent', async () => {
+  it('прежние советы — из недели приложения или, у старых сборок, из recent', async () => {
     const sample = await readSample();
     expect(fn.modelInput(sample).previously_suggested_actions).toEqual([
       'Лягте между 23:00 и 23:30, ночь пройдёт спокойнее.',
@@ -81,31 +79,28 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const week = {
       ...sample,
       past_opinions: [
-        { ago: 0, slot: 'morning', text: 'Похоже, тело ещё держит вчерашний тонус. Сожмите кулаки на пять секунд и резко отпустите три раза.' },
-        { ago: 2, slot: 'evening', text: 'Кажется, вечер не отпускает плечи. Прижмите лопатки к спинке стула и медленно отпустите.' },
+        { ago: 0, slot: 'morning', text: 'Утро идёт туговато. Выпейте стакан прохладной воды.' },
+        { ago: 2, slot: 'evening', text: 'Плечи весь день у ушей. Опустите их вниз и задержите.' },
       ],
     };
     expect(fn.validate(week)).toBeNull();
-    const input = fn.modelInput(week);
-    expect(input.previous_opinions[1]).toEqual({ when: '2 дн. назад вечером', text: week.past_opinions[1].text });
-    expect(input.previously_suggested_actions).toEqual([
-      'Сожмите кулаки на пять секунд и резко отпустите три раза.',
-      'Прижмите лопатки к спинке стула и медленно отпустите.',
-    ]);
+    expect(fn.modelInput(week).previously_suggested_actions).toEqual(['Выпейте стакан прохладной воды.', 'Опустите их вниз и задержите.']);
     expect(fn.validate({ ...sample, past_opinions: [{ ago: 1, slot: 'night', text: 'x' }] })).toBe('past_opinions');
   });
 
-  it('ответ: ровно два предложения, в первом без цифр, без банальностей, запретных слов и повторов', () => {
-    const good = 'Похоже, напряжение с обеда осело в мышцах шеи, а тело так и не получило сигнала к разрядке. Упритесь ладонями в край стола, пять секунд давите изо всех сил, затем резко отпустите.';
+  it('ответ: до 140 символов, два предложения, без дыхания, эзотерики, зауми, ночи днём и повторов', () => {
+    const good = 'После обеда вы почти не вставали, шея устала. Опустите плечи вниз и посмотрите вдаль в окно.';
+    expect(good.length).toBeLessThanOrEqual(140);
     expect(fn.answerProblem(good)).toBeNull();
-    expect(fn.answerProblem('Похоже, день тяжёлый. Прогуляйтесь десять минут на свежем воздухе.')).toBe('banal');
-    expect(fn.answerProblem('Кажется, вы устали за день и тело просит паузы. Отдохните немного и выпейте воды.')).toBe('banal');
-    expect(fn.answerProblem('Похоже, тело перегрелось за день и не может остыть. Подышите глубоко пару минут.')).toBe('banal');
-    expect(fn.answerProblem('Похоже, стресс вырос на 20 пунктов. Упритесь ладонями в стол и резко отпустите.')).toBe('numbers');
-    expect(fn.answerProblem('Похоже, сахар скачет после еды весь день. Упритесь ладонями в стол и резко отпустите.')).toBe('forbidden');
-    expect(fn.answerProblem('Похоже, тело зажато. Упритесь ладонями в стол. Потом резко отпустите руки.')).toBe('sentences');
-    expect(fn.answerProblem(good, ['Упритесь ладонями в край стола на пять секунд и резко отпустите.'])).toBe('repeat');
-    expect(fn.answerProblem(good, ['Прижмите лопатки к спинке стула и медленно отпустите.'])).toBeNull();
+    expect(fn.answerProblem('Шея устала. ' + 'Опустите плечи вниз и посмотрите вдаль в окно, а потом ещё раз медленно и спокойно поверните голову в обе стороны до самого конца и обратно, не торопясь.')).toBe('long');
+    expect(fn.answerProblem('Кажется, фокус уплывает. Сделайте пять глубоких вдохов.')).toBe('breathing');
+    expect(fn.answerProblem('Кажется, фокус уплывает. Помассируйте акупунктурные точки на стопах.')).toBe('esoteric');
+    expect(fn.answerProblem('Похоже на нестабильность режима. Опустите плечи вниз.')).toBe('jargon');
+    expect(fn.answerProblem('Ночью сон был коротким. Опустите плечи вниз.', [], '17:00')).toBe('time');
+    expect(fn.answerProblem('Ночью сон был коротким. Опустите плечи вниз.', [], '08:30')).toBeNull();
+    expect(fn.answerProblem('Шея устала за 3 часа. Опустите плечи вниз.')).toBe('numbers');
+    expect(fn.answerProblem('Шея устала. Опустите плечи. Посмотрите в окно.')).toBe('sentences');
+    expect(fn.answerProblem(good, ['Опустите плечи вниз и посмотрите в окно вдаль.'])).toBe('repeat');
     expect(fn.cleanAnswer('Лис: «' + good + '»')).toBe(good);
   });
 
@@ -128,7 +123,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     vi.stubEnv('APP_KEY', 'secret');
     vi.stubEnv('FOLDER_ID', 'b1gfolder');
     const calls = [];
-    const text = 'Похоже, после обеда тело держит скрытое напряжение, а движения не хватает, чтобы его сбросить. Встаньте, перенесите вес на пятки и десять раз медленно поднимитесь на носки.';
+    const text = 'После обеда вы почти не вставали, шея устала. Опустите плечи вниз и посмотрите вдаль в окно.';
     vi.stubGlobal('fetch', async (url, init) => {
       calls.push({ url, init });
       return modelAnswer(text);
@@ -151,9 +146,9 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     vi.stubEnv('APP_KEY', 'secret');
     vi.stubEnv('FOLDER_ID', 'b1gfolder');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const good = 'Похоже, напряжение с обеда осело в мышцах шеи, а тело так и не получило сигнала к разрядке. Упритесь ладонями в край стола, пять секунд давите изо всех сил, затем резко отпустите.';
+    const good = 'После обеда вы почти не вставали, шея устала. Опустите плечи вниз и посмотрите вдаль в окно.';
     const bodies = [];
-    let answers = ['Похоже, день тяжёлый. Прогуляйтесь десять минут.', good];
+    let answers = ['Кажется, фокус уплывает. Сделайте пять глубоких вдохов.', good];
     vi.stubGlobal('fetch', async (url, init) => {
       bodies.push(JSON.parse(init.body));
       return modelAnswer(answers.shift());
@@ -161,11 +156,11 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const res = await fn.handler(event(await readSample()), context);
     expect(JSON.parse(res.body).text).toBe(good);
     expect(bodies[1].messages.slice(-2)).toEqual([
-      { role: 'assistant', text: 'Похоже, день тяжёлый. Прогуляйтесь десять минут.' },
-      { role: 'user', text: 'Ответ не подходит: совет банальный — нужен прикладной микро-приём из физиологии, нейробиологии или эргономики. Напиши заново по правилам — ровно два предложения.' },
+      { role: 'assistant', text: 'Кажется, фокус уплывает. Сделайте пять глубоких вдохов.' },
+      { role: 'user', text: 'Ответ не подходит: дыхательные упражнения запрещены — предложи другое простое действие. Напиши заново по правилам — два коротких предложения, до 130 символов.' },
     ]);
 
-    answers = ['Отдохните.', 'Попейте воды и отдохните.'];
+    answers = ['Отдохните.', 'Подышите.'];
     const again = await fn.handler(event(await readSample()), context);
     expect(again.statusCode).toBe(502);
   });

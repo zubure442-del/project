@@ -2,16 +2,23 @@ import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
-import Svg, { Circle, Defs, LinearGradient, RadialGradient, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, G, LinearGradient, RadialGradient, Stop } from 'react-native-svg';
 import { colors } from './theme';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 /** Заполнение дуги и счёт числа вверх. */
 export const HERO_FILL_MS = 800;
+/** Запас после анимации, потом дуга рисуется обычными свойствами. */
+const HERO_SETTLE_MS = 100;
 
 /**
  * Крупное кольцо-герой: градиентная дуга со свечением на конце и число внутри.
- * При смене дня дуга доезжает от прошлого значения к новому, число считает вверх.
+ * При смене значения дуга доезжает от прошлого к новому, число считает вверх.
+ *
+ * Анимация — только украшение. Если данные пришли, пока вкладка была скрыта, кадры анимации
+ * до дуги иногда не доходили, и кольцо оставалось пустым с числом внутри (скриншот владельца 26.09).
+ * Поэтому анимированная дуга видна только на время анимации, а потом её сменяет обычная дуга,
+ * нарисованная React по конечному значению: она не зависит от того, дошли ли кадры.
  */
 export function HeroRing({
   value,
@@ -35,9 +42,14 @@ export function HeroRing({
   const filled = useSharedValue(0);
   const [shown, setShown] = useState(value ?? 0);
   const previous = useRef<number | null>(null);
+  /** Значение, до которого анимация уже должна была доехать; пока оно не равно цели — анимируем. */
+  const [settled, setSettled] = useState<number | null>(null);
+  const animating = settled !== target;
 
   useEffect(() => {
     filled.value = withTiming(target, { duration: HERO_FILL_MS, easing: Easing.out(Easing.cubic) });
+    const done = setTimeout(() => setSettled(target), HERO_FILL_MS + HERO_SETTLE_MS);
+    return () => clearTimeout(done);
   }, [filled, target]);
 
   // Число считаем вверх в JS: цифра меняется десяток раз, на плавность это не влияет.
@@ -67,6 +79,8 @@ export function HeroRing({
     const angle = (-90 + 360 * filled.value) * (Math.PI / 180);
     return { cx: cx + r * Math.cos(angle), cy: cx + r * Math.sin(angle), opacity: filled.value > 0 ? 1 : 0 };
   });
+  const tipAngle = (-90 + 360 * target) * (Math.PI / 180);
+  const tip = { x: cx + r * Math.cos(tipAngle), y: cx + r * Math.sin(tipAngle) };
 
   return (
     <View style={{ width: size, height: size }}>
@@ -92,18 +106,38 @@ export function HeroRing({
           strokeDasharray={collecting ? '6 8' : undefined}
           strokeLinecap={collecting ? 'round' : undefined}
         />
-        <AnimatedCircle
-          cx={cx}
-          cy={cx}
-          r={r}
-          stroke="url(#hero-arc)"
-          strokeWidth={thickness}
-          strokeLinecap="round"
-          fill="none"
-          transform={`rotate(-90 ${cx} ${cx})`}
-          animatedProps={arcProps}
-        />
-        <AnimatedCircle r={thickness * 2.4} fill="url(#hero-glow)" animatedProps={tipProps} />
+        {/* Во время анимации — анимированная дуга. */}
+        <G opacity={animating ? 1 : 0}>
+          <AnimatedCircle
+            cx={cx}
+            cy={cx}
+            r={r}
+            stroke="url(#hero-arc)"
+            strokeWidth={thickness}
+            strokeLinecap="round"
+            fill="none"
+            transform={`rotate(-90 ${cx} ${cx})`}
+            animatedProps={arcProps}
+          />
+          <AnimatedCircle r={thickness * 2.4} fill="url(#hero-glow)" animatedProps={tipProps} />
+        </G>
+        {/* После — та же дуга по конечному значению; при нуле дуги нет (иначе круглый край рисует точку). */}
+        {!animating && target > 0 ? (
+          <G>
+            <Circle
+              cx={cx}
+              cy={cx}
+              r={r}
+              stroke="url(#hero-arc)"
+              strokeWidth={thickness}
+              strokeLinecap="round"
+              fill="none"
+              strokeDasharray={`${circumference * target} ${circumference}`}
+              transform={`rotate(-90 ${cx} ${cx})`}
+            />
+            <Circle cx={tip.x} cy={tip.y} r={thickness * 2.4} fill="url(#hero-glow)" />
+          </G>
+        ) : null}
       </Svg>
       <View style={styles.center} pointerEvents="none">
         {collecting ? (

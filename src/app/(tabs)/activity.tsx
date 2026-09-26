@@ -2,6 +2,7 @@ import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import {
   TAB_INFO,
   bodyOf,
+  busiestCycleHour,
   busiestHour,
   distanceMeters,
   formatCount,
@@ -37,8 +38,12 @@ export default function ActivityTab() {
   const cycle = isToday ? today?.cycle ?? null : null;
   const chart = cycle?.chart ?? null;
   const age = profileAge(state.profile);
-  const hours = day?.stepsByHour ?? [];
-  const best = day ? busiestHour(hours, day.heart.map((p) => ({ m: p.m, v: p.v })), age) : null;
+  // Самый активный час — по тем же рядам, что на графике: сегодня вдоль цикла, прошлые дни — по суткам.
+  const best = chart
+    ? busiestCycleHour(chart.steps, chart.heart, age, chart.from, chart.to)
+    : day
+      ? busiestHour(day.stepsByHour, day.heart, age)
+      : null;
   const chartWidth = width - spacing.md * 4;
   // Калории считаем сами для любого дня; нет биометрии — «—».
   const calories = day?.calories ?? null;

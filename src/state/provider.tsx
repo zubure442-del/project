@@ -126,6 +126,8 @@ interface Vuelo {
   demo: boolean;
   /** Включить или выключить демо-режим (меню разработчика). Реальное состояние и хранилище не трогаются. */
   setDemo: (on: boolean) => void;
+  /** Меню разработчика: новое мнение Лиса на текущий отрезок поверх прежнего. Возвращает, что вышло. */
+  regenerateAdvice: () => Promise<string>;
 }
 
 const Context = createContext<Vuelo | null>(null);
@@ -189,12 +191,15 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   // То же для экрана: идёт ли запрос и когда пробовали — от этого зависит «Лис смотрит…».
   const [adviceRequesting, setAdviceRequesting] = useState<ReportMode | null>(null);
   const [adviceTriedAt, setAdviceTriedAt] = useState<Record<string, number>>({});
-  const refineAdvice = useCallback(async () => {
+  const refineAdvice = useCallback(async (force = false): Promise<string> => {
     const config = aiAdviceConfig();
-    const request = config ? aiAdviceRequest(latest.current) : null;
-    if (!config || !request || adviceBusy.current) return;
+    if (!config) return 'ИИ не настроен (нет .env)';
+    if (latest.current.demo) return 'В демо-режиме к модели не ходим';
+    if (adviceBusy.current) return 'Лис уже думает';
+    const request = aiAdviceRequest(latest.current, new Date(), force);
+    if (!request) return force ? 'Нет цикла с итогом — совет не для чего' : 'Мнение на этот отрезок уже есть';
     const key = aiAdviceKey(request);
-    if (!aiAdviceDue(adviceTried.current.get(key))) return;
+    if (!force && !aiAdviceDue(adviceTried.current.get(key))) return 'Недавно пробовали';
     const triedAt = Date.now();
     adviceTried.current.set(key, triedAt);
     setAdviceTriedAt((prev) => ({ ...prev, [key]: triedAt }));
@@ -205,15 +210,16 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       const result = await fetchAiAdvice(request.payload, config);
       if ('error' in result) {
         logNote(`мнение Лиса (${slot}) от модели: ${result.error}, остаётся шаблонное`);
-        return;
+        return `Не вышло: ${result.error}`;
       }
       const next = withAiAdvice(latest.current, request, result.text, result.about ?? null);
       if (next === latest.current) {
         logNote(`мнение Лиса (${slot}) от модели получено, но пока ждали, совет сменился — не применяем`);
-        return;
+        return 'Пока ждали, совет сменился — не применили';
       }
       commit(next);
-      logNote(`мнение Лиса (${slot}) от модели получено`);
+      logNote(`мнение Лиса (${slot}) от модели получено${force ? ' (по кнопке)' : ''}`);
+      return `Новое мнение (${slot}) — на главном экране`;
     } finally {
       adviceBusy.current = false;
       setAdviceRequesting(null);
@@ -602,8 +608,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       foxThinking: thinking ? FOX_THINKING_TEXT[thinking] : null,
       demo: demo !== null,
       setDemo,
+      regenerateAdvice: () => refineAdvice(true),
     };
-  }, [adviceRequesting, adviceSlot, adviceTriedAt, clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, homeRequest, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
+  }, [adviceRequesting, adviceSlot, adviceTriedAt, clearData, refineAdvice, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, homeRequest, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

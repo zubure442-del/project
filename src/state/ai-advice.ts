@@ -65,13 +65,15 @@ export interface AiAdviceRequest {
 export function aiAdviceTarget(
   state: VueloState,
   now = new Date(),
+  force = false,
 ): { date: string; mode: ReportMode; stored: StoredReport | null } | null {
   if (state.demo) return null;
   const cycle = currentCycle(state);
   if (!cycle || cycle.total === null) return null;
   const mode = adviceModeNow(state, now);
   const stored = state.reports.find((r) => r.date === cycle.date && r.mode === mode) ?? null;
-  return stored && isAiTemplate(stored.templateId) ? null : { date: cycle.date, mode, stored };
+  // `force` — меню разработчика: новое мнение на тот же отрезок поверх уже полученного.
+  return stored && isAiTemplate(stored.templateId) && !force ? null : { date: cycle.date, mode, stored };
 }
 
 const SLOT_ORDER: Record<ReportMode, number> = { morning: 0, day: 1, evening: 2 };
@@ -162,8 +164,8 @@ export function foxThinking(input: {
  * (`server/advice`) сравнивает числа с личной нормой, что главное и почему — решает модель.
  * Значений глюкозы и давления не отдаём — только время подъёмов глюкозы (обычно это еда).
  */
-export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRequest | null {
-  const target = aiAdviceTarget(state, now);
+export function aiAdviceRequest(state: VueloState, now = new Date(), force = false): AiAdviceRequest | null {
+  const target = aiAdviceTarget(state, now, force);
   const cycle = currentCycle(state);
   if (!target || !cycle) return null;
   const { mode, stored } = target;

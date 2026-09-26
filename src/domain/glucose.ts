@@ -1,6 +1,7 @@
 import { dateKey } from '../codec';
 import { loadIntervals } from './charts';
 import { median } from './food';
+import { SLEEP_SESSION_GAP } from './sleep';
 import { HR_ZONE_BOUNDS, SESSION_MIN_ZONE, pulseAtShare } from './training';
 
 /**
@@ -99,7 +100,8 @@ export function dropGlucoseSpikes<T extends { ts: number; glucose: number | null
 /**
  * Подъём глюкозы не от еды (решение владельца 26.09): «Цикл питания» (колба) и время еды для
  * «Мнения Лиса» ищут приёмы пищи по подъёмам глюкозы, но глюкоза поднимается и без еды:
- * - во сне — часто перед пробуждением: человек спит и не ест;
+ * - во сне — часто перед пробуждением: человек спит и не ест. Кроме первых двух часов сна:
+ *   поел и сразу уснул — подъём от еды, колба честно покажет «Переработку»;
  * - на интенсивной нагрузке — вместе с пульсом.
  * Такой подъём не сбрасывает отсчёт колбы и не считается приёмом пищи. Замер остаётся на графике
  * и в остальных расчётах: это не выброс кольца, а настоящий уровень.
@@ -144,7 +146,29 @@ export function intenseSpans(
   return [...episodes, ...hot];
 }
 
-/** Где подъём глюкозы — не еда: отрезки сна и интенсивной нагрузки на одной оси минут. */
+/**
+ * Поел и сразу уснул — первые часы сна глюкоза ещё от еды: подъём в начале сна считаем едой.
+ * Два часа — столько подъём после еды держится, прежде чем пойти вниз (как у соседей выброса,
+ * `GLUCOSE_NEIGHBOR_GAP_MIN`). Позже во сне человек не ест: подъём (часто перед пробуждением) — не еда.
+ */
+export const GLUCOSE_SLEEP_DIGEST_MIN = GLUCOSE_NEIGHBOR_GAP_MIN;
+
+/**
+ * Сессии сна из отрезков гипнограммы: отрезки с разрывом до двух часов — одна ночь, как в `buildSleepSessions`.
+ * Начало сессии — момент засыпания: от него считается `GLUCOSE_SLEEP_DIGEST_MIN`.
+ */
+export function sleepSpans(segments: readonly Span[]): Span[] {
+  const sorted = [...segments].sort((a, b) => a.from - b.from);
+  const out: Span[] = [];
+  for (const s of sorted) {
+    const last = out[out.length - 1];
+    if (last && s.from - last.to <= SLEEP_SESSION_GAP / 60) last.to = Math.max(last.to, s.to);
+    else out.push({ from: s.from, to: s.to });
+  }
+  return out;
+}
+
+/** Где подъём глюкозы — не еда: сессии сна (`sleepSpans`) и отрезки интенсивной нагрузки на одной оси минут. */
 export interface NotMealContext {
   sleep: readonly Span[];
   exercise: readonly Span[];
@@ -152,7 +176,7 @@ export interface NotMealContext {
 
 /** Почему высокий замер в минуту `m` не еда; null — мог быть едой. */
 export function notMealAt(m: number, ctx: NotMealContext): NotMealReason | null {
-  if (ctx.sleep.some((s) => m >= s.from && m <= s.to)) return 'sleep';
+  if (ctx.sleep.some((s) => m > s.from + GLUCOSE_SLEEP_DIGEST_MIN && m <= s.to)) return 'sleep';
   if (ctx.exercise.some((e) => m >= e.from - GLUCOSE_EXERCISE_BEFORE_MIN && m <= e.to + GLUCOSE_EXERCISE_AFTER_MIN)) {
     return 'exercise';
   }

@@ -6,6 +6,7 @@ import {
   intenseSpans,
   markNotMeal,
   notMealAt,
+  sleepSpans,
   type NotMealContext,
 } from './glucose';
 import { pulseAtShare } from './training';
@@ -64,6 +65,31 @@ describe('СИНТЕТИЧЕСКИЕ: подъём глюкозы не от ед
     expect(without?.stage).toBe('processing');
     expect(withSleep?.stage).toBe('fat');
     expect(withSleep?.hours).toBeCloseTo((450 + 240) / 60);
+  });
+
+  it('колба: поел и сразу уснул — первые два часа сна подъём от еды, колба честно в «Переработке»', () => {
+    // Ужин в 13:00 давно переработан; в 23:00 перекус, в 23:10 уснул, замеры уже во сне высокие.
+    const points = [
+      { m: 780, v: 7 },
+      { m: 840, v: 5 },
+      { m: 1350, v: 5 }, // 22:30, ещё не спит
+      { m: 1410, v: 7.2 }, // 23:30, спит 20 минут
+      { m: 1470, v: 6.8 }, // 00:30, спит 80 минут
+    ];
+    const ctx: NotMealContext = { sleep: sleepSpans([{ from: 1390, to: 1500 }]), exercise: [] };
+    const flask = flaskState({ points, nowMinute: 1480, stats: STATS, calories: null, notMeal: ctx });
+    expect([flask?.stage, flask?.fill]).toEqual(['processing', 0]);
+    // А тот же подъём через три часа сна — уже не еда.
+    const late = [...points.slice(0, 3), { m: 1600, v: 7.2 }];
+    const lateCtx: NotMealContext = { sleep: sleepSpans([{ from: 1390, to: 1700 }]), exercise: [] };
+    expect(flaskState({ points: late, nowMinute: 1610, stats: STATS, calories: null, notMeal: lateCtx })?.stage).toBe('fat');
+  });
+
+  it('сессии сна: отрезки гипнограммы с разрывом до двух часов — одна ночь', () => {
+    expect(sleepSpans([{ from: 100, to: 200 }, { from: -60, to: 100 }, { from: 250, to: 400 }, { from: 600, to: 700 }])).toEqual([
+      { from: -60, to: 400 },
+      { from: 600, to: 700 },
+    ]);
   });
 
   it('колба: подъём на тренировке не «еда», а еда после тренировки — да', () => {

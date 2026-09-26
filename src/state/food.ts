@@ -5,6 +5,7 @@ import {
   flaskStats,
   intenseSpans,
   median,
+  sleepSpans,
   nightGlucose,
   type FoodInput,
   type GlucosePoint,
@@ -35,7 +36,7 @@ export function notMealOf(day: DaySnapshot | null, age: number | null, shift = 0
   if (!day) return { sleep: [], exercise: [] };
   const move = (s: { from: number; to: number }) => ({ from: s.from + shift, to: s.to + shift });
   return {
-    sleep: day.sleepSegments.map(move),
+    sleep: sleepSpans(day.sleepSegments).map(move),
     exercise: intenseSpans(day.heart, day.stepsByMinute, age, day.restingHr).map(move),
   };
 }

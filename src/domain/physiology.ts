@@ -21,7 +21,7 @@ import type { ReportMode } from './report';
  * и диагнозов. Значения давления и сахара не называются — только «выше обычного», «скачет».
  */
 
-export type BodyState = 'idle' | 'tense-still' | 'saving' | 'still' | 'moving' | 'fade' | 'tense' | 'pressure-up' | 'steady';
+export type BodyState = 'idle' | 'tense-still' | 'saving' | 'still' | 'moving' | 'exertion' | 'fade' | 'tense' | 'pressure-up' | 'steady';
 export type RootCause =
   | 'deep-debt'
   | 'short-night'
@@ -75,19 +75,28 @@ export interface Insight {
   rootCause: string;
   /** Сколько допустимых связок движок нашёл сейчас: одна — ротации не из чего выбирать. */
   options: number;
+  /** Для «Сырого лога»: с чем сравнивал движок («пульс сейчас 78, обычный днём 74»). Посреднику не уходит. */
+  debug: string;
 }
 
 // ── Пороги ──────────────────────────────────────────────────────────────────────────────────────
 
-/** «Холостой ход» — пульс выше покоя на 15 % и больше почти без шагов (владелец 26.09). */
+/**
+ * «Холостой ход» — пульс на 15 % и больше выше СВОЕГО ОБЫЧНОГО ДНЁМ В ПОКОЕ почти без шагов (владелец 26.09).
+ * Не выше пульса покоя: тот берётся из сна, и днём любой пульс был «заметно выше обычного».
+ */
 export const IDLE_PULSE_RATIO = 1.15;
 /** «Почти без шагов» за час. */
 export const STILL_STEPS_PER_HOUR = 100;
-/** Экономный режим: пульс не выше покоя больше чем на 5 %, стресс в зоне «Низкий» (до 30). */
-export const SAVING_PULSE_RATIO = 1.05;
+/** Экономный режим: пульс ниже обычного днём в покое на 5 % и больше, стресс в зоне «Низкий» (до 30). */
+export const SAVING_PULSE_RATIO = 0.95;
 export const SAVING_STRESS_MAX = 30;
 /** Стресс «Повышенный» — от 61 (зоны стресса продукта): без шагов это высокий тонус в статике. */
 export const HIGH_STRESS_MIN = 61;
+/** Нагрузка сейчас — пульс выше обычного днём на 30 % при движении (тренировка, быстрый шаг, лестницы). */
+export const EXERTION_PULSE_RATIO = 1.3;
+/** «Ровно» — пульс в пределах ±12 % от обычного днём в покое (или пульса нет, а стресс спокойный). */
+export const STEADY_PULSE_BAND = 0.12;
 /** Движение сейчас — от стольких шагов за последний час (≈ четверть часа ходьбы). */
 export const MOVING_STEPS_PER_HOUR = 1500;
 /** Затяжная статика — не меньше двух часов и меньше стольких шагов за них. */
@@ -177,6 +186,7 @@ export const CAUSES_FOR: Record<BodyState, readonly RootCause[]> = {
   saving: [...NIGHT_CAUSES, 'recent-meal', 'active-earlier', 'heavy-yesterday', 'repair', 'hrv-up', 'good-night', 'usual-night', 'snacking', 'sugar-swings'],
   still: [...NIGHT_CAUSES, 'heavy-yesterday', 'repair', 'hrv-down'],
   moving: ['good-night', 'hrv-up', 'calm-days', 'low-night-pulse', 'regular-bed', 'usual-night'],
+  exertion: ['good-night', 'hrv-up', 'calm-days', 'low-night-pulse', 'usual-night', 'heavy-yesterday', 'short-night', 'deep-debt'],
   fade: [...NIGHT_CAUSES, 'hrv-down', 'heavy-yesterday', 'repair', 'late-meal', 'snacking', 'sugar-swings'],
   tense: [...NIGHT_CAUSES, 'stress-days', 'hrv-down', 'late-meal', 'long-still', 'sugar-swings'],
   'pressure-up': [...NIGHT_CAUSES, 'stress-days', 'long-still'],
@@ -227,6 +237,11 @@ export const STATE_TEXT: Record<BodyState, Record<ReportMode, Pair>> = {
     morning: ['С утра давление держится выше вашего обычного', 'С утра давление заметно выше вашего обычного'],
     day: ['Давление сейчас держится выше вашего обычного', 'Давление сейчас заметно выше вашего обычного'],
     evening: ['Вечером давление держится выше вашего обычного', 'Вечером давление заметно выше вашего обычного'],
+  },
+  exertion: {
+    morning: ['С утра пульс высокий, тело сейчас в нагрузке', 'С утра пульс очень высокий, тело в серьёзной нагрузке'],
+    day: ['Пульс сейчас высокий, тело в нагрузке', 'Пульс сейчас очень высокий, тело в серьёзной нагрузке'],
+    evening: ['Вечером пульс высокий, тело в нагрузке', 'Вечером пульс очень высокий, тело в серьёзной нагрузке'],
   },
   steady: {
     morning: ['Утро идёт ровно: пульс и стресс в вашей норме', 'Утро идёт ровно, тело в хорошей форме'],
@@ -295,13 +310,19 @@ function norm(days: readonly AdviceDay[], pick: (d: AdviceDay) => number | null,
 
 const inWindow = (points: readonly MinutePoint[], from: number, to: number) => points.filter((p) => p.m > from && p.m <= to);
 const sum = (points: readonly MinutePoint[]) => points.reduce((a, p) => a + p.v, 0);
+/**
+ * Обычный пульс днём в покое: медиана по прошлым дням (от двух), иначе — по сегодняшним замерам.
+ * Именно с ним сравнивается пульс сейчас.
+ */
+export const dayPulseOf = (days: readonly AdviceDay[]) =>
+  norm(days, (d) => d.quietPulse, 1, 7, 2) ?? days.find((d) => d.ago === 0)?.quietPulse ?? null;
 const restingOf = (days: readonly AdviceDay[]) => norm(days, (d) => d.restingPulse, 1, 7, 1) ?? days.find((d) => d.ago === 0)?.restingPulse ?? null;
 
 /** Состояние тела сейчас по оперативному срезу, среднему горизонту и давлению. */
 export function bodyStates(input: PhysioInput): Found<BodyState>[] {
   const { now, days } = input;
   const today = days.find((d) => d.ago === 0);
-  const rest = restingOf(days);
+  const rest = dayPulseOf(days);
   const pulse = mean(inWindow(input.heart, now - 90, now).map((p) => p.v));
   const stress = mean(inWindow(input.stress, now - 90, now).map((p) => p.v));
   const stepsNow = sum(inWindow(input.steps, now - 60, now));
@@ -325,6 +346,9 @@ export function bodyStates(input: PhysioInput): Found<BodyState>[] {
     out.push({ key: 'still', strength: cap(midHours / STILL_MIN_HOURS) });
   }
   if (stepsNow >= MOVING_STEPS_PER_HOUR) out.push({ key: 'moving', strength: cap(stepsNow / MOVING_STEPS_PER_HOUR) });
+  if (!quiet && rest !== null && pulse !== null && pulse >= rest * EXERTION_PULSE_RATIO) {
+    out.push({ key: 'exertion', strength: cap((pulse / rest - 1) / (EXERTION_PULSE_RATIO - 1)) });
+  }
   if (now >= FADE_FROM_MIN && wake !== null && stress !== null && stepsNow < MOVING_STEPS_PER_HOUR / 3) {
     const morning = mean(inWindow(input.stress, wake, wake + 240).map((p) => p.v));
     if (morning !== null && now - wake >= 360 && stress >= morning + STRESS_OVER) {
@@ -342,7 +366,9 @@ export function bodyStates(input: PhysioInput): Found<BodyState>[] {
   }
   // «Ровно» — только когда больше ничего не видно: иначе по кнопке Лис говорил «пульс в порядке»
   // сразу после «пульс выше обычного» (владелец 26.09). Все остальные состояния верны одновременно.
-  if (!out.length && (pulse !== null || stress !== null)) out.push({ key: 'steady', strength: 0.3 });
+  // И пульс должен быть рядом с обычным: 123 при прогулке — не «ровно».
+  const pulseUsual = pulse === null || rest === null || Math.abs(pulse / rest - 1) <= STEADY_PULSE_BAND;
+  if (!out.length && pulseUsual && (pulse !== null || stress !== null)) out.push({ key: 'steady', strength: 0.3 });
   return out;
 }
 
@@ -479,6 +505,15 @@ export function rootCauses(input: PhysioInput): Found<RootCause>[] {
   return out;
 }
 
+/** Цифры, с которыми сравнивал движок, — только для «Сырого лога» на телефоне. */
+function debugLine(input: PhysioInput): string {
+  const r = (v: number | null) => (v === null ? '—' : String(Math.round(v)));
+  const pulse = mean(inWindow(input.heart, input.now - 90, input.now).map((p) => p.v));
+  const stress = mean(inWindow(input.stress, input.now - 90, input.now).map((p) => p.v));
+  const steps = sum(inWindow(input.steps, input.now - 60, input.now));
+  return `пульс сейчас ${r(pulse)}, обычный днём в покое ${r(dayPulseOf(input.days))}, покоя во сне ${r(restingOf(input.days))}; стресс ${r(stress)}; шагов за час ${steps}`;
+}
+
 /** Все допустимые связки по весу, самая яркая первой (с учётом того, о чём Лис уже говорил). */
 export function rankInsights(input: PhysioInput): { state: Found<BodyState>; cause: Found<RootCause>; score: number }[] {
   const states = bodyStates(input);
@@ -519,5 +554,6 @@ export function findInsight(input: PhysioInput): Insight | null {
     consequence: `${STATE_TEXT[state.key][input.mode][strong(state.strength)]}.`,
     rootCause: `${cause.text ?? CAUSE_TEXT[cause.key][strong(cause.strength)]}.`,
     options: ranked.length,
+    debug: debugLine(input),
   };
 }

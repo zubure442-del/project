@@ -51,8 +51,9 @@ export interface AiAdviceRequest {
    */
   templateId: string | null;
   payload: AdvicePayload;
-  /** Сколько связок нашёл движок (для «Сырого лога»; посреднику не уходит). */
+  /** Сколько связок нашёл движок и с какими цифрами сравнивал (для «Сырого лога»; посреднику не уходит). */
   options: number;
+  debug: string;
 }
 
 /**
@@ -172,6 +173,7 @@ export function aiAdviceRequest(state: VueloState, now = new Date(), force = fal
     mode,
     templateId: stored?.templateId ?? null,
     options: insight.options,
+    debug: insight.debug,
     payload: {
       mode,
       time: coffeeClock(now.getHours() * 60 + now.getMinutes()),

@@ -17,7 +17,7 @@ import {
 /** Обычный день: сон 7.5 ч, глубокий 90 мин, пульс во сне 58, покоя 60, вариабельность 50, стресс 35, кислород ночью 97. */
 function row(ago: number, over: Partial<AdviceDay> = {}): AdviceDay {
   return {
-    ago, asleep: '23:30', awake: '07:00', sleepMin: 450, deepMin: 90, nightPulse: 58, hrv: 50, restingPulse: 60,
+    ago, asleep: '23:30', awake: '07:00', sleepMin: 450, deepMin: 90, nightPulse: 58, hrv: 50, restingPulse: 60, quietPulse: 64,
     spo2: 97, nightSpo2: 97, systolic: 118, diastolic: 76, glucoseRange: 1.2, stress: 35, steps: 8000, stepNorm: 9000,
     calories: 300, load: 40, workout: null, meals: ['08:30', '13:30', '19:00'],
     ...over,
@@ -60,14 +60,26 @@ const causesOf = (i: PhysioInput) => rootCauses(i).map((c) => c.key);
 describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мнения Лиса»', () => {
   it('холостой ход: пульс на 15 % выше покоя без шагов — причина из ночи, а не из движения', () => {
     const days = week({ sleepMin: 330, deepMin: 50 }, { 1: { deepMin: 60 } });
-    const insight = findInsight(input({ pulse: 75, days }))!;
+    const insight = findInsight(input({ pulse: 80, days }))!;
     expect(insight.state).toBe('idle');
     expect(['short-night', 'deep-debt']).toContain(insight.cause);
     expect(insight.consequence).toBe('Пульс сейчас заметно выше обычного, хотя вы почти не двигаетесь.');
   });
 
+  it('пульс сейчас сравнивается с обычным пульсом днём, а не с пульсом во сне (владелец 26.09: «постоянно про пульс»)', () => {
+    // Покоя во сне 53, днём в покое обычно 72; сейчас 72 — это норма, а не «на треть выше обычного».
+    const days = week({}, {}).map((d) => ({ ...d, restingPulse: 53, quietPulse: 72 }));
+    const states = rankInsights(input({ pulse: 72, days })).map((p) => p.state.key);
+    expect(states).not.toContain('idle');
+    expect(states).toContain('steady');
+    // 123 при движении — нагрузка, а не «ровно».
+    const busy = rankInsights(input({ pulse: 123, stepsPerMin: 12, days })).map((p) => p.state.key);
+    expect(busy).toContain('exertion');
+    expect(busy).not.toContain('steady');
+  });
+
   it('еда и пульс: скачок пульса через полчаса–час после еды — это переваривание, а не усталость', () => {
-    const insight = findInsight(input({ pulse: 72, days: week({ meals: ['08:30', '14:15'] }) }))!;
+    const insight = findInsight(input({ pulse: 76, days: week({ meals: ['08:30', '14:15'] }) }))!;
     expect([insight.state, insight.cause]).toEqual(['idle', 'recent-meal']);
     // Сонливость после еды: пульс низкий, стресса нет — тоже еда.
     const sleepy = findInsight(input({ pulse: 58, stress: 15, stepsBefore: 5, days: week({ meals: ['08:30', '14:15'], steps: 3000 }) }))!;
@@ -130,7 +142,7 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
   });
 
   it('«ровно» не спорит с отклонением: если пульс выше обычного, «пульс в норме» не прозвучит (скриншот 26.09)', () => {
-    const ranked = rankInsights(input({ pulse: 72, days: week({ asleep: '01:00' }) }));
+    const ranked = rankInsights(input({ pulse: 76, days: week({ asleep: '01:00' }) }));
     expect(ranked.length).toBeGreaterThan(0);
     expect(ranked.every((p) => p.state.key !== 'steady')).toBe(true);
     // В ровный день — разные спокойные причины, а не одно «ночь прошла как обычно».

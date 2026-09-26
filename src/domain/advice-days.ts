@@ -26,6 +26,12 @@ export interface AdviceDay {
   nightPulse: number | null;
   hrv: number | null;
   restingPulse: number | null;
+  /**
+   * Обычный пульс днём в покое: медиана дневных замеров (8:00–22:00, вне сна), рядом с которыми
+   * за полчаса почти не было шагов. С ним «Мнение Лиса» сравнивает пульс сейчас: пульс покоя берётся
+   * из сна, и днём любой пульс выходил «заметно выше обычного» (владелец 26.09).
+   */
+  quietPulse: number | null;
   spo2: number | null;
   /** Средний кислород внутри сна дня: просадка ночью объясняет разбитость днём. */
   nightSpo2: number | null;
@@ -61,6 +67,32 @@ export interface AdviceDayInput {
   calories?: number | null;
   load?: { trimp: number; session: 'cardio' | 'strength' | null } | null;
   summaryPoints: readonly { m: number; glucose: number | null; systolic?: number | null; diastolic?: number | null }[];
+  /** Пульс и шаги по минутам — для обычного пульса днём в покое; нет — `quietPulse` null. */
+  heart?: readonly MinutePoint[];
+  stepsByMinute?: readonly MinutePoint[];
+}
+
+/** Обычный пульс днём в покое: окно дня, «почти без шагов» за полчаса до замера, сколько замеров нужно. */
+export const QUIET_FROM = 8 * 60;
+export const QUIET_TO = 22 * 60;
+export const QUIET_STEPS = 100;
+export const QUIET_MIN_POINTS = 3;
+
+/** Медиана дневных замеров пульса, рядом с которыми почти не было шагов (вне сна, до `until`). */
+export function quietPulse(
+  heart: readonly MinutePoint[],
+  steps: readonly MinutePoint[],
+  sleep: readonly { from: number; to: number }[],
+  until = 1440,
+): number | null {
+  const values = heart
+    .filter((p) => p.m >= QUIET_FROM && p.m <= Math.min(QUIET_TO, until) && !sleep.some((s) => p.m >= s.from && p.m <= s.to))
+    .filter((p) => steps.filter((s) => s.m > p.m - 30 && s.m <= p.m).reduce((a, s) => a + s.v, 0) < QUIET_STEPS)
+    .map((p) => p.v)
+    .sort((a, b) => a - b);
+  if (values.length < QUIET_MIN_POINTS) return null;
+  const mid = Math.floor(values.length / 2);
+  return Math.round(values.length % 2 ? values[mid] : (values[mid - 1] + values[mid]) / 2);
 }
 
 /** Подъём глюкозы — замер выше обычного уровня на столько (при уровне 6.0 — от 6.9). */
@@ -125,6 +157,7 @@ export function adviceDay(
     nightPulse: round(day.nightHr?.avg),
     hrv: round(day.estimates.hrv),
     restingPulse: round(day.restingHr),
+    quietPulse: day.heart && day.stepsByMinute ? quietPulse(day.heart, day.stepsByMinute, segments, until) : null,
     spo2: round(mean(day.spo2.map((p) => p.v))),
     nightSpo2: round(mean(day.spo2.filter((p) => inSleep(p.m)).map((p) => p.v))),
     systolic: round(mean(values((p) => p.systolic))),

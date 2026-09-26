@@ -228,7 +228,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       const links = request.options === 1
         ? '\nСвязка сейчас одна — по данным больше не о чем сказать, смысл будет повторяться.'
         : `\nСвязка ${request.payload.insight.key}, всего сейчас ${request.options}.`;
-      return `Новое мнение (${slot}) — на главном экране:\n${result.text}${engineLine}${links}${old}`;
+      return `Новое мнение (${slot}) — на главном экране:\n${result.text}${engineLine}${links}\n${request.debug}${old}`;
     } finally {
       adviceBusy.current = false;
       setAdviceRequesting(null);

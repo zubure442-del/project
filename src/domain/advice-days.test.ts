@@ -38,6 +38,7 @@ describe('СИНТЕТИЧЕСКИЕ: таблица чисел для «Мне�
       nightPulse: 56,
       hrv: 49,
       restingPulse: 54,
+      quietPulse: null,
       spo2: 97,
       nightSpo2: 97,
       systolic: null,

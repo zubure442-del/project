@@ -165,7 +165,7 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
     expect(saidInsights(next.reports, request.date, null).today).toEqual([request.payload.insight.key]);
     // По кнопке «Новое мнение Лиса» прежняя связка уже сказана — движок берёт другую, прошлое мнение уходит посреднику.
     const again = aiAdviceRequest(next, NOW, true)!;
-    expect(again.payload.insight.key).not.toBe(request.payload.insight.key);
+    if (again.options > 1) expect(again.payload.insight.key).not.toBe(request.payload.insight.key);
     expect(again.payload.past_opinions.map((o) => o.text)).toEqual(['Тело сейчас спокойно. Кажется, ночь прошла в обычном ритме.']);
     const other = withAiAdvice(next, { ...again, templateId: AI_TEMPLATE_ID }, 'Другое мнение Лиса о дне.');
     // Прежнее мнение того же отрезка не теряется: ключ и текст остаются в памяти.

@@ -180,6 +180,8 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
       about: { focus: ['today-steps'], action: 'workout' },
     });
     expect(await fetchAiAdvice(request.payload, CONFIG, okFetch({ text: reply.text }))).toEqual({ text: reply.text });
+    // Версия кода функции — чтобы «Сырой лог» мог сказать, что в Yandex Cloud старый код.
+    expect(await fetchAiAdvice(request.payload, CONFIG, okFetch({ ...reply, v: 2 }))).toMatchObject({ server: 2 });
   });
 
   it('«Лис смотрит…» вместо старого совета — пока идёт выгрузка или запрос за свежим мнением', () => {

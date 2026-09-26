@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import { DAY_PROGRESS_LABEL, formatCount, type RelayView } from '../domain';
 import { MASCOT_SKINS, Mascot, mascotHeightFor } from './Mascot';
 import { RELAY_TITLE, RelaySheet, StreakBadge } from './Relay';
@@ -13,6 +13,9 @@ import { colors, radius, spacing } from './theme';
  */
 const MASCOT_MAX_BOX_HEIGHT = 245;
 const MASCOT_WIDTH_SHARE = 0.55;
+/** Короткое касание почти без сдвига — нажатие, даже если его перехватила прокрутка. */
+const TAP_MAX_MOVE = 10;
+const TAP_MAX_MS = 500;
 const { frame, figure } = MASCOT_SKINS.fox;
 const MASCOT_MAX_HEIGHT = (MASCOT_MAX_BOX_HEIGHT * figure) / frame.height;
 
@@ -35,16 +38,39 @@ export function MascotHero({
   const [open, setOpen] = useState(false);
   const height = Math.min(MASCOT_MAX_HEIGHT, mascotHeightFor(width * MASCOT_WIDTH_SHARE));
 
+  // Владелец 26.09: «скроллю и резко нажимаю на лиса — эстафета не открывается». Пока экран ещё
+  // докатывается после прокрутки или пружинит после жеста обновления, iOS отдаёт первое касание
+  // прокрутке (чтобы её остановить), и onPress не приходит. Поэтому ловим и само касание:
+  // короткое и почти без сдвига — это нажатие.
+  const touch = useRef<{ x: number; y: number; at: number } | null>(null);
+  const openedAt = useRef(0);
+  const openRelay = () => {
+    // Касание и onPress могут прийти оба — открываем один раз.
+    if (Date.now() - openedAt.current < 600) return;
+    openedAt.current = Date.now();
+    void Haptics.selectionAsync();
+    setOpen(true);
+  };
+  const onTouchStart = (e: GestureResponderEvent) => {
+    touch.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY, at: Date.now() };
+  };
+  const onTouchEnd = (e: GestureResponderEvent) => {
+    const start = touch.current;
+    touch.current = null;
+    if (!start) return;
+    const moved = Math.hypot(e.nativeEvent.pageX - start.x, e.nativeEvent.pageY - start.y);
+    if (moved <= TAP_MAX_MOVE && Date.now() - start.at <= TAP_MAX_MS) openRelay();
+  };
+
   return (
     <>
       <Pressable
         style={({ pressed }) => [styles.root, pressed && styles.pressed]}
         accessibilityRole="button"
         accessibilityLabel={`${RELAY_TITLE}. Орехов: ${relay.nuts}`}
-        onPress={() => {
-          void Haptics.selectionAsync();
-          setOpen(true);
-        }}
+        onPress={openRelay}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
       >
         <View style={styles.row}>
           <Mascot height={height} />

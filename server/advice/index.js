@@ -44,6 +44,11 @@
 const { Buffer } = require('node:buffer');
 
 const API_URL = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion';
+/**
+ * Версия кода функции — в каждом ответе (`v`). По ней приложение понимает, что в Yandex Cloud вставлен
+ * свежий код: без неё «Сырой лог» просит обновить функцию. Меняйте при заметных правках правил.
+ */
+const VERSION = 2;
 const MAX_BODY_CHARS = 12000;
 const LLM_TIMEOUT_MS = 12000;
 /** Сколько функция готова ждать модель в сумме: приложение ждёт ответ 15 с. */
@@ -1007,7 +1012,7 @@ async function handler(event, context) {
     const answer = parseAnalysis(result.text);
     problem = analysisProblem(answer, seen, talk.act);
     if (!problem) {
-      return reply(200, { text: answer.text, mode: 'analysis', focus: focusOf(answer, seen), cause: answer.cause, action: actionKey(answer.action) });
+      return reply(200, { text: answer.text, mode: 'analysis', focus: focusOf(answer, seen), cause: answer.cause, action: actionKey(answer.action), v: VERSION });
     }
     // Причина — в лог функции без текста ответа: видно, как часто анализ промахивается.
     console.warn('analysis rejected', problem);
@@ -1022,7 +1027,7 @@ async function handler(event, context) {
   const guided = text ? answerProblem(text, seen.action) : 'format';
   if (!guided) {
     const key = Object.keys(talk.act).find((k) => talk.act[k] === seen.action) || null;
-    return reply(200, { text, mode: 'guided', focus: [seen.id], cause: seen.cause, action: key && actionKey(key) });
+    return reply(200, { text, mode: 'guided', focus: [seen.id], cause: seen.cause, action: key && actionKey(key), v: VERSION });
   }
   console.warn('guided rejected', guided);
   return reply(502, { error: `answer ${problem} / ${guided}` });
@@ -1063,5 +1068,5 @@ async function askModel({ token, folder, model, messages, timeoutMs, temperature
 
 module.exports = {
   handler, validate, measure, signals, observe, buildAnalysisText, buildUserText, conversation, dayFacts, offer,
-  parseAnalysis, analysisProblem, parseAnswer, answerProblem, ANALYSIS_PROMPT, GUIDED_PROMPT, FITS, FACT_FITS, TOPIC_OF,
+  VERSION, parseAnalysis, analysisProblem, parseAnswer, answerProblem, ANALYSIS_PROMPT, GUIDED_PROMPT, FITS, FACT_FITS, TOPIC_OF,
 };

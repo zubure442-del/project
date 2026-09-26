@@ -365,6 +365,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
       focus: ['stress-days'],
       cause: 'давно без передышки',
       action: 'workout',
+      v: fn.VERSION,
     });
     const sent = JSON.parse(calls[0].init.body);
     expect(calls).toHaveLength(1);
@@ -391,7 +392,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const sample = { ...(await readSample()), recent: [] };
     const res = await fn.handler(event(sample), context);
     expect(JSON.parse(res.body)).toEqual({
-      text: guided, mode: 'guided', focus: ['late-meal'], cause: 'поздний ужин — ночью телу пришлось переваривать, а не отдыхать', action: 'dinner',
+      text: guided, mode: 'guided', focus: ['late-meal'], cause: 'поздний ужин — ночью телу пришлось переваривать, а не отдыхать', action: 'dinner', v: fn.VERSION,
     });
     expect(bodies.map((b) => b.messages[0].text)).toEqual([fn.ANALYSIS_PROMPT, fn.GUIDED_PROMPT]);
     expect(bodies[1].messages[1].text).toContain('Что предложить: поужинать по графику Vuelo в 18:45.');

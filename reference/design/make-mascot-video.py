@@ -25,13 +25,22 @@ from PIL import Image
 
 FFMPEG = os.environ.get('FFMPEG', 'ffmpeg')
 
-# Фон приложения (src/ui/theme.ts).
-BG = np.array([0x0B, 0x0B, 0x0F], dtype=np.float64)
+# Фон приложения (src/ui/theme.ts) #0B0B0F. В видео — на оттенок темнее: iPhone показывает видео чуть
+# светлее картинок (снимок экрана владельца 26.09: фон видео 12,11,17 при фоне экрана 11,10,16),
+# и по краю кадра проступал прямоугольник.
+BG = np.array([0x0B - 1, 0x0B - 1, 0x0F - 1], dtype=np.float64)
 
 # Серый фон исходника и мягкая маска по сумме разниц каналов: ниже KEY_LOW — фон, выше KEY_HIGH — лиса.
 SOURCE_BG = np.array([41.4, 43.4, 43.4])
-KEY_LOW = 10.0
-KEY_HIGH = 28.0
+KEY_LOW = 12.0
+KEY_HIGH = 30.0
+
+# Тень под лапами убрана (владелец 26.09: «неестественная — свет не оттуда, резкие края, слишком тёмная»).
+# Тень — серые пиксели темнее фона ниже SHADOW_FROM_Y: у тени нет цвета (разброс каналов меньше
+# SHADOW_SPREAD), а лапы коричневые, их маска не задевает.
+SHADOW_FROM_Y = 600
+SHADOW_SPREAD = 9
+SHADOW_LUM = 40
 
 # Кадр результата в координатах исходника 768×768: лиса (уши 43 — лапы 727, хвост от 106) целиком.
 CROP_X = 70
@@ -47,10 +56,22 @@ def over(base, color, alpha):
     return base * (1 - a) + color * a
 
 
+def box_blur(img):
+    """Среднее 3×3: шум серого фона не даёт отдельных тёмных точек в маске."""
+    p = np.pad(img, 1, mode='edge')
+    h, w = img.shape
+    return sum(p[dy:dy + h, dx:dx + w] for dy in range(3) for dx in range(3)) / 9
+
+
 def key(frame):
-    """Альфа лисы и её цвет без примеси серого фона на краях шерсти."""
-    d = np.abs(frame - SOURCE_BG).sum(2)
+    """Альфа лисы и её цвет без примеси серого фона на краях шерсти; тень под лапами — фон."""
+    d = box_blur(np.abs(frame - SOURCE_BG).sum(2))
     alpha = np.clip((d - KEY_LOW) / (KEY_HIGH - KEY_LOW), 0, 1)
+    lum = frame.mean(2)
+    spread = frame.max(2) - frame.min(2)
+    shadow = (spread < SHADOW_SPREAD) & (lum < SHADOW_LUM)
+    shadow[:SHADOW_FROM_Y] = False
+    alpha[box_blur(shadow.astype(np.float64)) > 0.5] = 0
     a = np.maximum(alpha, 1e-3)[..., None]
     fg = np.clip((frame - (1 - a) * SOURCE_BG) / a, 0, 255)
     return fg, alpha

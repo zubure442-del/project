@@ -16,7 +16,16 @@ const stamp = (at: number) => {
 /** Меню разработчика: сырые пакеты кольца (время, направление, hex) для разбора и демо-режим. */
 export default function RawLogScreen() {
   const insets = useSafeAreaInsets();
-  const { demo, setDemo, state } = useVuelo();
+  const { demo, setDemo, state, regenerateAdvice } = useVuelo();
+  // Для проверки советов: новое мнение Лиса на текущее время суток — только по кнопке (стоит токенов).
+  const [advice, setAdvice] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+  const askAdvice = async () => {
+    setAsking(true);
+    setAdvice('Лис думает…');
+    setAdvice(await regenerateAdvice());
+    setAsking(false);
+  };
   const background = state.lastBackground;
   const [items, setItems] = useState<LoggedPacket[]>(packetLog);
   const [copied, setCopied] = useState(false);
@@ -56,9 +65,19 @@ export default function RawLogScreen() {
             : 'Фонового обновления ещё не было'}
         </Text>
         {/* Демо: синтетические показатели через настоящий расчёт; реальные данные не трогаются. */}
-        <Pressable style={[styles.button, styles.demo]} onPress={() => setDemo(!demo)}>
-          <Text style={styles.buttonText}>{demo ? 'Выключить демо-режим' : 'Демо-режим'}</Text>
-        </Pressable>
+        <View style={styles.devRow}>
+          <Pressable style={[styles.button, styles.demo]} onPress={() => setDemo(!demo)}>
+            <Text style={styles.buttonText}>{demo ? 'Выключить демо-режим' : 'Демо-режим'}</Text>
+          </Pressable>
+          <Pressable style={[styles.button, styles.demo]} onPress={askAdvice} disabled={asking}>
+            <Text style={styles.buttonText}>{asking ? 'Лис думает…' : 'Новое мнение Лиса'}</Text>
+          </Pressable>
+        </View>
+        {advice ? (
+          <Text style={styles.note} selectable>
+            {advice}
+          </Text>
+        ) : null}
       </View>
 
       <ScrollView
@@ -91,6 +110,7 @@ const styles = StyleSheet.create({
   button: { backgroundColor: colors.accent, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 8 },
   buttonText: { color: colors.bg, fontSize: 13, fontWeight: '600' },
   demo: { alignSelf: 'flex-start', marginTop: spacing.xs },
+  devRow: { flexDirection: 'row', gap: spacing.sm },
   clear: { paddingHorizontal: 4 },
   clearText: { color: colors.textMuted, fontSize: 13 },
   note: { color: colors.textMuted, fontSize: 12.5 },

@@ -26,9 +26,7 @@ const GOALS: { id: Goal; label: string }[] = [
 type TextKey = 'name' | 'heightCm' | 'weightKg' | 'birthYear';
 
 export default function ProfileTab() {
-  const { state, statusText, saveProfile, reloadProfile, forgetRing, clearData, regenerateAdvice } = useVuelo();
-  // Для проверки советов: нажатие на версию просит у Лиса новое мнение на текущее время суток.
-  const [adviceNote, setAdviceNote] = useState<string | null>(null);
+  const { state, statusText, saveProfile, reloadProfile, forgetRing, clearData } = useVuelo();
   const insets = useSafeAreaInsets();
   const [about, setAbout] = useState(false);
   const [taps, setTaps] = useState(0);
@@ -111,8 +109,6 @@ export default function ProfileTab() {
     );
 
   const onVersion = () => {
-    setAdviceNote('Лис думает…');
-    void regenerateAdvice().then(setAdviceNote);
     const next = taps + 1;
     setTaps(next);
     if (next >= 5) {
@@ -132,7 +128,6 @@ export default function ProfileTab() {
           <Text style={styles.note}>{DISCLAIMER}</Text>
           <Pressable onPress={onVersion} style={styles.versionRow}>
             <Text style={styles.version}>Версия {version}</Text>
-            {adviceNote ? <Text style={styles.version}>{adviceNote}</Text> : null}
           </Pressable>
         </Card>
       </ScrollView>

@@ -39,6 +39,7 @@ import {
   aiAdviceKey,
   aiAdviceRequest,
   fetchAiAdvice,
+  AI_ADVICE_SERVER_VERSION,
   foxThinking,
   withAiAdvice,
 } from './ai-advice';
@@ -218,8 +219,11 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         return 'Пока ждали, совет сменился — не применили';
       }
       commit(next);
-      logNote(`мнение Лиса (${slot}) от модели получено${force ? ' (по кнопке)' : ''}`);
-      return `Новое мнение (${slot}) — на главном экране`;
+      logNote(`мнение Лиса (${slot}) от модели получено${force ? ' (по кнопке)' : ''}, функция ${result.server ? `v${result.server}` : 'старая — обновите код в Yandex Cloud'}`);
+      const old = (result.server ?? 0) < AI_ADVICE_SERVER_VERSION
+        ? '\nВнимание: в Yandex Cloud старый код функции — вставьте server/advice/index.js заново.'
+        : '';
+      return `Новое мнение (${slot}) — на главном экране:\n${result.text}${old}`;
     } finally {
       adviceBusy.current = false;
       setAdviceRequesting(null);

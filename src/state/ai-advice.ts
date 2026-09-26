@@ -240,7 +240,10 @@ export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: 
   return { ...state, reports: addReport(state.reports, report) };
 }
 
-export type AiAdviceResult = { text: string; about?: AdviceAbout } | { error: string };
+export type AiAdviceResult = { text: string; about?: AdviceAbout; server?: number } | { error: string };
+
+/** Версия кода облачной функции, с которой приложение работает полностью (разговор за день, метки). */
+export const AI_ADVICE_SERVER_VERSION = 2;
 
 /** Запрос к посреднику. Любая неудача — `error` с причиной для отладочного лога, без исключений. */
 export async function fetchAiAdvice(
@@ -259,12 +262,13 @@ export async function fetchAiAdvice(
       signal: controller.signal,
     });
     if (!response.ok) return { error: `посредник ответил ${response.status}` };
-    const data = (await response.json()) as { text?: unknown; focus?: unknown; action?: unknown };
+    const data = (await response.json()) as { text?: unknown; focus?: unknown; action?: unknown; v?: unknown };
     if (typeof data.text !== 'string') return { error: 'в ответе нет текста' };
     const text = cleanAdvice(data.text);
     if (!isSafeAdvice(text)) return { error: 'текст не прошёл проверку' };
     const about = adviceAbout(data);
-    return about ? { text, about } : { text };
+    const server = typeof data.v === 'number' ? { server: data.v } : {};
+    return about ? { text, about, ...server } : { text, ...server };
   } catch (e) {
     return { error: controller.signal.aborted ? 'нет ответа за 15 с' : `нет связи (${String(e)})` };
   } finally {

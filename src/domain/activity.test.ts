@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { busiestHour, loadIntervals } from './charts';
+import { busiestCycleHour, busiestHour, loadIntervals } from './charts';
 import {
   HOUR_LOAD_HR_WEIGHT,
   HOUR_LOAD_STEPS_WEIGHT,
@@ -33,6 +33,21 @@ describe('самый активный час', () => {
 
   it('пустой день — часа нет', () => {
     expect(busiestHour(hours({}), [], 30)).toBeNull();
+  });
+
+  it('вдоль цикла — по тем же рядам, что на графике, а не по календарным суткам', () => {
+    // Скриншот владельца 26.09: подъём 9:59, прогулки днём, в 1 ночи 45 шагов, сейчас 3:24.
+    const steps = [
+      { m: 600, v: 900 }, // 10:00
+      { m: 20 * 60 + 20, v: 2400 }, // 20:20 — самая большая прогулка
+      { m: 1440 + 60, v: 45 }, // 1:00 следующих суток
+    ];
+    expect(busiestCycleHour(steps, [], 30, 599, 1440 + 204)).toBe(20);
+    // Прогулка после полуночи — час на циферблате, а не «25:00».
+    expect(busiestCycleHour([{ m: 1440 + 90, v: 500 }], [], 30, 599, 1440 + 204)).toBe(1);
+    // Шаги до подъёма (минуты сна) в цикл не входят.
+    expect(busiestCycleHour([{ m: 300, v: 5000 }, { m: 700, v: 10 }], [], null, 599, 900)).toBe(11);
+    expect(busiestCycleHour([], [], 30, 599, 900)).toBeNull();
   });
 });
 

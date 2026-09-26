@@ -25,6 +25,10 @@ export function dateKey(ringTs: number): string {
   return `${pad(w.year, 4)}-${pad(w.month)}-${pad(w.day)}`;
 }
 
+/** Дата за `offset` дней до `today` («2026-09-18»): так архивный запрос «день назад» превращается в дату. */
+export const dateForOffset = (offset: number, today: string): string =>
+  new Date(Date.parse(`${today}T00:00:00Z`) - offset * 86400000).toISOString().slice(0, 10);
+
 /** «2026-09-18 08:15:00». */
 export function formatWall(ringTs: number): string {
   const w = wallClock(ringTs);

@@ -31,7 +31,7 @@ const round = (v: number | null | undefined) => (v === null || v === undefined ?
 export default function BodyTab() {
   const { state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner } = useTabDay();
+  const { date: picked, banner, isToday, today } = useTabDay();
   const [open, setOpen] = useState<string | null>(null);
   const still = useReducedMotion();
   const day = findDay(state.days, picked);
@@ -99,12 +99,15 @@ export default function BodyTab() {
       onSync={() => sync('refresh')}
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
-      <View style={styles.hero}>
-        <HeroRing value={day?.scores.state ?? null} size={HERO_RING} />
-        <View style={styles.heroSide}>
-          <TrendInline trend={trendFor(state, 'state', picked)} />
+      {isToday ? (
+        // Оценка — по текущему циклу (ночь и текущее состояние); на прошлых датах только графики.
+        <View style={styles.hero}>
+          <HeroRing value={today?.cycle?.scores.state ?? null} size={HERO_RING} />
+          <View style={styles.heroSide}>
+            <TrendInline trend={trendFor(state, 'state', picked)} />
+          </View>
         </View>
-      </View>
+      ) : null}
 
       {/* Плитки со спарклайнами; нажатие разворачивает плитку в полный график с осями. */}
       {tiles.length ? (

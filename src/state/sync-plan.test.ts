@@ -3,7 +3,15 @@ import { hexToBytes } from '../codec';
 import { emptySyncResult, resetLightThrottle, runSync } from '../ble/sync';
 import type { Transport } from '../ble/transport';
 import { EMPTY_STATE } from '../storage';
-import { FINAL_AFTER_HOURS, applySyncResult, finalFrom, isFinalDay, markSynced, planDays } from './sync-plan';
+import {
+  FINAL_AFTER_HOURS,
+  applySyncResult,
+  finalFrom,
+  isFinalDay,
+  markSynced,
+  nightAfterArrived,
+  planDays,
+} from './sync-plan';
 
 /** 21.09.2026 13:18 по местному времени — дневная сессия. */
 const DAY = new Date(2026, 8, 21, 13, 18);
@@ -55,6 +63,31 @@ describe('СИНТЕТИЧЕСКИЕ: время выгрузки дней', () 
   });
 });
 
+describe('СИНТЕТИЧЕСКИЕ: вчера финальный, как только пришла ночь', () => {
+  const day = (sleep: [number, number][]) => ({ date: '', steps: [], sleep, heart: [], summary: [], spo2: [] });
+
+  it('сон после полуночи у сегодняшнего дня — ночь пришла', () => {
+    expect(nightAfterArrived('2026-09-20', { '2026-09-21': day([[-60, 40], [30, 99]]) })).toBe(true);
+  });
+
+  it('только сон до полуночи (дневной сон вчера после полудня) — ночь ещё не пришла', () => {
+    expect(nightAfterArrived('2026-09-20', { '2026-09-21': day([[-600, 40]]) })).toBe(false);
+    expect(nightAfterArrived('2026-09-20', {})).toBe(false);
+  });
+
+  it('в 09:00 после ночи вчера сразу финальный, сегодня — нет', () => {
+    const synced = markSynced({}, [0, 1], at(21, 9), (date) => date === '2026-09-20');
+    expect(isFinalDay('2026-09-20', synced)).toBe(true);
+    expect(isFinalDay('2026-09-21', synced)).toBe(false);
+    expect(planDays(synced, at(21, 9, 30)).days).toEqual([0, 2, 3, 4, 5, 6]);
+  });
+
+  it('без ночи вчера до полудня по-прежнему запрашивается', () => {
+    const synced = markSynced({}, [0, 1], at(21, 9));
+    expect(isFinalDay('2026-09-20', synced)).toBe(false);
+  });
+});
+
 describe('СИНТЕТИЧЕСКИЕ: обрыв связи', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -98,5 +131,24 @@ describe('СИНТЕТИЧЕСКИЕ: обрыв связи', () => {
     expect(next.syncFailed).toBe(true);
     expect(next.lastSyncAt).toBe(1000);
     expect(Object.keys(next.raw).length).toBe(1);
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: выброс глюкозы не доходит до графика', () => {
+  it('одиночный скачок вверх убран из сводки дня, соседние замеры и давление того же замера на месте', () => {
+    const base = Date.parse('2026-09-21T06:00:00Z') / 1000;
+    const values = [6, 5.8, 6.2, 6, 5.9, 6.1, 6, 6.2, 13.5, 6, 5.9];
+    const sync = {
+      ...emptySyncResult(),
+      summary: values.map((glucose, i) => ({ ts: base + i * 1800, systolic: 118, diastolic: 76, stress: 20, glucose, hrv: 50 })),
+    };
+    const state = applySyncResult(EMPTY_STATE, sync, null, DAY);
+    const day = state.days.find((d) => d.date === '2026-09-21')!;
+    const spike = day.summaryPoints.find((p) => p.m === 6 * 60 + 8 * 30)!;
+    expect(spike.glucose).toBeNull();
+    expect(spike.systolic).toBe(118);
+    expect(day.summaryPoints.filter((p) => p.glucose !== null)).toHaveLength(values.length - 1);
+    // Сырые ряды не тронуты: подтверждение может прийти со следующим замером.
+    expect(state.raw['2026-09-21'].summary.some((r) => r[4] === 135)).toBe(true);
   });
 });

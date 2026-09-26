@@ -134,9 +134,10 @@ export function busiestHour(
   age: number | null,
 ): number | null {
   const maxHr = age === null ? null : maxHeartRate(age);
-  const cardio = new Array<number>(24).fill(0);
-  if (maxHr !== null) {
-    for (const p of heart) cardio[Math.min(23, Math.floor(p.m / 60))] += cardioPointsFor(p.v, maxHr);
+  const last = stepsPerHour.length - 1;
+  const cardio = new Array<number>(stepsPerHour.length).fill(0);
+  if (maxHr !== null && last >= 0) {
+    for (const p of heart) cardio[Math.max(0, Math.min(last, Math.floor(p.m / 60)))] += cardioPointsFor(p.v, maxHr);
   }
   const maxSteps = Math.max(...stepsPerHour, 0);
   const maxCardio = Math.max(...cardio, 0);
@@ -144,7 +145,7 @@ export function busiestHour(
 
   let best = 0;
   let bestLoad = -1;
-  for (let hour = 0; hour < 24; hour++) {
+  for (let hour = 0; hour < stepsPerHour.length; hour++) {
     const load =
       HOUR_LOAD_STEPS_WEIGHT * (maxSteps ? stepsPerHour[hour] / maxSteps : 0) +
       HOUR_LOAD_HR_WEIGHT * (maxCardio ? cardio[hour] / maxCardio : 0);
@@ -154,6 +155,28 @@ export function busiestHour(
     }
   }
   return bestLoad > 0 ? best : null;
+}
+
+/**
+ * Самый активный час вдоль цикла бодрствования — по тем же рядам, что нарисованы на графике «День»
+ * (минуты от полуночи даты цикла, после полуночи — больше 1440). Считать его по календарным суткам
+ * нельзя: в 3 часа ночи у суток только ночные минуты, и «самым активным» выходил час после полуночи,
+ * хотя на графике днём были прогулки. Ответ — час на циферблате, 0–23.
+ */
+export function busiestCycleHour(
+  steps: { m: number; v: number }[],
+  heart: { m: number; v: number }[],
+  age: number | null,
+  from: number,
+  to: number,
+): number | null {
+  if (!(to >= from)) return null;
+  const first = Math.floor(from / 60);
+  const perHour = new Array<number>(Math.floor(to / 60) - first + 1).fill(0);
+  for (const p of steps) if (p.m >= from && p.m <= to) perHour[Math.floor(p.m / 60) - first] += p.v;
+  const inside = heart.filter((p) => p.m >= from && p.m <= to).map((p) => ({ m: p.m - first * 60, v: p.v }));
+  const best = busiestHour(perHour, inside, age);
+  return best === null ? null : (((first + best) % 24) + 24) % 24;
 }
 
 /**

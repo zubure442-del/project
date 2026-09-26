@@ -11,6 +11,8 @@ import {
   heartByMinute,
   kcalPerStep,
   keytel,
+  corridorPosition,
+  weekActivity,
   weekActivityLevel,
   weekCalories,
   type Body,
@@ -123,5 +125,22 @@ describe('СИНТЕТИЧЕСКИЕ: оценка недели по корид�
     expect(weekActivityLevel({ days, today, body, goal: null })).toBeNull();
     expect(weekActivityLevel({ days: [{ date: today, value: 500 }], today, body, goal: 'keep' })).toBeNull();
     expect(weekActivityLevel({ days: [{ date: '2026-09-20', value: null }], today, body, goal: 'keep' })).toBeNull();
+  });
+
+  it('шкала недели: средний расход, коридор и место на шкале из трёх равных частей', () => {
+    const today = '2026-09-21';
+    const week = weekActivity({ days: [{ date: '2026-09-20', value: 500 }], today, body, goal: 'keep' })!;
+    expect(week.level).toBe('ideal');
+    expect(week.perDay).toBe(500);
+    expect(week.from).toBeCloseTo(bmr(body) * 0.2);
+    expect(week.to).toBeCloseTo(bmr(body) * 0.35);
+    // Середина коридора — середина шкалы; края коридора — границы зелёной части.
+    expect(corridorPosition(450, 300, 600)).toBeCloseTo(0.5);
+    expect(corridorPosition(300, 300, 600)).toBeCloseTo(1 / 3);
+    expect(corridorPosition(600, 300, 600)).toBeCloseTo(2 / 3);
+    expect(corridorPosition(0, 300, 600)).toBe(0);
+    expect(corridorPosition(150, 300, 600)).toBeCloseTo(1 / 6);
+    // Дальше двойной верхней границы шкала не идёт.
+    expect(corridorPosition(5000, 300, 600)).toBe(1);
   });
 });

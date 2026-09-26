@@ -1,7 +1,18 @@
 import type { AutoMeasurePeriod } from '../codec';
 import type { KnownRing } from '../ble';
 import type { RawByDay } from './raw';
-import { EMPTY_RELAY, type ComponentId, type RelayLedger, type ReportMode, type SleepStage, type StoredNorm } from '../domain';
+import {
+  EMPTY_RELAY,
+  type ComponentId,
+  type CycleEnd,
+  type CycleStart,
+  type DayLoad,
+  type NightHr,
+  type RelayLedger,
+  type ReportMode,
+  type SleepStage,
+  type StoredNorm,
+} from '../domain';
 
 /** Одна точка графика: секунды от начала дня + значение. Так день хранится компактно. */
 export interface DayPoint {
@@ -40,6 +51,8 @@ export interface DaySnapshot {
   }[];
   /** Активные ккал за день по нашей минутной модели; null — нет биометрии. У старых сводок поля нет. */
   calories?: number | null;
+  /** Нагрузка дня по пульсовым зонам и главная тренировка (training.ts); null — возраст неизвестен. */
+  load?: DayLoad | null;
   /** Норма шагов дня. У старых сводок из кэша её может не быть — тогда 10 000. */
   stepNorm?: StoredNorm;
   /** Шаги по часам суток: ровно 24 числа. */
@@ -58,6 +71,38 @@ export interface DaySnapshot {
   };
 }
 
+/**
+ * Цикл бодрствования — единица аналитики: итог, сон, активность и организм считаются по нему,
+ * а не по календарным суткам (domain/cycles.ts). Метки — кольцевые секунды.
+ */
+export interface CycleSnapshot {
+  /** Календарная дата начала цикла: по ней цикл попадает в историю. */
+  date: string;
+  start: number;
+  /** null — цикл идёт сейчас. */
+  end: number | null;
+  startedBy: CycleStart;
+  endedBy: CycleEnd | null;
+  /** Что было перед циклом: сон или время без кольца. */
+  before: { from: number; to: number } | null;
+  /** Итог — только когда посчитаны все три составляющие; у цикла без сна его нет. */
+  total: number | null;
+  scores: Record<ComponentId, number | null>;
+  /** Шаги внутри цикла после шумоподавления: от них считается индекс активности. */
+  steps: number;
+  /** Сон, которым начался цикл. */
+  sleep: { start: number; end: number; totalMin: number; deepMin: number; lightMin: number } | null;
+  /** Гипнограмма этого сна: минуты от полуночи даты цикла, вечер накануне — отрицательные. */
+  sleepSegments: { from: number; to: number; stage: SleepStage }[];
+  /** Пульс во сне этого цикла: минимальный и средний. */
+  nightHr: NightHr | null;
+  /**
+   * Ряды для графика «День» вдоль цикла — только у текущего. Минуты от полуночи даты цикла:
+   * после полуночи — больше 1440, график идёт непрерывно.
+   */
+  chart: { from: number; to: number; heart: DayPoint[]; steps: DayPoint[]; restingHr: number | null } | null;
+}
+
 export interface StoredReport {
   date: string;
   mode: ReportMode;
@@ -67,6 +112,12 @@ export interface StoredReport {
 
 export interface VueloState {
   days: DaySnapshot[];
+  /** Циклы бодрствования последних двух недель; последний с `end: null` — текущий. */
+  cycles: CycleSnapshot[];
+  /** Кольцо снято сейчас: с этого момента (кольцевая метка) нет замеров. null — кольцо на руке. */
+  ringOffSince: number | null;
+  /** Нагрузка по дням за весь кэш рядов (до 30 дней): для тренировки дня в «Пике выносливости». */
+  training: Record<string, DayLoad>;
   reports: StoredReport[];
   lastSyncAt: number | null;
   /** Заряд кольца на момент последней синхронизации. */
@@ -81,7 +132,8 @@ export interface VueloState {
   syncFailed: boolean;
   /**
    * Когда день последний раз выгружен целиком (все потоки закрыты маркером) в удачной синхронизации.
-   * По этому времени решаем, финальный ли день и нужно ли его запрашивать снова.
+   * По этому времени решаем, финальный ли день и нужно ли его запрашивать снова. Если ночь после дня
+   * уже пришла, пишется момент финальности — полдень следующего дня (`markSynced`).
    */
   syncedAt: Record<string, number>;
   /** Норма шагов по дням: считается один раз в день и дальше не меняется. */
@@ -104,6 +156,11 @@ export interface VueloState {
   hadCompleteDay: boolean;
   /** «Эстафета»: баланс орехов, пометки «начислено», серия и выплаченные ступени лестницы. */
   relay: RelayLedger;
+  /**
+   * Последнее фоновое обновление (iOS разбудила приложение): когда и чем кончилось. Видно вверху
+   * «Сырого лога» — отладочный журнал живёт в памяти и мог пропасть, если iOS выгрузила приложение.
+   */
+  lastBackground: { at: number; note: string } | null;
   /** Состояние демо-режима: живёт только в памяти, `saveState` его не пишет. У настоящего поля нет. */
   demo?: true;
 }
@@ -137,9 +194,9 @@ export const isProfileComplete = (p: Profile): boolean =>
   p.sex !== null && p.heightCm !== null && p.weightKg !== null && p.birthYear !== null;
 
 export const EMPTY_STATE: VueloState = {
-  days: [], raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
+  days: [], cycles: [], ringOffSince: null, training: {}, raw: {}, reports: [], lastSyncAt: null, syncFailed: false, syncedAt: {}, stepNorms: {}, requestDurations: {}, battery: null,
   ring: null, age: null, profile: EMPTY_PROFILE, autoMeasureMin: 30, batteryAt: null, started: false, hadCompleteDay: false,
-  relay: EMPTY_RELAY,
+  relay: EMPTY_RELAY, lastBackground: null,
 };
 /** Сколько дней показываем в неделе (полоса дней, календарь, карточки недели). */
 export const HISTORY_DAYS = 7;

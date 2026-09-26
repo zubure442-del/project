@@ -1,9 +1,11 @@
 import type { KnownRing } from '../ble/ring';
 import type { SyncResult } from '../ble/sync';
-import { bodyOf, buildTemplateReport } from '../domain';
+import { dateForOffset, nowRingTs } from '../codec';
+import { bodyOf, buildTemplateReport, dropGlucoseSpikes, isAiTemplate } from '../domain';
 import {
   CACHE_DAYS,
   addReport,
+  buildCycleSnapshots,
   buildSnapshots,
   collectStepNorms,
   keepLastDays,
@@ -12,9 +14,10 @@ import {
   recentTemplateIds,
   splitByDay,
   toSyncResult,
+  type RawByDay,
   type VueloState,
 } from '../storage';
-import { DAY_START_HOUR, adviceMode, dayView, findDay, isCompleteDay, scoreOf, todayKey } from './day';
+import { DAY_START_HOUR, adviceModeNow, cycleScoreOf, isCompleteDay, todayKey } from './day';
 import { settleRelayState } from './relay';
 
 /** Глубина выгрузки: кольцо хранит неделю. */
@@ -22,7 +25,8 @@ export const TOTAL_DAYS = 7;
 /**
  * День D финальный, если его последняя удачная выгрузка была не раньше полудня следующего дня:
  * startOfDay(D+1) + FINAL_AFTER_HOURS. К этому времени ночь кончилась и кольцо отдало весь сон.
- * Финальные дни больше не запрашиваем; сегодня — всегда.
+ * Раньше полудня — если ночь после D уже пришла (`nightAfterArrived`): тогда финальна первая
+ * же полная выгрузка D. Финальные дни больше не запрашиваем; сегодня — всегда.
  */
 export const FINAL_AFTER_HOURS = 12;
 /**
@@ -31,9 +35,7 @@ export const FINAL_AFTER_HOURS = 12;
  */
 export const NIGHT_SESSION_UNTIL_HOUR = DAY_START_HOUR;
 
-/** Календарная дата для смещения в днях назад от сегодняшней. */
-export const dateForOffset = (offset: number, today: string): string =>
-  new Date(Date.parse(`${today}T00:00:00Z`) - offset * 86400000).toISOString().slice(0, 10);
+export { dateForOffset };
 
 const short = (date: string) => `${date.slice(8, 10)}.${date.slice(5, 7)}`;
 
@@ -45,6 +47,15 @@ export function finalFrom(date: string): number {
 
 export const isFinalDay = (date: string, syncedAt: Readonly<Record<string, number>>) =>
   syncedAt[date] !== undefined && syncedAt[date] >= finalFrom(date);
+
+/**
+ * Ночь после дня D уже в кэше: у D+1 есть сон после полуночи. Кольцо отдаёт ночь целиком, когда
+ * она кончилась (днём, не ночью), а её вечерняя часть до полуночи приходит в окне дня D той же
+ * выгрузки. Значит, полная выгрузка D после этого — окончательная, ждать полудня незачем.
+ * Сон до полуночи сюда не считается: у D+1 так хранится и дневной сон после полудня D.
+ */
+export const nightAfterArrived = (date: string, raw: Readonly<RawByDay>): boolean =>
+  raw[dateForOffset(-1, date)]?.sleep.some(([minute]) => minute >= 0) ?? false;
 
 /**
  * «Новый пользователь»: удачная загрузка уже была, но ни одного полного дня (все три метрики)
@@ -86,16 +97,22 @@ export function planDays(
 /**
  * Записывает время выгрузки дней, пришедших целиком. В ночной сессии не пишем ничего:
  * кольцо тогда не отдаёт сон. Храним не больше CACHE_DAYS дат.
+ * `nightDone(date)` — ночь после дня уже пришла: такой день финальный сразу, и ему пишется
+ * момент финальности (полдень следующего дня), если он ещё не наступил.
  */
 export function markSynced(
   previous: Readonly<Record<string, number>>,
   completeDays: readonly number[],
   now = new Date(),
+  nightDone: (date: string) => boolean = () => false,
 ): Record<string, number> {
   if (now.getHours() < NIGHT_SESSION_UNTIL_HOUR) return { ...previous };
   const today = todayKey(now);
   const next: Record<string, number> = { ...previous };
-  for (const day of completeDays) next[dateForOffset(day, today)] = now.getTime();
+  for (const day of completeDays) {
+    const date = dateForOffset(day, today);
+    next[date] = day > 0 && nightDone(date) ? Math.max(now.getTime(), finalFrom(date)) : now.getTime();
+  }
   const kept = Object.keys(next).sort().slice(-CACHE_DAYS);
   return Object.fromEntries(kept.map((d) => [d, next[d]]));
 }
@@ -104,16 +121,45 @@ export function markSynced(
  * Сводки дней заново из рядов: оценки, норма шагов (сохранённая не меняется) и калории
  * по текущему профилю. Вызывается после выгрузки и после правки профиля.
  */
-export function rebuildDays(state: VueloState, now = new Date()): VueloState {
-  const days = keepLastDays(
-    buildSnapshots(toSyncResult(state.raw), profileAge(state.profile, now) ?? state.age, state.stepNorms, bodyOf(state.profile, now), now),
+export function rebuildDays(state: VueloState, now = new Date(), horizon?: Date): VueloState {
+  // Одиночные выбросы глюкозы вверх убираем до всех расчётов: ни график, ни «Организм»,
+  // ни «Цикл питания» их не видят. Сырые ряды не трогаем — подтверждение может прийти позже.
+  const raw = toSyncResult(state.raw);
+  const sync = { ...raw, summary: dropGlucoseSpikes(raw.summary) };
+  const age = profileAge(state.profile, now) ?? state.age;
+  const all = buildSnapshots(sync, age, state.stepNorms, bodyOf(state.profile, now), now);
+  const days = keepLastDays(all);
+  const { cycles, ringOffSince } = buildCycleSnapshots(sync, age, days, dataHorizon(state, sync, horizon));
+  // Нагрузка — за все дни рядов, а не только за две недели сводок: привычная нагрузка — четыре недели.
+  const training = Object.fromEntries(
+    all.filter((d) => d.load).map((d) => [d.date, d.load as NonNullable<typeof d.load>]),
   );
   return {
     ...state,
     days,
+    cycles,
+    ringOffSince,
+    training,
     stepNorms: collectStepNorms(state.stepNorms, days),
-    hadCompleteDay: state.hadCompleteDay || days.some(isCompleteDay),
+    hadCompleteDay: state.hadCompleteDay || days.some(isCompleteDay) || cycles.some((c) => c.total !== null),
   };
+}
+
+const ringTsOf = (at: Date) => nowRingTs(at.getTime(), -at.getTimezoneOffset() * 60);
+
+/**
+ * До какого момента есть данные — конец текущего цикла и точка отсчёта «кольцо снято».
+ * После выгрузки это её время; иначе — последняя удачная выгрузка или самый поздний замер
+ * (живой замер бывает позже выгрузки). Текущее время не годится: между выгрузками
+ * замеров нет не потому, что кольцо сняли, а потому, что их ещё не забрали.
+ */
+function dataHorizon(state: VueloState, sync: SyncResult, horizon?: Date): number {
+  if (horizon) return ringTsOf(horizon);
+  const latest = Math.max(
+    0,
+    ...[sync.heart, sync.spo2, sync.summary, sync.steps].map((list) => (list.length ? list[list.length - 1].ts : 0)),
+  );
+  return Math.max(latest, state.lastSyncAt === null ? 0 : ringTsOf(new Date(state.lastSyncAt)));
 }
 
 /**
@@ -129,8 +175,7 @@ export function applySyncResult(
   now = new Date(),
 ): VueloState {
   const raw = mergeRaw(state.raw, splitByDay(sync));
-  const rebuilt = rebuildDays({ ...state, raw }, now);
-  const days = rebuilt.days;
+  const rebuilt = rebuildDays({ ...state, raw }, now, now);
   const base: VueloState = {
     ...rebuilt,
     ring: known ?? state.ring,
@@ -144,24 +189,27 @@ export function applySyncResult(
       ...base,
       lastSyncAt: now.getTime(),
       syncFailed: false,
-      syncedAt: markSynced(state.syncedAt, sync.completeDays, now),
-      reports: withAdvice(state.reports, days, now),
+      syncedAt: markSynced(state.syncedAt, sync.completeDays, now, (date) => nightAfterArrived(date, raw)),
+      reports: withAdvice(state.reports, rebuilt, now),
     },
     now,
   );
 }
 
 /**
- * Совет пишем в историю только для полного дня: сегодня, если он полный, иначе последний полный.
- * Шаблон подбираем без учёта прежнего совета на тот же день и режим: пока слабая сторона
- * та же, текст не прыгает от синхронизации к синхронизации.
+ * Совет пишем в историю только для цикла с итогом: текущего, а если у него итога нет —
+ * последнего полного. Ключ — дата начала цикла. Шаблон подбираем без учёта прежнего совета
+ * на тот же цикл и режим: пока слабая сторона та же, текст не прыгает от синхронизации к синхронизации.
+ * Совет от модели (`state/ai-advice.ts`) на тот же цикл и режим не заменяется.
  */
-function withAdvice(reports: VueloState['reports'], days: VueloState['days'], now: Date): VueloState['reports'] {
-  const date = dayView(days, now).lastComplete;
-  const day = date ? findDay(days, date) : null;
-  if (!date || !day) return reports;
-  const mode = adviceMode(date, now);
-  const others = reports.filter((r) => !(r.date === date && r.mode === mode));
-  const report = buildTemplateReport({ mode, score: scoreOf(day), recentTemplateIds: recentTemplateIds(others) });
-  return addReport(reports, { date, mode, templateId: report.templateId, text: report.text });
+function withAdvice(reports: VueloState['reports'], rebuilt: VueloState, now: Date): VueloState['reports'] {
+  const cycle = [...rebuilt.cycles].reverse().find((c) => c.total !== null);
+  if (!cycle) return reports;
+  // Текущий цикл — по ритму человека (после пробуждения / днём / перед сном), закончившийся — вечерний.
+  const mode = cycle.end === null ? adviceModeNow(rebuilt, now) : 'evening';
+  // Совет от модели на этот цикл и время суток уже есть — шаблоном его не затираем.
+  if (reports.some((r) => r.date === cycle.date && r.mode === mode && isAiTemplate(r.templateId))) return reports;
+  const others = reports.filter((r) => !(r.date === cycle.date && r.mode === mode));
+  const report = buildTemplateReport({ mode, score: cycleScoreOf(cycle), recentTemplateIds: recentTemplateIds(others) });
+  return addReport(reports, { date: cycle.date, mode, templateId: report.templateId, text: report.text });
 }

@@ -1,12 +1,21 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { ACTIVITY_LEVEL_TEXT, formatCount, pizzaSlices, pluralRu, weekCalories, type ActivityLevel } from '../domain';
-import { PizzaSlice } from './Pizza';
+import Svg, { Circle, Rect, Text as SvgText } from 'react-native-svg';
+import {
+  ACTIVITY_LEVEL_TEXT,
+  corridorPosition,
+  formatCount,
+  pizzaSlices,
+  pluralRu,
+  weekCalories,
+  type WeekActivity,
+} from '../domain';
+import { PizzaSlice, PizzaStack } from './Pizza';
 import { Card } from './Screen';
 import { Sheet } from './Sheet';
 import { WeekBars } from './WeekBars';
-import { colors, spacing } from './theme';
+import { colors, spacing, withAlpha } from './theme';
 
 export const CALORIES_WEEK_TITLE = 'Расход активных калорий за неделю';
 /** Больше кусков в ряд не рисуем: дальше это каша. Точное число остаётся в подписи. */
@@ -36,20 +45,57 @@ function SliceRow({ slices, size = 30 }: { slices: number; size?: number }) {
   );
 }
 
+const GAUGE_HEIGHT = 46;
+const GAUGE_BAR = 8;
+/** Половина ширины подписи под бегунком: столько места оставляем до края шкалы. */
+const GAUGE_LABEL_HALF = 72;
+
 /**
- * «Расход активных калорий за неделю»: сумма за 7 дней и то же число в кусках пиццы —
- * чтобы было понятно, сколько это. По нажатию — лист с расходом по дням.
- * Мера грубая и не медицинская: один кусок — ровно `KCAL_PER_PIZZA_SLICE` ккал.
+ * Шкала недели «мало — идеально — много» — тот же язык, что у таймлайна «Кофейного окна»:
+ * красное по краям, зелёная середина — коридор цели. Бегунок — средний расход за день,
+ * под ним подпись оценки. Часть шкалы, где стоит бегунок, яркая, остальные приглушены.
+ */
+function ActivityGauge({ activity, width }: { activity: WeekActivity; width: number }) {
+  const gap = 3;
+  const part = (width - gap * 2) / 3;
+  const position = corridorPosition(activity.perDay, activity.from, activity.to);
+  const zone = activity.level === 'low' ? 0 : activity.level === 'ideal' ? 1 : 2;
+  const x = Math.min(width - GAUGE_BAR, Math.max(GAUGE_BAR, position * width));
+  const labelX = Math.min(width - GAUGE_LABEL_HALF, Math.max(GAUGE_LABEL_HALF, x));
+  const color = activity.level === 'ideal' ? colors.positive : colors.negative;
+  const zoneColor = (i: number) =>
+    i === 1 ? withAlpha(colors.positive, i === zone ? 1 : 0.3) : withAlpha(colors.negative, i === zone ? 0.85 : 0.25);
+  const barY = 6;
+  return (
+    <View pointerEvents="none" style={styles.gauge}>
+      <Svg width={width} height={GAUGE_HEIGHT}>
+        {[0, 1, 2].map((i) => (
+          <Rect key={i} x={i * (part + gap)} y={barY} width={part} height={GAUGE_BAR} rx={GAUGE_BAR / 2} fill={zoneColor(i)} />
+        ))}
+        <Circle cx={x} cy={barY + GAUGE_BAR / 2} r={8} fill={colors.text} stroke={colors.card} strokeWidth={3} />
+        <SvgText x={labelX} y={GAUGE_HEIGHT - 6} fill={color} fontSize={13} fontWeight="500" textAnchor="middle">
+          {ACTIVITY_LEVEL_TEXT[activity.level]}
+        </SvgText>
+      </Svg>
+    </View>
+  );
+}
+
+/**
+ * «Расход активных калорий за неделю» одним блоком: слева пиццы (куски складываются в целые
+ * пиццы), справа сумма и та же сумма в кусках; ниже — шкала недели с оценкой по цели.
+ * По нажатию — лист с расходом по дням. Мера грубая и не медицинская: один кусок —
+ * ровно `KCAL_PER_PIZZA_SLICE` ккал, на экране это число не пишем.
  */
 export function CaloriesWeekCard({
   days,
   width,
-  level,
+  activity,
 }: {
   days: { date: string; value: number | null }[];
   width: number;
   /** Оценка недели по коридору от базового обмена и цели; null — нет биометрии, цели или данных. */
-  level?: ActivityLevel | null;
+  activity?: WeekActivity | null;
 }) {
   const [open, setOpen] = useState(false);
   const total = weekCalories(days.map((d) => d.value));
@@ -66,24 +112,21 @@ export function CaloriesWeekCard({
         style={({ pressed }) => (pressed ? styles.pressed : undefined)}
       >
         <Card title={CALORIES_WEEK_TITLE} right={<Text style={styles.chevron}>›</Text>}>
-          {/* Справа от числа, по нижнему краю — как неделя смотрится относительно цели. */}
-          <View style={styles.totalRow}>
-            <Text style={styles.total}>
-              {total === null ? '—' : formatCount(total)}
-              <Text style={styles.unit}> ккал</Text>
-            </Text>
-            {level ? (
-              <Text style={[styles.level, level === 'ideal' ? styles.levelGood : styles.levelBad]}>
-                {ACTIVITY_LEVEL_TEXT[level]}
+          <View style={styles.hero}>
+            {total !== null ? <PizzaStack slices={slices} /> : null}
+            <View style={styles.heroText}>
+              <Text style={styles.total} numberOfLines={1} adjustsFontSizeToFit>
+                {total === null ? '—' : formatCount(total)}
+                <Text style={styles.unit}> ккал</Text>
               </Text>
-            ) : null}
+              {total !== null ? (
+                <Text style={styles.caption}>
+                  {slices > 0 ? `${slices} ${pluralRu(slices, SLICE_FORMS)} пиццы` : 'Меньше куска пиццы'}
+                </Text>
+              ) : null}
+            </View>
           </View>
-          <SliceRow slices={slices} />
-          {slices > 0 ? (
-            <Text style={styles.caption}>
-              {slices} {pluralRu(slices, SLICE_FORMS)} пиццы
-            </Text>
-          ) : null}
+          {activity ? <ActivityGauge activity={activity} width={width} /> : null}
         </Card>
       </Pressable>
 
@@ -114,15 +157,14 @@ export function CaloriesWeekCard({
 const styles = StyleSheet.create({
   pressed: { opacity: 0.85 },
   chevron: { color: colors.textFaint, fontSize: 22, lineHeight: 24 },
-  totalRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.sm },
+  hero: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginTop: spacing.xs },
+  heroText: { flex: 1 },
   total: { color: colors.text, fontSize: 38, fontWeight: '200', fontVariant: ['tabular-nums'] },
-  level: { fontSize: 14, fontWeight: '500', marginBottom: 6 },
-  levelGood: { color: colors.positive },
-  levelBad: { color: colors.negative },
-  unit: { color: colors.textMuted, fontSize: 15 },
-  slices: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: spacing.sm },
+  unit: { color: colors.textMuted, fontSize: 15, fontWeight: '400' },
+  caption: { color: colors.textMuted, fontSize: 14, marginTop: -2 },
+  gauge: { marginTop: spacing.md },
+  slices: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 4 },
   more: { color: colors.textMuted, fontSize: 13, marginLeft: 2 },
-  caption: { color: colors.textFaint, fontSize: 12, marginTop: spacing.sm },
   rows: { marginTop: spacing.md },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 8 },
   rowDay: { color: colors.text, fontSize: 15, width: 96 },

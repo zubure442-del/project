@@ -145,18 +145,50 @@ export function activityLevel(perDay: number, body: Body, goal: ActivityGoal): A
   return 'ideal';
 }
 
-/**
- * Оценка недели: средний расход по ЗАВЕРШЁННЫМ дням (сегодняшний ещё идёт и среднее занижает).
- * Нет биометрии, цели или ни одного завершённого дня с расходом — оценки нет.
- */
-export function weekActivityLevel(input: {
+/** Оценка недели и то, из чего она получилась: средний расход и коридор цели, ккал в день. */
+export interface WeekActivity {
+  level: ActivityLevel;
+  perDay: number;
+  from: number;
+  to: number;
+}
+
+type WeekActivityInput = {
   days: readonly { date: string; value: number | null }[];
   today: string;
   body: Body | null;
   goal: ActivityGoal | null;
-}): ActivityLevel | null {
+};
+
+/**
+ * Оценка недели: средний расход по ЗАВЕРШЁННЫМ дням (сегодняшний ещё идёт и среднее занижает).
+ * Нет биометрии, цели или ни одного завершённого дня с расходом — оценки нет.
+ */
+export function weekActivity(input: WeekActivityInput): WeekActivity | null {
   if (!input.body || input.goal === null) return null;
   const done = input.days.filter((d) => d.date < input.today && d.value !== null).map((d) => d.value as number);
   if (!done.length) return null;
-  return activityLevel(done.reduce((a, b) => a + b, 0) / done.length, input.body, input.goal);
+  const perDay = done.reduce((a, b) => a + b, 0) / done.length;
+  const corridor = ACTIVITY_CORRIDOR[input.goal];
+  const base = bmr(input.body);
+  return {
+    level: activityLevel(perDay, input.body, input.goal),
+    perDay,
+    from: base * corridor.from,
+    to: base * corridor.to,
+  };
+}
+
+export const weekActivityLevel = (input: WeekActivityInput): ActivityLevel | null => weekActivity(input)?.level ?? null;
+
+/**
+ * Где стоит средний расход на шкале «мало — идеально — много», 0–1. У шкалы три равные части:
+ * до коридора, сам коридор и после него (до двойной верхней границы); внутри части — линейно.
+ * Равные части — чтобы зелёная середина читалась одинаково при любой цели.
+ */
+export function corridorPosition(perDay: number, from: number, to: number): number {
+  const third = 1 / 3;
+  if (perDay < from) return (Math.max(0, perDay) / from) * third;
+  if (perDay <= to) return third + ((perDay - from) / Math.max(1, to - from)) * third;
+  return 2 * third + Math.min(1, (perDay - to) / to) * third;
 }

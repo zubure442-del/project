@@ -57,3 +57,32 @@ export function CheckGlyph({ size = 12, color = colors.bg }: { size?: number; co
     </Svg>
   );
 }
+
+/** Будущие предметы магазина — силуэты на пустой витрине: шляпа, бабочка, мяч для площадки. */
+export type ShopItem = 'hat' | 'bow' | 'ball';
+
+export function ShopItemGlyph({ name, size = 30, color = colors.textFaint }: { name: ShopItem; size?: number; color?: string }) {
+  const p = { stroke: color, strokeWidth: 1.5, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, fill: 'none' };
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      {name === 'hat' ? (
+        <>
+          {/* Цилиндр: высокая тулья, лента и изогнутые поля. */}
+          <Path {...p} d="M8 16.5 7.4 5.8c0-.7 2-1.3 4.6-1.3s4.6.6 4.6 1.3L16 16.5" />
+          <Path {...p} d="M7.8 13.2h8.4" />
+          <Path {...p} d="M3.5 16.5c1.5 1.8 15.5 1.8 17 0" />
+        </>
+      ) : name === 'bow' ? (
+        <>
+          <Path {...p} d="M10.2 12 4 8v8zM13.8 12 20 8v8z" />
+          <Path {...p} d="M10.2 10.4h3.6v3.2h-3.6z" />
+        </>
+      ) : (
+        <>
+          <Path {...p} d="M12 4a8 8 0 1 0 0 16a8 8 0 1 0 0-16z" />
+          <Path {...p} d="M4.6 9.5c4.8 1.8 10 1.8 14.8 0M4.6 14.5c4.8-1.8 10-1.8 14.8 0" />
+        </>
+      )}
+    </Svg>
+  );
+}

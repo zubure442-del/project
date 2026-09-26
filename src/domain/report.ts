@@ -1,7 +1,30 @@
 import type { ComponentId, DayScore } from './score';
 
-/** morning — до 11:00 про ночь, day — до 18:00 про текущий день, evening — итог дня. */
+/**
+ * Три мнения за цикл бодрствования (`adviceSlot`): morning — после пробуждения, про ночь и день
+ * впереди; day — про то, как идёт день; evening — перед сном, про прошедший день и сон.
+ */
 export type ReportMode = 'morning' | 'day' | 'evening';
+
+/** «После пробуждения» — столько минут от подъёма. */
+export const ADVICE_MORNING_MIN = 4 * 60;
+/** «Перед сном» — столько минут до начала окна «Режима сна». */
+export const ADVICE_EVENING_BEFORE_BED_MIN = 3 * 60;
+/** Окна сна нет — считаем, что человек ложится в 23:00. */
+export const ADVICE_DEFAULT_BEDTIME_MIN = 23 * 60;
+
+/**
+ * Какое мнение Лиса сейчас — по ритму человека, а не по часам (владелец 26.09: «один совет после
+ * пробуждения, один в течение дня, последний перед сном»): первые 4 часа после подъёма — утро,
+ * последние 3 часа до окна сна — вечер, между ними — день. Утро важнее: если человек встал поздно
+ * и вечер наступил бы сразу, первые 4 часа всё равно утро. Все минуты — от полуночи даты начала
+ * цикла (после полуночи — больше 1440).
+ */
+export function adviceSlot(input: { wakeMinute: number; bedtimeMinute: number | null; nowMinute: number }): ReportMode {
+  if (input.nowMinute < input.wakeMinute + ADVICE_MORNING_MIN) return 'morning';
+  const bedtime = input.bedtimeMinute ?? ADVICE_DEFAULT_BEDTIME_MIN;
+  return input.nowMinute >= bedtime - ADVICE_EVENING_BEFORE_BED_MIN ? 'evening' : 'day';
+}
 
 export interface ReportInput {
   mode: ReportMode;

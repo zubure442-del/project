@@ -13,6 +13,10 @@ export async function loadState(): Promise<VueloState> {
     const parsed = JSON.parse(raw) as Partial<VueloState>;
     return {
       days: parsed.days ?? [],
+      // Старый кэш циклов не знал: они пересоберутся из рядов при первой же выгрузке или правке.
+      cycles: parsed.cycles ?? [],
+      ringOffSince: parsed.ringOffSince ?? null,
+      training: parsed.training ?? {},
       // Старый кэш без рядов переносим, иначе сон пропадёт при первой же синхронизации.
       raw: parsed.raw ?? migrateSnapshots(parsed.days ?? []),
       reports: parsed.reports ?? [],
@@ -32,6 +36,7 @@ export async function loadState(): Promise<VueloState> {
       // Старый кэш флага не знал: полный день в сохранённых сводках — значит, пользователь уже не новый.
       hadCompleteDay: parsed.hadCompleteDay ?? (parsed.days ?? []).some((d) => d?.total !== null && d?.total !== undefined),
       relay: { ...EMPTY_RELAY, ...(parsed.relay ?? {}) },
+      lastBackground: parsed.lastBackground ?? null,
     };
   } catch {
     return EMPTY_STATE; // повреждённое хранилище не должно ломать запуск

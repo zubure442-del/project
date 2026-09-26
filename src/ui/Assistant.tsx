@@ -1,9 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
-import { ADVICE_LABEL, AUTOPHAGY_INFO, coffeeClock, type CoffeeWindow, type FoodCycle } from '../domain';
+import {
+  ADVICE_LABEL,
+  AUTOPHAGY_INFO,
+  EFFORT_TEXT,
+  ENDURANCE_INFO,
+  SLEEP_MODE_INFO,
+  SLEEP_MODE_PHASE_TEXT,
+  coffeeClock,
+  pluralRu,
+  type CoffeeWindow,
+  type Effort,
+  type FoodCycle,
+  type SleepMode,
+  type WorkoutPlan,
+} from '../domain';
 import type { AssistantSlide } from '../state/day';
+import type { EnduranceView } from '../state/endurance';
+import { CAROUSEL_GAP, carouselLayout, carouselPage } from './carouselLayout';
 import { Flask } from './Flask';
 import { InfoButton } from './Sheet';
 import { SparkIcon } from './TabIcons';
@@ -15,12 +31,29 @@ import { colors, radius, spacing, withAlpha } from './theme';
  * на экране вместе с маскотом: заходишь в приложение — и листать вниз не нужно.
  */
 export const ASSISTANT_HEIGHT = 300;
-/** Подпись-подсказка в правом нижнем углу карточки: дальше по свайпу — готовые подсказки. */
-export const LIFEHACKS_LABEL = 'Лайфхаки';
-/** Один проход волны по шевронам. */
-const SWIPE_MS = 1600;
-/** Насколько шеврон уезжает вправо на своём такте. */
-const SWIPE_PX = 3;
+/**
+ * Шрифт «Мнения Лиса» по длине текста: карточка фиксированной высоты, а совет от модели длиннее
+ * шаблонного. На ширине iPhone SE (карточка с краем следующей справа) в неё помещается 5 строк
+ * по 18 pt (≈ 120 знаков) или 6 строк по 16 и 15 pt (≈ 165 и 190 знаков). Больше шести строк —
+ * многоточие, но модель просим короче.
+ */
+export const ADVICE_MAX_LINES = 6;
+export function adviceFontSize(text: string): { fontSize: number; lineHeight: number } {
+  if (text.length <= 120) return { fontSize: 18, lineHeight: 27 };
+  if (text.length <= 165) return { fontSize: 16, lineHeight: 23 };
+  return { fontSize: 15, lineHeight: 21 };
+}
+
+/**
+ * Разовый «кивок» карусели: через NUDGE_DELAY_MS после появления она чуть сдвигается влево
+ * и возвращается — видно, что карточки едут. Только пока человек ни разу не листал её
+ * с запуска приложения; при «Уменьшении движения» — никогда.
+ */
+const NUDGE_DELAY_MS = 1200;
+const NUDGE_BACK_MS = 420;
+const NUDGE_PX = 56;
+let swipedOnce = false;
+
 const ZONE_RED = withAlpha(colors.danger, 0.6);
 const ZONE_GREEN = '#5DBB8C';
 
@@ -46,63 +79,6 @@ function CardGlyph({ name }: { name: Glyph }) {
         <Path {...p} d="M15.5 3.5a8.5 8.5 0 1 0 5 12.7A7 7 0 0 1 15.5 3.5z" />
       )}
     </Svg>
-  );
-}
-
-/**
- * Подсказка «Лайфхаки» в правом нижнем углу первой карточки.
- *
- * Нарочно не выглядит кнопкой: тот же приглушённый цвет и кегль, что у подписи модели слева,
- * без акцента, фона и рамки, и не принимает нажатия. Движение — два тонких шеврона, которые
- * по очереди светлеют и уезжают вправо: так читается жест свайпа, а не «нажми сюда».
- * При системном «Уменьшении движения» шевроны просто стоят.
- */
-function SwipeHint() {
-  const reduce = useReduceMotion();
-  const phase = useSharedValue(0);
-
-  useEffect(() => {
-    if (reduce) {
-      phase.value = 0;
-      return;
-    }
-    phase.value = 0;
-    phase.value = withRepeat(withTiming(1, { duration: SWIPE_MS, easing: Easing.linear }), -1, false);
-  }, [phase, reduce]);
-
-  /** Волна по шевронам: каждый светлеет со своим сдвигом. */
-  const wave = (value: number, shift: number) => {
-    'worklet';
-    const d = (value - shift + 1) % 1;
-    return Math.max(0, 1 - Math.abs(d - 0.2) / 0.25);
-  };
-  const first = useAnimatedStyle(() => {
-    const k = wave(phase.value, 0);
-    return { opacity: 0.35 + 0.65 * k, transform: [{ translateX: k * SWIPE_PX }] };
-  });
-  const second = useAnimatedStyle(() => {
-    const k = wave(phase.value, 0.18);
-    return { opacity: 0.35 + 0.65 * k, transform: [{ translateX: k * SWIPE_PX }] };
-  });
-
-  return (
-    <View style={styles.hint} pointerEvents="none">
-      <Text style={styles.hintText}>{LIFEHACKS_LABEL}</Text>
-      {[first, second].map((style, i) => (
-        <Animated.View key={i} style={[styles.chevron, style]}>
-          <Svg width={10} height={12} viewBox="0 0 10 12">
-            <Path
-              d="M2.5 1.5L7 6l-4.5 4.5"
-              stroke={colors.textFaint}
-              strokeWidth={1.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          </Svg>
-        </Animated.View>
-      ))}
-    </View>
   );
 }
 
@@ -184,22 +160,188 @@ function FoodBody({ food }: { food: FoodCycle }) {
   );
 }
 
+/** «Через 2 ч 10 мин», «через 25 мин». */
+const inTime = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  return h ? `через ${h} ч${m ? ` ${m} мин` : ''}` : `через ${m} мин`;
+};
+
+/**
+ * Уровень нагрузки: пять делений, залиты до нужного — как индикатор громкости.
+ * Без номеров зон и пульса: у кольца нет экрана, во время тренировки пульс не виден.
+ */
+function EffortScale({ effort }: { effort: Effort }) {
+  return (
+    <View style={styles.effort} pointerEvents="none">
+      {[1, 2, 3, 4, 5].map((level) => (
+        <View key={level} style={[styles.effortStep, level <= effort && styles.effortOn]} />
+      ))}
+    </View>
+  );
+}
+
+const MINUTE_FORMS = ['минута', 'минуты', 'минут'] as const;
+
+/**
+ * Тренировка дня простыми словами: название, одной фразой — что делать и как это должно ощущаться,
+ * шкала нагрузки и сколько заниматься.
+ */
+function WorkoutBlock({ plan }: { plan: WorkoutPlan }) {
+  return (
+    <View style={styles.workout}>
+      <Text style={styles.workoutTitle}>{plan.title}</Text>
+      <Text style={styles.workoutHint}>{plan.hint}</Text>
+      <EffortScale effort={plan.effort} />
+      <View style={styles.effortRow}>
+        <Text style={styles.effortText}>{EFFORT_TEXT[plan.effort]}</Text>
+        <Text style={styles.workoutMinutes}>
+          {plan.minutes} {pluralRu(plan.minutes, MINUTE_FORMS)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * «Пик выносливости»: окно крупно, под ним где мы сейчас и тренировка дня — по готовности организма,
+ * нагрузке последних недель и цели профиля. Как это считается, не объясняем: только общие слова в «i».
+ */
+function EnduranceBody({ peak }: { peak: EnduranceView }) {
+  const status =
+    peak.nowMinute < peak.from
+      ? `Начнётся ${inTime(peak.from - peak.nowMinute)}`
+      : peak.nowMinute < peak.to
+        ? 'Сейчас лучшее время'
+        : 'Пик на сегодня прошёл';
+  return (
+    <View style={styles.bodyGap}>
+      <View>
+        <Text style={styles.peakTime}>
+          {coffeeClock(peak.from)}–{coffeeClock(peak.to)}
+        </Text>
+        <Text style={styles.text}>{status}</Text>
+      </View>
+      <WorkoutBlock plan={peak.plan} />
+    </View>
+  );
+}
+
+/** «8 ч 05 мин», «45 мин». */
+const duration = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = Math.round(minutes % 60);
+  return h ? `${h} ч ${String(m).padStart(2, '0')} мин` : `${m} мин`;
+};
+
+/**
+ * «Режим сна»: окно отхода ко сну крупно, под ним где мы сейчас, подъём и сколько сна нужно;
+ * ниже — накопившийся долг сна красным и за сколько ночей он вернётся по графику.
+ * Как это считается, не объясняем: только общие слова в «i».
+ */
+function SleepModeBody({ plan }: { plan: SleepMode }) {
+  return (
+    <View style={styles.bodyGap}>
+      <View>
+        <Text style={styles.mealTitle}>Лечь спать</Text>
+        <Text style={styles.peakTime}>
+          {coffeeClock(plan.from)}–{coffeeClock(plan.to)}
+        </Text>
+      </View>
+      {/* Днём строки нет: «План на вечер» при сне в два часа ночи звучал нелепо. */}
+      {SLEEP_MODE_PHASE_TEXT[plan.phase] ? <Text style={styles.text}>{SLEEP_MODE_PHASE_TEXT[plan.phase]}</Text> : null}
+      <View style={styles.meals}>
+        <View style={styles.meal}>
+          <Text style={styles.mealTitle}>Подъём</Text>
+          <Text style={styles.mealTime}>{coffeeClock(plan.wake)}</Text>
+        </View>
+        <View style={styles.meal}>
+          <Text style={styles.mealTitle}>Нужно сна</Text>
+          <Text style={styles.mealTime}>{duration(plan.needMin)}</Text>
+        </View>
+      </View>
+      {plan.debtMin > 0 ? (
+        <View>
+          {/* Долг — красным: это единственное, что здесь требует внимания. */}
+          <Text style={styles.debt}>У вас накопился долг сна {duration(plan.debtMin)}</Text>
+          <Text style={styles.small}>
+            Вернём за {plan.repayNights} {pluralRu(plan.repayNights, ['ночь', 'ночи', 'ночей'])} по графику Vuelo
+          </Text>
+        </View>
+      ) : (
+        <Text style={styles.small}>Долга сна нет</Text>
+      )}
+    </View>
+  );
+}
+
+/** Такт точек «Лис смотрит…»: каждая загорается по очереди. */
+const THINKING_DOT_MS = 420;
+/** Новое мнение проявляется, а не подменяется молча. */
+const ADVICE_FADE_MS = 450;
+
+function ThinkingDot({ index }: { index: number }) {
+  const reduceMotion = useReduceMotion();
+  const on = useSharedValue(reduceMotion ? 1 : 0.25);
+  useEffect(() => {
+    if (reduceMotion) {
+      on.value = 1;
+      return;
+    }
+    on.value = withDelay(
+      index * THINKING_DOT_MS,
+      withRepeat(withSequence(withTiming(1, { duration: THINKING_DOT_MS }), withTiming(0.25, { duration: THINKING_DOT_MS * 2 })), -1),
+    );
+  }, [index, on, reduceMotion]);
+  const style = useAnimatedStyle(() => ({ opacity: on.value }));
+  return <Animated.View style={[styles.thinkingDot, style]} />;
+}
+
+/**
+ * Мнение Лиса. Пока идёт выгрузка или запрос за свежим мнением (`foxThinking`), вместо старого
+ * текста — «Лис смотрит, как прошла ночь» и три точки: так видно, что Лис разбирает свежие данные,
+ * а не показывает вчерашнее. Новый текст проявляется (кроме «Уменьшения движения»); текст, который
+ * был при появлении карточки, показывается сразу.
+ */
+function AdviceBody({ text, thinking }: { text: string; thinking: string | null }) {
+  const reduceMotion = useReduceMotion();
+  const [initial] = useState(thinking ? null : text);
+  if (thinking) {
+    return (
+      <View style={[styles.advice, styles.thinking]}>
+        <Text style={styles.thinkingText}>{thinking}</Text>
+        <View style={styles.thinkingDots}>
+          {[0, 1, 2].map((i) => (
+            <ThinkingDot key={i} index={i} />
+          ))}
+        </View>
+      </View>
+    );
+  }
+  return (
+    <Animated.View key={text} entering={!reduceMotion && text !== initial ? FadeIn.duration(ADVICE_FADE_MS) : undefined} style={styles.advice}>
+      <Text style={[styles.adviceText, adviceFontSize(text)]} numberOfLines={ADVICE_MAX_LINES} ellipsizeMode="tail">
+        {text}
+      </Text>
+    </Animated.View>
+  );
+}
+
 interface Slide {
   key: Exclude<AssistantSlide, 'advice'>;
   title: string;
   glyph: Glyph;
   /** «i» в шапке карточки: объяснение простыми словами. */
   info?: { title: string; text: string };
-  /** Заглушка «Скоро» с одной декоративной строкой. */
-  soon?: string;
 }
 
 const SLIDES: Slide[] = [
   // «Цикл питания» стоит раньше кофейного окна.
   { key: 'food', title: 'Цикл питания', glyph: 'food', info: AUTOPHAGY_INFO },
+  // «Пик выносливости» — перед кофейным окном.
+  { key: 'endurance', title: 'Пик выносливости', glyph: 'bolt', info: ENDURANCE_INFO },
   { key: 'coffee', title: 'Кофейное окно', glyph: 'coffee' },
-  { key: 'endurance', title: 'Пик выносливости', glyph: 'bolt', soon: 'Покажет время дня, когда тренировки даются легче.' },
-  { key: 'sleepmode', title: 'Режим сна', glyph: 'moon', soon: 'Поможет держать ровное время отхода ко сну.' },
+  { key: 'sleepmode', title: 'Режим сна', glyph: 'moon', info: SLEEP_MODE_INFO },
 ];
 
 /**
@@ -216,72 +358,104 @@ export function AssistantCarousel({
   slides,
   advice,
   adviceLabel,
+  thinking = null,
   coffee,
   food,
+  endurance = null,
+  sleepMode = null,
 }: {
   slides: readonly AssistantSlide[];
   advice: string | null;
   adviceLabel: string;
+  /** «Лис смотрит, как прошла ночь» — вместо совета, пока готовится свежее мнение. */
+  thinking?: string | null;
   coffee: (CoffeeWindow & { nowMinute: number }) | null;
   food: FoodCycle | null;
+  endurance?: EnduranceView | null;
+  sleepMode?: SleepMode | null;
 }) {
   const { width } = useWindowDimensions();
+  const reduceMotion = useReduceMotion();
   const [page, setPage] = useState(0);
-  const inner = width - spacing.md * 4;
+  const scroll = useRef<ScrollView>(null);
+  const nudge = useRef<ReturnType<typeof setTimeout>[]>([]);
   const shown = SLIDES.filter(
-    (card) => slides.includes(card.key) && (card.key !== 'coffee' || coffee) && (card.key !== 'food' || food),
+    (card) =>
+      slides.includes(card.key) &&
+      (card.key !== 'coffee' || coffee) &&
+      (card.key !== 'food' || food) &&
+      (card.key !== 'endurance' || endurance) &&
+      (card.key !== 'sleepmode' || sleepMode),
   );
   const pages = 1 + shown.length;
+  const layout = carouselLayout(width, pages);
+  const inner = layout.card - spacing.md * 2;
+  const canSwipe = pages > 1;
+
+  // Разовый «кивок» — пока человек ни разу не листал карусель с запуска приложения.
+  useEffect(() => {
+    if (!canSwipe || reduceMotion || swipedOnce) return;
+    const timers = [
+      setTimeout(() => scroll.current?.scrollTo({ x: NUDGE_PX, animated: true }), NUDGE_DELAY_MS),
+      setTimeout(() => scroll.current?.scrollTo({ x: 0, animated: true }), NUDGE_DELAY_MS + NUDGE_BACK_MS),
+    ];
+    nudge.current = timers;
+    return () => timers.forEach(clearTimeout);
+  }, [canSwipe, reduceMotion]);
+
+  const onDrag = () => {
+    swipedOnce = true;
+    nudge.current.forEach(clearTimeout);
+  };
 
   return (
     <View style={styles.root}>
       <ScrollView
+        ref={scroll}
         horizontal
-        pagingEnabled
         showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / width))}
+        // Шаг — карточка с зазором; за один свайп — ровно одна карточка.
+        snapToInterval={layout.step}
+        snapToAlignment="start"
+        decelerationRate="fast"
+        disableIntervalMomentum
+        scrollEnabled={canSwipe}
+        contentContainerStyle={[styles.track, { gap: CAROUSEL_GAP }]}
+        onScrollBeginDrag={onDrag}
+        onMomentumScrollEnd={(e) => setPage(carouselPage(e.nativeEvent.contentOffset.x, layout.step, pages))}
       >
-        <View style={[styles.page, { width }]}>
-          <View style={styles.card}>
-            <View style={styles.head}>
-              <SparkIcon color={colors.accent} />
-              <Text style={styles.title}>AI Ассистент</Text>
-            </View>
-            {advice ? (
-              <>
-                <Text style={styles.small}>{adviceLabel}</Text>
-                <View style={styles.advice}>
-                  <Text style={styles.adviceText}>{advice}</Text>
-                </View>
-              </>
-            ) : (
-              <Text style={styles.text}>{ADVICE_LABEL} появится, когда день будет полным</Text>
-            )}
-            <View style={styles.flex} />
-            {/* Слева — подпись модели, справа — подсказка про свайп. */}
-            <View style={styles.footer}>
-              <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
-              <SwipeHint />
-            </View>
+        <View style={[styles.card, { width: layout.card }]}>
+          <View style={styles.head}>
+            <SparkIcon color={colors.accent} />
+            <Text style={styles.title}>AI Ассистент</Text>
           </View>
+          {advice ? (
+            <>
+              <Text style={styles.small}>{adviceLabel}</Text>
+              <AdviceBody text={advice} thinking={thinking} />
+            </>
+          ) : (
+            <Text style={styles.text}>{ADVICE_LABEL} появится, когда день будет полным</Text>
+          )}
+          <View style={styles.flex} />
+          <Text style={styles.poweredBy}>Powered by YandexGPT</Text>
         </View>
         {shown.map((card) => (
-          <View key={card.key} style={[styles.page, { width }]}>
-            <View style={styles.card}>
-              <View style={styles.head}>
-                <CardGlyph name={card.glyph} />
-                <Text style={styles.title}>{card.title}</Text>
-                {card.info ? <InfoButton title={card.info.title} text={card.info.text} /> : null}
-                {card.soon ? <Text style={styles.soon}>Скоро</Text> : null}
-              </View>
-              {card.soon ? (
-                <Text style={styles.text}>{card.soon}</Text>
-              ) : card.key === 'food' ? (
-                food && <FoodBody food={food} />
-              ) : (
-                coffee && <CoffeeBody coffee={coffee} nowMinute={coffee.nowMinute} width={inner} />
-              )}
+          <View key={card.key} style={[styles.card, { width: layout.card }]}>
+            <View style={styles.head}>
+              <CardGlyph name={card.glyph} />
+              <Text style={styles.title}>{card.title}</Text>
+              {card.info ? <InfoButton title={card.info.title} text={card.info.text} /> : null}
             </View>
+            {card.key === 'food' ? (
+              food && <FoodBody food={food} />
+            ) : card.key === 'sleepmode' ? (
+              sleepMode && <SleepModeBody plan={sleepMode} />
+            ) : card.key === 'endurance' ? (
+              endurance && <EnduranceBody peak={endurance} />
+            ) : (
+              coffee && <CoffeeBody coffee={coffee} nowMinute={coffee.nowMinute} width={inner} />
+            )}
           </View>
         ))}
       </ScrollView>
@@ -296,19 +470,11 @@ export function AssistantCarousel({
 
 const styles = StyleSheet.create({
   root: { marginTop: spacing.sm },
-  page: { paddingHorizontal: spacing.md },
+  // Слева — обычное поле экрана, справа столько же: последняя карточка встаёт к правому краю.
+  track: { paddingHorizontal: spacing.md },
   card: { height: ASSISTANT_HEIGHT, backgroundColor: colors.card, borderRadius: radius.card, padding: spacing.md, gap: spacing.sm },
   head: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   title: { color: colors.text, fontSize: 17, fontWeight: '500', flex: 1 },
-  soon: {
-    color: colors.textMuted,
-    fontSize: 12,
-    backgroundColor: colors.track,
-    borderRadius: radius.pill,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    overflow: 'hidden',
-  },
   advice: {
     backgroundColor: 'rgba(242, 169, 59, 0.10)',
     borderRadius: radius.card,
@@ -317,17 +483,28 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   adviceText: { color: colors.text, fontSize: 18, lineHeight: 27 },
+  thinking: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  thinkingText: { color: colors.textMuted, fontSize: 16, lineHeight: 23, flexShrink: 1 },
+  thinkingDots: { flexDirection: 'row', gap: 5 },
+  thinkingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
   text: { color: colors.textMuted, fontSize: 15, lineHeight: 22 },
   small: { color: colors.textFaint, fontSize: 12 },
-  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   poweredBy: { color: colors.textFaint, fontSize: 11 },
-  hint: { flexDirection: 'row', alignItems: 'center' },
-  hintText: { color: colors.textFaint, fontSize: 11, marginRight: 3 },
-  chevron: { marginLeft: -3 },
   flex: { flex: 1 },
   bodyGap: { gap: spacing.sm },
   foodBody: { flex: 1, gap: spacing.sm },
   mode: { color: colors.accent, fontSize: 16, fontWeight: '500' },
+  peakTime: { color: colors.text, fontSize: 34, fontWeight: '200', fontVariant: ['tabular-nums'] },
+  debt: { color: colors.negative, fontSize: 15, lineHeight: 21 },
+  workout: { gap: spacing.xs, marginTop: spacing.xs },
+  workoutTitle: { color: colors.text, fontSize: 22, fontWeight: '500' },
+  workoutHint: { color: colors.textMuted, fontSize: 14, lineHeight: 20 },
+  effort: { flexDirection: 'row', gap: 4, marginTop: 2 },
+  effortStep: { flex: 1, height: 6, borderRadius: 3, backgroundColor: colors.track },
+  effortOn: { backgroundColor: colors.accent },
+  effortRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: spacing.sm },
+  effortText: { color: colors.textMuted, fontSize: 13 },
+  workoutMinutes: { color: colors.text, fontSize: 15, fontVariant: ['tabular-nums'] },
   meals: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   meal: { gap: 1 },
   mealTitle: { color: colors.textFaint, fontSize: 12 },
@@ -335,5 +512,6 @@ const styles = StyleSheet.create({
   sectionLabel: { color: colors.textMuted, fontSize: 13, marginTop: spacing.xs },
   dots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: spacing.sm },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.track },
-  dotOn: { backgroundColor: colors.accent },
+  // Открытая карточка — вытянутая точка: видно и сколько карточек, и где ты сейчас.
+  dotOn: { width: 18, backgroundColor: colors.accent },
 });

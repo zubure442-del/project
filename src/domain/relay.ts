@@ -118,3 +118,23 @@ export function relayView(ledger: RelayLedger, todayDay: Pick<RelayDay, 'steps' 
     ladder: STREAK_LADDER.map((r) => ({ ...r, reached: alive && ledger.ladderPaid.includes(r.days) })),
   };
 }
+
+/**
+ * Где серия на дорожке лестницы: 0 — старт, 1 — первая ступень, … 5 — последняя; между
+ * ступенями — дробно, по доле пройденных дней. Для полоски, которая тянется от ступени к ступени.
+ */
+export function ladderPosition(streak: number): number {
+  let prev = 0;
+  for (let i = 0; i < STREAK_LADDER.length; i++) {
+    const { days } = STREAK_LADDER[i];
+    if (streak < days) return i + Math.max(0, streak - prev) / (days - prev);
+    prev = days;
+  }
+  return STREAK_LADDER.length;
+}
+
+/** Следующая награда за серию: сколько дней осталось и сколько орехов. Все пройдены — null. */
+export function nextRung(streak: number): { days: number; left: number; nuts: number } | null {
+  const rung = STREAK_LADDER.find((r) => r.days > streak);
+  return rung ? { days: rung.days, left: rung.days - streak, nuts: rung.nuts } : null;
+}

@@ -232,6 +232,34 @@ export class RingBle implements Transport {
     });
   }
 
+  /**
+   * Подключение для фонового обновления: только уже подключённое или известное по идентификатору
+   * кольцо, без поиска в эфире (в фоне iOS не даёт сканировать без фильтра по сервису), и не дольше
+   * `timeoutMs` — у фоновой задачи мало времени. Не успели — ошибка; запрос на подключение iOS держит
+   * сама и соединит, когда кольцо окажется рядом.
+   */
+  async connectKnown(timeoutMs: number): Promise<void> {
+    if (await this.isLive()) {
+      this.setStatus('ready');
+      return;
+    }
+    const attempt = async () => {
+      await this.waitPoweredOn();
+      const target = (await this.fromSystem()) ?? (await this.fromKnownId());
+      if (!target) throw new Error('кольцо ещё не привязано');
+      await this.attach(target);
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`кольцо не ответило за ${Math.round(timeoutMs / 1000)} с`)), timeoutMs);
+    });
+    try {
+      await Promise.race([attempt(), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** Первая попытка: системное подключение, сохранённый идентификатор, иначе поиск по имени. */
   private async attemptKnown(): Promise<void> {
     const target = (await this.fromSystem()) ?? (await this.fromKnownId());

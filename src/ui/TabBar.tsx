@@ -2,7 +2,7 @@ import * as Haptics from 'expo-haptics';
 import type { BottomTabBarProps } from 'expo-router/tabs';
 import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { findDay, isCompleteDay, tabAvailable, useVuelo } from '../state';
+import { tabAvailable, useTabDay } from '../state';
 import { Logo } from './Logo';
 import { CENTER_SIZE, TAB_ICON_SIZE, TAB_ICON_TOP, TAB_LABEL_LINE, TAB_LABEL_SIZE, tabBarLayout } from './tabBarLayout';
 import { colors } from './theme';
@@ -19,9 +19,9 @@ const UNAVAILABLE_OPACITY = 0.35;
 export function TabBar({ state, descriptors, navigation, insets }: BottomTabBarProps) {
   // Ширина экрана на вертикальную разметку не влияет: считаем только высоты.
   const layout = tabBarLayout(0, insets.bottom);
-  // Для дня без всех трёх метрик Сон, Активность и Организм закрыты: на «Сегодня» — экран калибровки.
-  const { state: vuelo, selectedDate } = useVuelo();
-  const complete = isCompleteDay(findDay(vuelo.days, selectedDate));
+  // Сон, Активность и Организм закрыты, если показать нечего: сегодня — цикл без итога и активности
+  // (экран калибровки), прошлый день — без данных.
+  const { tabsOpen: complete } = useTabDay();
   const current = state.routes[state.index]?.name;
   useEffect(() => {
     if (current && !tabAvailable(current, complete)) navigation.navigate(CENTER_ROUTE);

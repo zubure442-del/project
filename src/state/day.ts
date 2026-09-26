@@ -1,6 +1,7 @@
 import { dateKey, nowRingTs } from '../codec';
 import {
   ADVICE_LABEL,
+  adviceSlot,
   buildTemplateReport,
   coffeeWindow,
   foodCycle,
@@ -10,8 +11,12 @@ import {
   type FoodCycle,
   type Report,
   type ReportMode,
+  type SleepMode,
 } from '../domain';
-import { recentTemplateIds, type DaySnapshot, type VueloState } from '../storage';
+import { recentTemplateIds, type CycleSnapshot, type DaySnapshot, type VueloState } from '../storage';
+import { currentCycle, cycleClock } from './cycle';
+import { enduranceFor, type EnduranceView } from './endurance';
+import { sleepModeFor } from './sleep-mode';
 import { foodInput } from './food';
 
 /** Если данные свежее десяти минут, к кольцу не идём. */
@@ -23,7 +28,10 @@ export const BATTERY_STALE_MS = 30 * 60 * 1000;
 export const isFresh = (state: VueloState, now = Date.now()) =>
   state.lastSyncAt !== null && !state.syncFailed && now - state.lastSyncAt < CACHE_FRESH_MS;
 
-/** До 11:00 — про ночь, до 18:00 — про текущий день, позже — итог дня. */
+/**
+ * Запасное деление по часам — когда у цикла нет сна и подъёма (совета такому циклу всё равно
+ * не показываем): до 11:00 — утро, до 18:00 — день, позже — вечер.
+ */
 export const reportMode = (now: Date): ReportMode =>
   now.getHours() < 11 ? 'morning' : now.getHours() < 18 ? 'day' : 'evening';
 
@@ -142,61 +150,68 @@ export function shortDate(date: string): string {
 export const todayTabLabel = (selected: string, today: string) => (selected === today ? 'Сегодня' : shortDate(selected));
 
 /**
- * Данные для «Кофейного окна» — только по сегодняшней ночи. Оценки сна за сегодня нет —
- * null: карточка не показывается вовсе, без заглушек и без «последней доступной ночи».
+ * Данные для «Кофейного окна» — по сну текущего цикла бодрствования. Нет цикла со сном и оценкой
+ * сна — null: карточки нет вовсе, без заглушек и без «последней доступной ночи».
+ * Минуты — от полуночи даты начала цикла: после полуночи цикл продолжается (больше 1440).
  * Обычный отход ко сну — по последним ночам (в минутах от полуночи дня пробуждения + 1440).
  */
-export function coffeeInput(days: DaySnapshot[], now = new Date()): CoffeeInput | null {
-  const today = todayKey(now);
-  const night = findDay(days, today);
-  const sleepScore = night?.scores.sleep ?? null;
-  if (!night || sleepScore === null || !night.sleepSegments.length) return null;
-  const withSleep = [...days]
-    .filter((d) => d.date <= today && d.sleep !== null && d.sleepSegments.length > 0)
+export function coffeeInput(state: Pick<VueloState, 'cycles' | 'ringOffSince' | 'days'>, now = new Date()): CoffeeInput | null {
+  const clock = cycleClock(state, now);
+  if (!clock) return null;
+  const { cycle, date, nowMinute, sleepScore } = clock;
+  const previous = [...state.days]
+    .filter((d) => d.date < date && d.sleep !== null && d.sleepSegments.length > 0)
     .sort((a, b) => a.date.localeCompare(b.date));
   return {
-    wakeMinute: night.sleepSegments[night.sleepSegments.length - 1].to,
+    wakeMinute: cycle.sleepSegments[cycle.sleepSegments.length - 1].to,
     sleepScore,
-    bedtimes: withSleep.map((d) => d.sleepSegments[0].from + 1440),
-    nowMinute: now.getHours() * 60 + now.getMinutes(),
+    bedtimes: [...previous.map((d) => d.sleepSegments[0].from + 1440), cycle.sleepSegments[0].from + 1440],
+    nowMinute,
   };
 }
 
 /** Рекомендательные карточки «Сегодня» в карусели «AI Ассистент», по порядку. */
 export type AssistantSlide = 'advice' | 'food' | 'coffee' | 'endurance' | 'sleepmode';
-/** Карточки «Скоро»: показываются вместе с остальными рекомендациями. */
-export const SOON_SLIDES = ['endurance', 'sleepmode'] as const;
 
-/** Рекомендательный слой «Сегодня»: совет, цикл питания, кофейное окно и карточки «Скоро». */
+/** Рекомендательный слой «Сегодня»: совет, цикл питания, пик выносливости, кофейное окно и режим сна. */
 export interface Recommendations {
   advice: Report | null;
   /** null — оценки сна за сегодня нет, карточки нет. */
   coffee: (CoffeeWindow & { nowMinute: number }) | null;
   /** «Цикл питания» стоит раньше кофейного окна; null — оценки сна за сегодня нет. */
   food: FoodCycle | null;
+  /** «Пик выносливости» — перед кофейным окном; null — у текущего цикла нет сна. */
+  endurance: EnduranceView | null;
+  /** «Режим сна» — последняя карточка; null — у текущего цикла нет сна. */
+  sleepMode: SleepMode | null;
   slides: AssistantSlide[];
 }
 
 /**
- * Рекомендации осмысленны только для текущего дня. Для любого прошлого дня — null:
- * скрываются все карточки-рекомендации целиком (совет, кофейное окно, «Скоро»),
- * а данные и графики дня остаются.
+ * Рекомендации осмысленны только для текущего цикла, то есть для сегодняшней даты в календаре.
+ * Для любого прошлого дня — null: скрываются все карточки-рекомендации целиком
+ * (совет, питание, пик выносливости, кофейное окно, режим сна), а данные и графики дня остаются.
  */
 export function recommendationsFor(state: VueloState, date: string, now = new Date()): Recommendations | null {
   if (date !== todayKey(now)) return null;
-  const input = coffeeInput(state.days, now);
+  const input = coffeeInput(state, now);
   const coffee = input ? { ...coffeeWindow(input), nowMinute: input.nowMinute } : null;
   const meals = foodInput(state, now);
   const food = meals ? foodCycle(meals) : null;
+  const endurance = enduranceFor(state, now);
+  const sleepMode = sleepModeFor(state, now);
   return {
-    advice: adviceFor(state, date, now),
+    advice: adviceFor(state, now),
     coffee,
     food,
+    endurance,
+    sleepMode,
     slides: [
       'advice',
       ...(food ? (['food'] as const) : []),
+      ...(endurance ? (['endurance'] as const) : []),
       ...(coffee ? (['coffee'] as const) : []),
-      ...SOON_SLIDES,
+      ...(sleepMode ? (['sleepmode'] as const) : []),
     ],
   };
 }
@@ -229,21 +244,39 @@ export const scoreOf = (day: DaySnapshot) => ({
   restingHr: day.restingHr === null ? null : { value: day.restingHr, source: day.restingHrSource ?? ('day' as const) },
 });
 
-/** Режим совета для дня: сегодня — по времени суток, прошедший день — «как прошёл день». */
-export const adviceMode = (date: string, now = new Date()): ReportMode =>
-  date === todayKey(now) ? reportMode(now) : 'evening';
+/**
+ * Какое мнение Лиса сейчас у текущего цикла: после пробуждения, днём или перед сном (`adviceSlot`) —
+ * от подъёма этого цикла и окна «Режима сна». Нет сна у цикла — по часам (`reportMode`).
+ */
+export function adviceModeNow(state: VueloState, now = new Date()): ReportMode {
+  const input = coffeeInput(state, now);
+  if (!input) return reportMode(now);
+  const bedtime = sleepModeFor(state, now)?.from ?? null;
+  return adviceSlot({ wakeMinute: input.wakeMinute, bedtimeMinute: bedtime, nowMinute: input.nowMinute });
+}
+
+/** Оценки цикла в виде, который понимает генератор советов. */
+export const cycleScoreOf = (cycle: CycleSnapshot) => ({
+  total: cycle.total,
+  sleep: c(cycle.scores.sleep),
+  activity: c(cycle.scores.activity),
+  state: c(cycle.scores.state),
+  restingHr: null,
+});
 
 /**
- * Совет для дня. Только для полного дня: по неполному данных не хватает, и совет вышел бы случайным.
- * Уже выданный совет берём из истории, чтобы при перезапуске текст не менялся.
+ * Совет — по текущему циклу и только когда у него есть итог: по неполному данных не хватает,
+ * и совет вышел бы случайным. Три совета за цикл — после пробуждения, днём и перед сном
+ * (`adviceModeNow`). Уже выданный совет берём из истории (ключ — дата начала цикла и режим),
+ * чтобы при перезапуске текст не менялся.
  */
-export function adviceFor(state: VueloState, date: string, now = new Date()): Report | null {
-  const day = findDay(state.days, date);
-  if (!isCompleteDay(day) || !day) return null;
-  const mode = adviceMode(date, now);
-  const stored = state.reports.find((r) => r.date === date && r.mode === mode);
+export function adviceFor(state: VueloState, now = new Date()): Report | null {
+  const cycle = currentCycle(state);
+  if (!cycle || cycle.total === null) return null;
+  const mode = adviceModeNow(state, now);
+  const stored = state.reports.find((r) => r.date === cycle.date && r.mode === mode);
   if (stored) return { text: stored.text, focus: null, templateId: stored.templateId };
-  return buildTemplateReport({ mode, score: scoreOf(day), recentTemplateIds: recentTemplateIds(state.reports) });
+  return buildTemplateReport({ mode, score: cycleScoreOf(cycle), recentTemplateIds: recentTemplateIds(state.reports) });
 }
 
 /** Подпись над советом: «Мнение Лиса», «Мнение Лиса · вчера», «Мнение Лиса · 18 сентября». */

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { nowRingTs } from '../codec';
+import type { ReportMode } from '../domain';
 import {
   RingBle,
   clearPacketLog,
@@ -10,7 +11,6 @@ import {
   logNote,
   runSync,
   type KnownRing,
-  type RingProfile,
 } from '../ble';
 import {
   EMPTY_STATE,
@@ -20,17 +20,30 @@ import {
   loadProfile,
   loadState,
   mergeRaw,
-  profileAge,
   saveState,
   splitByDay,
   type Profile,
   type VueloState,
 } from '../storage';
-import { CACHE_FRESH_MS, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
+import { currentCycle } from './cycle';
+import { CACHE_FRESH_MS, adviceModeNow, dayView, findDay, isFresh, selectedDay, syncStatusText, todayKey, weekDays, type DayView } from './day';
 import { DEMO_STATUS_TEXT, demoState } from './demo';
-import { loadPlan, loadProgress, recordDurations, wantsSlides, type SegmentKind } from './loading';
+import { loadPlan, loadProgress, recordDurations, runsInBackground, wantsSlides, type SegmentKind } from './loading';
 import { isGoalSet, mergeProfile, withOnboarding } from './profile';
 import { settleRelayState } from './relay';
+import {
+  AI_ADVICE_SLOT_TEXT,
+  FOX_THINKING_TEXT,
+  aiAdviceConfig,
+  aiAdviceDue,
+  aiAdviceKey,
+  aiAdviceRequest,
+  fetchAiAdvice,
+  foxThinking,
+  withAiAdvice,
+} from './ai-advice';
+import { registerBackgroundSync } from './background-task';
+import { dropSessionRing, onBackgroundSync, ringSession, sessionRing, toRingProfile } from './ring-session';
 import { applySyncResult, newUserTodayOnly, planDays, rebuildDays } from './sync-plan';
 
 /** Старое имя оставлено, чтобы не ломать импорты. */
@@ -48,9 +61,12 @@ export const LIVE_MEASURE_COOLDOWN_MS = 30 * 60 * 1000;
 
 /**
  * idle — ничего не идёт; loading — открыт экран загрузки; done — загрузка кончилась;
- * failed — связь не установилась, на экране загрузки текст ошибки; fresh — данные свежие, к кольцу не идём.
+ * failed — связь не установилась, на экране загрузки текст ошибки; fresh — данные свежие, к кольцу не идём;
+ * background — кэш есть, кольцо догружает сегодня в фоне, экран загрузки не открыт.
  */
-export type Phase = 'idle' | 'loading' | 'done' | 'failed' | 'fresh';
+export type Phase = 'idle' | 'loading' | 'done' | 'failed' | 'fresh' | 'background';
+/** Статус в шапке, пока идёт фоновая догрузка. */
+export const BACKGROUND_STATUS_TEXT = 'Обновляем данные…';
 /** Три разные беды, о которых говорим по-разному. */
 export type SyncError = 'not-found' | 'lost' | 'slow';
 /** Откуда запущена синхронизация. Любой запуск идёт через экран загрузки. */
@@ -95,6 +111,17 @@ interface Vuelo {
    * карусель ассистента, чтобы она открылась на первой карточке.
    */
   homeRequest: number;
+  /**
+   * Текущий отрезок мнения Лиса («2026-09-25 day»): после пробуждения, днём или перед сном.
+   * Меняется, пока приложение открыто, — «Сегодня» перерисовывает совет под новый отрезок.
+   */
+  adviceSlot: string;
+  /**
+   * «Лис смотрит, как прошла ночь» — пока идёт выгрузка или запрос за свежим мнением от модели
+   * (`foxThinking`): вместо старого совета карточка показывает, что Лис разбирает свежие данные.
+   * null — показываем совет как есть.
+   */
+  foxThinking: string | null;
   /** Демо-режим включён: экраны показывают синтетические показатели, посчитанные реальными формулами. */
   demo: boolean;
   /** Включить или выключить демо-режим (меню разработчика). Реальное состояние и хранилище не трогаются. */
@@ -109,12 +136,6 @@ export function useVuelo(): Vuelo {
   return value;
 }
 
-const toRingProfile = (profile: Profile): RingProfile | null => {
-  const age = profileAge(profile);
-  if (!isProfileComplete(profile) || age === null) return null;
-  return { age, heightCm: profile.heightCm as number, weightKg: profile.weightKg as number, male: profile.sex === 'male' };
-};
-
 /** Дать экрану загрузки отрисовать новый этап перед тяжёлым расчётом. */
 const yieldFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 16));
 
@@ -124,7 +145,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [loadingMode, setLoadingMode] = useState<SyncMode>('launch');
   const [error, setError] = useState<SyncError | null>(null);
-  /** Выбор в календаре. Сбрасывается после каждой синхронизации (ключ — время синхронизации). */
+  /** Выбор в календаре. Сбрасывается после выгрузки с экрана загрузки (ключ — счётчик homeRequest). */
   const [picked, setPicked] = useState<{ date: string; key: number } | null>(null);
   /**
    * Сегодняшняя дата по часам телефона. Раньше «сегодня» пересчитывалось только при новых данных:
@@ -132,8 +153,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
    */
   const [clockDay, setClockDay] = useState(() => todayKey());
   const lastLiveAt = useRef(0);
-  const ring = useRef<RingBle | null>(null);
-  const running = useRef(false);
+  // Кольцо и замок выгрузки — общие с фоновым обновлением (`ring-session.ts`).
   const latest = useRef(EMPTY_STATE);
   /** Живой замер идёт после загрузки; новая загрузка его прерывает и дожидается. */
   const liveTask = useRef<Promise<void>>(Promise.resolve());
@@ -156,6 +176,49 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     setState(next);
     void saveState(next);
   }, []);
+
+  /**
+   * «Мнение Лиса» от YandexGPT: после выгрузки, при свежем кэше и при смене отрезка (после
+   * пробуждения → днём → перед сном), в фоне, ничего не ждёт и ничего не блокирует.
+   * Не вышло (нет сети, посредник не настроен, текст не прошёл проверку) — остаётся шаблонный совет,
+   * а тот же отрезок спрашиваем снова не раньше чем через 30 минут (`aiAdviceDue`).
+   * Один запрос за раз; совет от модели на цикл и отрезок просим один раз (`aiAdviceRequest`).
+   */
+  const adviceBusy = useRef(false);
+  const adviceTried = useRef(new Map<string, number>());
+  // То же для экрана: идёт ли запрос и когда пробовали — от этого зависит «Лис смотрит…».
+  const [adviceRequesting, setAdviceRequesting] = useState<ReportMode | null>(null);
+  const [adviceTriedAt, setAdviceTriedAt] = useState<Record<string, number>>({});
+  const refineAdvice = useCallback(async () => {
+    const config = aiAdviceConfig();
+    const request = config ? aiAdviceRequest(latest.current) : null;
+    if (!config || !request || adviceBusy.current) return;
+    const key = aiAdviceKey(request);
+    if (!aiAdviceDue(adviceTried.current.get(key))) return;
+    const triedAt = Date.now();
+    adviceTried.current.set(key, triedAt);
+    setAdviceTriedAt((prev) => ({ ...prev, [key]: triedAt }));
+    adviceBusy.current = true;
+    setAdviceRequesting(request.mode);
+    const slot = AI_ADVICE_SLOT_TEXT[request.mode];
+    try {
+      const result = await fetchAiAdvice(request.payload, config);
+      if ('error' in result) {
+        logNote(`мнение Лиса (${slot}) от модели: ${result.error}, остаётся шаблонное`);
+        return;
+      }
+      const next = withAiAdvice(latest.current, request, result.text);
+      if (next === latest.current) {
+        logNote(`мнение Лиса (${slot}) от модели получено, но пока ждали, совет сменился — не применяем`);
+        return;
+      }
+      commit(next);
+      logNote(`мнение Лиса (${slot}) от модели получено`);
+    } finally {
+      adviceBusy.current = false;
+      setAdviceRequesting(null);
+    }
+  }, [commit]);
 
   /**
    * Один живой замер, если кольцо давно ничего не мерило.
@@ -189,27 +252,37 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   );
 
   /**
-   * Единственный путь к кольцу за данными. Любой запуск (вход, возврат из фона,
-   * pull-to-refresh, «Повторить») открывает экран загрузки; по ходу выгрузки
-   * состояние не трогаем — оно применяется один раз в конце.
+   * Единственный путь к кольцу за данными (вход, возврат из фона, pull-to-refresh, «Повторить»).
+   * Первый запуск и долгая загрузка идут через экран загрузки; если кэш есть и грузить немного —
+   * в фоне, без экрана (`runsInBackground`). По ходу выгрузки состояние не трогаем —
+   * оно применяется один раз в конце.
    */
   const sync = useCallback(
     (mode: SyncMode = 'launch') => {
-      if (running.current) return;
+      if (ringSession.running) {
+        // Идёт фоновая выгрузка (iOS разбудила приложение): не мешаем ей, показываем «Обновляем данные…».
+        if (ringSession.running === 'background') setPhase('background');
+        return;
+      }
       // В демо к кольцу не идём: демо работает и без кольца, а настоящие данные ждут выключения.
       if (demoOn.current) return;
       if (isFresh(latest.current)) {
         setPhase('fresh');
+        // Кэш свежий, но прошлый запрос совета мог не удаться — пробуем ещё раз.
+        void refineAdvice();
         return;
       }
-      running.current = true;
+      ringSession.running = 'screen';
       stopLive.current = true;
       setError(null);
       setLoadingMode(mode);
       // План дней известен сразу: от него зависят карточки и ожидаемая длительность частей загрузки.
       // Новый пользователь (полного дня ещё не было) после первой загрузки берёт только сегодня.
-      const plan = planDays(latest.current.syncedAt, new Date(), { todayOnly: newUserTodayOnly(latest.current) });
+      const planAt = new Date();
+      const plan = planDays(latest.current.syncedAt, planAt, { todayOnly: newUserTodayOnly(latest.current) });
       const slides = wantsSlides(latest.current.lastSyncAt === null, plan.days.length);
+      // Кэш есть и грузить немного — приложение открыто сразу, выгрузка идёт в фоне.
+      const background = runsInBackground(latest.current.lastSyncAt === null, plan.days.length, latest.current.days.length > 0);
       const startedAt = Date.now();
       const measured: Partial<Record<SegmentKind, number[]>> = {};
       loadProgress.reset({
@@ -218,14 +291,13 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         plan: loadPlan(plan.days.length, latest.current.requestDurations),
         segmentStartedAt: startedAt,
       });
-      setPhase('loading');
+      setPhase(background ? 'background' : 'loading');
 
       void (async () => {
         await liveTask.current;
         stopLive.current = false;
         const base = latest.current;
-        const device = ring.current ?? new RingBle(base.ring);
-        ring.current = device;
+        const device = sessionRing(base.ring);
         let known: KnownRing | null = null;
         device.onKnown = (k) => {
           known = k;
@@ -251,7 +323,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
             setError(kind);
             loadProgress.set({ finished: true, finishedAt: Date.now() });
             // Экран ошибки — только если связи не было вовсе или показывать нечего.
-            setPhase(connected && next.days.length ? 'done' : 'failed');
+            // В фоне экрана нет: остаётся плашка «Не все данные загружены · Повторить».
+            setPhase(background ? 'idle' : connected && next.days.length ? 'done' : 'failed');
             return;
           }
 
@@ -263,6 +336,8 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           let packets = 0;
           const result = await runSync(device, {
             days: plan.days,
+            // Та же дата, что у плана: по ней маркер 23:45 сверяется с запрошенным днём.
+            today: todayKey(planAt),
             extras: true,
             hardCapMs: HARD_CAP_MS,
             onSegment: (kind, ms, real) => {
@@ -291,23 +366,24 @@ export function VueloProvider({ children }: { children: ReactNode }) {
           await saveState(next);
           latest.current = next;
           setState(next);
-          // Новые данные пришли — возвращаемся на «Сегодня» и открываем карусель заново.
-          // Короткое сворачивание приложения без выгрузки вкладку больше не сбрасывает.
-          goHome();
+          // Новые данные пришли с экрана загрузки — возвращаемся на «Сегодня» и открываем карусель заново.
+          // Фоновая догрузка вкладку, выбранный день и карусель не трогает: человек уже смотрит приложение.
+          if (!background) goHome();
+          void refineAdvice();
           loadProgress.set({ finished: true, finishedAt: Date.now() });
           if (result.error) {
             setError('lost');
-            setPhase(next.days.length ? 'done' : 'failed');
+            setPhase(background ? 'idle' : next.days.length ? 'done' : 'failed');
           } else {
-            setPhase('done');
+            setPhase(background ? 'idle' : 'done');
             liveTask.current = maybeLiveMeasure(device);
           }
         } finally {
-          running.current = false;
+          ringSession.running = null;
         }
       })();
     },
-    [commit, goHome, maybeLiveMeasure],
+    [commit, goHome, maybeLiveMeasure, refineAdvice],
   );
 
   // Вход в приложение. Самый первый запуск ждёт имя; дальше — правило 10 минут.
@@ -318,16 +394,41 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     booted.current = true;
     void loadState().then((loaded) => {
       // Автоочистка кэша при запуске: дальше CACHE_DAYS хранить незачем.
-      const trimmed = { ...loaded, raw: keepRecentDays(loaded.raw) };
+      const kept = { ...loaded, raw: keepRecentDays(loaded.raw) };
+      // Кэш до циклов бодрствования: циклы собираются из рядов сразу, не дожидаясь выгрузки.
+      // Нагрузка по дням пересоберётся с первой же выгрузкой при запуске.
+      const trimmed = kept.cycles.length || !Object.keys(kept.raw).length ? kept : rebuildDays(kept);
       // «Эстафета»: орехи за вчерашние и прошлые дни с нормой — по кэшу, сразу при открытии.
       const cleaned = settleRelayState(trimmed);
       if (cleaned !== trimmed) void saveState(cleaned);
       latest.current = cleaned;
       setState(cleaned);
       setReady(true);
-      if (cleaned.started) sync('launch');
+      // iOS подняла приложение в фоне ради фонового обновления: к кольцу сходит оно само
+      // (`background-sync.ts`), а обычная загрузка начнётся, когда человек откроет приложение.
+      if (cleaned.started && AppState.currentState !== 'background') sync('launch');
     });
   }, [sync]);
+
+  // Фоновое обновление: экран — хозяин состояния (фоновая выгрузка берёт его и отдаёт результат сюда),
+  // статус «Обновляем данные…», пока она идёт, и мнение Лиса после неё. Просим iOS будить приложение.
+  useEffect(() => {
+    if (!ready) return;
+    ringSession.host = { get: () => latest.current, apply: commit };
+    if (latest.current.started) void registerBackgroundSync();
+    const off = onBackgroundSync((event) => {
+      if (event.kind === 'started') {
+        setPhase((p) => (p === 'idle' ? 'background' : p));
+        return;
+      }
+      setPhase((p) => (p === 'background' && !ringSession.running ? 'idle' : p));
+      if (event.changed) void refineAdvice();
+    });
+    return () => {
+      off();
+      ringSession.host = null;
+    };
+  }, [ready, commit, refineAdvice]);
 
   // Возврат из фона: сверяем дату по часам и, если кэш устарел, идём к кольцу (правило 10 минут).
   // Вкладку и выбранный день не трогаем: на «Сегодня» перекидывает только приход новых данных
@@ -342,7 +443,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       setClockDay(todayKey());
       setDemoSession((prev) => prev && { ...prev, at: Date.now() });
       // Возврат из фона — тоже открытие: проверяем кэш на выполненные дни, даже если к кольцу не пойдём.
-      if (!running.current) {
+      if (!ringSession.running) {
         const settled = settleRelayState(latest.current);
         if (settled !== latest.current) commit(settled);
       }
@@ -352,18 +453,31 @@ export function VueloProvider({ children }: { children: ReactNode }) {
   }, [commit, sync]);
 
   // Полночь, пока приложение открыто: дата «сегодня» сменится сама.
+  // Смена отрезка мнения Лиса (после пробуждения → днём → перед сном): «Сегодня» перерисуется,
+  // и для нового отрезка попросим мнение у модели — без похода к кольцу.
+  const [adviceSlot, setAdviceSlot] = useState('');
+  const adviceSlotRef = useRef('');
   useEffect(() => {
     const timer = setInterval(() => {
       const day = todayKey();
       setClockDay((prev) => (prev === day ? prev : day));
       // Демо после полуночи строится заново: у нового «сегодня» тоже есть данные.
       setDemoSession((prev) => (prev && todayKey(new Date(prev.at)) !== day ? { ...prev, at: Date.now() } : prev));
+      const cycle = currentCycle(latest.current);
+      const slot = cycle ? `${cycle.date} ${adviceModeNow(latest.current)}` : '';
+      if (slot === adviceSlotRef.current) return;
+      const changed = adviceSlotRef.current !== '';
+      adviceSlotRef.current = slot;
+      setAdviceSlot(slot);
+      // Первая проверка после запуска не в счёт: там мнение и так просит выгрузка.
+      if (changed && slot && !ringSession.running) void refineAdvice();
     }, CLOCK_CHECK_MS);
     return () => clearInterval(timer);
-  }, []);
+  }, [refineAdvice]);
 
   const setDemo = useCallback((on: boolean) => {
     demoOn.current = on;
+    ringSession.demo = on;
     setPicked(null);
     // Новое зерно на каждое включение: каждый раз своя правдоподобная неделя.
     setDemoSession(on ? { seed: Date.now() % 2147483647, at: Date.now() } : null);
@@ -382,8 +496,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
 
   const forgetRing = useCallback(() => {
     void (async () => {
-      await ring.current?.disconnect();
-      ring.current = null;
+      await dropSessionRing();
       const cleared = await clearState();
       commit({ ...cleared, started: latest.current.started, profile: latest.current.profile });
       setPhase('idle');
@@ -399,6 +512,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         latest.current = next;
         setState(next);
         sync('launch');
+        void registerBackgroundSync();
       })();
     },
     [sync],
@@ -410,16 +524,17 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     void loadProfile().then((profile) => {
       // Пока читали, профиль успели поправить — прочитанное устарело, не возвращаем его.
       if (version !== profileVersion.current) return;
-      if (running.current || JSON.stringify(profile) === JSON.stringify(latest.current.profile)) return;
+      if (ringSession.running || JSON.stringify(profile) === JSON.stringify(latest.current.profile)) return;
       latest.current = { ...latest.current, profile };
       setState(latest.current);
     });
   }, []);
 
   const dismissFresh = useCallback(() => setPhase('idle'), []);
-  const selectDay = useCallback((date: string) => setPicked({ date, key: latest.current.lastSyncAt ?? 0 }), []);
+  // Выбор дня живёт до следующей выгрузки с экрана загрузки (счётчик homeRequest); фоновая его не сбрасывает.
+  const selectDay = useCallback((date: string) => setPicked({ date, key: homeRequest }), [homeRequest]);
   const finishLoading = useCallback(() => {
-    if (!running.current) setPhase('idle');
+    if (!ringSession.running) setPhase('idle');
   }, []);
 
   const saveProfile = useCallback(
@@ -434,8 +549,9 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       clearTimeout(profilePush.current);
       profilePush.current = setTimeout(() => {
         const forRing = toRingProfile(latest.current.profile);
-        if (forRing && ring.current?.status === 'ready' && !running.current) {
-          void handshake(ring.current, forRing).catch(() => undefined);
+        const device = ringSession.ring;
+        if (forRing && device?.status === 'ready' && !ringSession.running) {
+          void handshake(device, forRing).catch(() => undefined);
         }
       }, PROFILE_PUSH_DELAY_MS);
     },
@@ -452,17 +568,24 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     const clock = new Date(y, m - 1, d, 12);
     const view = dayView(shown.days, clock);
     const week = weekDays(shown.days, clock);
+    const thinking = foxThinking({
+      state: shown,
+      aiOn: aiAdviceConfig() !== null,
+      syncing: phase === 'loading' || phase === 'background',
+      requesting: adviceRequesting,
+      lastTry: (key) => adviceTriedAt[key],
+    });
     return {
       state: shown,
       ready,
       week,
       dayView: view,
-      selectedDate: selectedDay(picked, view, week.map((w) => w.date), shown.lastSyncAt ?? 0),
+      selectedDate: selectedDay(picked, view, week.map((w) => w.date), homeRequest),
       selectDay,
       phase,
       loadingMode,
       error,
-      statusText: demo ? DEMO_STATUS_TEXT : syncStatusText(shown),
+      statusText: demo ? DEMO_STATUS_TEXT : phase === 'background' ? BACKGROUND_STATUS_TEXT : syncStatusText(shown),
       profileReady: isProfileComplete(shown.profile),
       goalReady: isGoalSet(shown.profile),
       syncFailed: shown.syncFailed && shown.started,
@@ -475,10 +598,12 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       reloadProfile,
       clearData,
       homeRequest,
+      adviceSlot,
+      foxThinking: thinking ? FOX_THINKING_TEXT[thinking] : null,
       demo: demo !== null,
       setDemo,
     };
-  }, [clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, homeRequest, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
+  }, [adviceRequesting, adviceSlot, adviceTriedAt, clearData, clockDay, demo, dismissFresh, error, finishLoading, forgetRing, homeRequest, loadingMode, completeOnboarding, phase, picked, ready, reloadProfile, saveProfile, selectDay, setDemo, shown, sync]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }

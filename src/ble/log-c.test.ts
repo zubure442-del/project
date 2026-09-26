@@ -1,6 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { dropGlucoseSpikes } from '../domain';
 import { weekDays } from '../state/day';
 import { applySyncResult, planDays } from '../state/sync-plan';
 import { EMPTY_STATE } from '../storage';
@@ -14,6 +15,8 @@ import { resetLightThrottle, runSync, type SyncResult } from './sync';
  */
 const LOG = readFileSync('reference/logs/ring-log-2026-09-21-c.txt', 'utf8');
 const WEEK = [0, 1, 2, 3, 4, 5, 6];
+/** День сессии: маркер 23:45 сверяется с датой запрошенного дня. */
+const SESSION_DAY = '2026-09-21';
 /** Время телефона в конце выгрузки: 21.09 13:11 по местному времени. */
 const SYNC_END = new Date(2026, 8, 21, 13, 11, 47);
 
@@ -26,7 +29,7 @@ afterEach(() => vi.useRealTimers());
 async function replayWeek(): Promise<{ result: SyncResult; seconds: number; sent: string[] }> {
   const { transport, sent } = logRing(LOG);
   const started = Date.now();
-  const run = runSync(transport, { days: WEEK });
+  const run = runSync(transport, { days: WEEK, today: SESSION_DAY });
   await vi.runAllTimersAsync();
   const result = await run;
   return { result, seconds: (Date.now() - started) / 1000, sent };
@@ -94,7 +97,7 @@ describe('РЕАЛЬНЫЙ ЛОГ c: сон в кэше и на экранах',
   it('перезаход после полудня: только сегодня, около 10 с', async () => {
     const { transport } = logRing(LOG);
     const started = Date.now();
-    const run = runSync(transport, { days: [0] });
+    const run = runSync(transport, { days: [0], today: SESSION_DAY });
     await vi.runAllTimersAsync();
     const result = await run;
     const seconds = (Date.now() - started) / 1000;
@@ -113,5 +116,24 @@ describe('РЕАЛЬНЫЙ ЛОГ c: сон в кэше и на экранах',
     expect(byDate('2026-09-21')?.total).not.toBeNull();
     // Сегодня полный — совет записан за сегодня, в дневном режиме.
     expect(state.reports.map((r) => [r.date, r.mode])).toEqual([['2026-09-21', 'day']]);
+  });
+});
+
+describe('РЕАЛЬНЫЙ ЛОГ c: выбросы глюкозы', () => {
+  it('из 111 замеров за неделю убираются только одиночные скачки; пики после еды остаются', async () => {
+    const { result } = await replayWeek();
+    const after = dropGlucoseSpikes(result.summary);
+    const at = (r: { ts: number }) => new Date(r.ts * 1000).toISOString().slice(5, 16);
+    const readings = result.summary.filter((r) => r.glucose !== null);
+    const dropped = result.summary.filter((r, i) => r.glucose !== null && after[i].glucose === null).map(at);
+    expect(readings).toHaveLength(111);
+    expect(dropped).toEqual([
+      '09-20T13:45', // 5.9 … 7.8 … 6.0: соседи в двух и трёх часах, точка одна
+      '09-21T02:45', // 5.0 → 6.8 → 5.5 ночью
+      '09-21T12:45', // 6.4 → 7.7 — последний замер выгрузки: ждёт следующего
+    ]);
+    // Завтрак, обед и ужин: 7.8 → 7.3, 7.5 … 7.4, 8.1 → 7.3, 7.9 → 7.4, 8.0 → 8.0 — на месте.
+    const keptAt = new Set(after.filter((r) => r.glucose !== null).map(at));
+    for (const peak of ['09-18T08:45', '09-18T11:30', '09-19T19:15', '09-20T08:45', '09-20T19:15']) expect(keptAt).toContain(peak);
   });
 });

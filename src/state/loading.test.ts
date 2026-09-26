@@ -11,6 +11,7 @@ import {
   nextSlide,
   plannedPercent,
   recordDurations,
+  runsInBackground,
   slideCaption,
   slideForPercent,
   statusText,
@@ -99,5 +100,17 @@ describe('СИНТЕТИЧЕСКИЕ: когда показывать слайд
     expect(statusText(run({ stage: 1 }), 0.05)).toBe('Подключаемся…');
     expect(statusText(run({ stage: 2 }), 0.42)).toBe('Загружаем данные · 42 %');
     expect(DEFAULT_SEGMENT_MS.connect).toBeGreaterThan(0);
+  });
+});
+
+describe('СИНТЕТИЧЕСКИЕ: фоновая догрузка при заполненном кэше', () => {
+  it('кэш есть, грузить сегодня (и вчера) — экран загрузки не открываем', () => {
+    expect(runsInBackground(false, 1, true)).toBe(true);
+    expect(runsInBackground(false, 2, true)).toBe(true);
+  });
+  it('первый запуск, пустой кэш или неделя целиком — через экран загрузки', () => {
+    expect(runsInBackground(true, 7, false)).toBe(false);
+    expect(runsInBackground(false, 1, false)).toBe(false);
+    expect(runsInBackground(false, 7, true)).toBe(false);
   });
 });

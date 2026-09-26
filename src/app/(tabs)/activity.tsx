@@ -2,12 +2,13 @@ import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import {
   TAB_INFO,
   bodyOf,
+  busiestCycleHour,
   busiestHour,
   distanceMeters,
   formatCount,
   formatDistance,
   tabInfoText,
-  weekActivityLevel,
+  weekActivity,
 } from '../../domain';
 import { findDay, useTabDay, useVuelo } from '../../state';
 import { profileAge } from '../../storage';
@@ -31,17 +32,24 @@ const HERO_RING = 150;
 export default function ActivityTab() {
   const { week, state, statusText, sync, dayView } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner } = useTabDay();
+  const { date: picked, banner, isToday, today } = useTabDay();
   const day = findDay(state.days, picked);
+  // Сегодня график «День» идёт вдоль текущего цикла (от пробуждения, через полночь), прошлые дни — 0–24.
+  const cycle = isToday ? today?.cycle ?? null : null;
+  const chart = cycle?.chart ?? null;
   const age = profileAge(state.profile);
-  const hours = day?.stepsByHour ?? [];
-  const best = day ? busiestHour(hours, day.heart.map((p) => ({ m: p.m, v: p.v })), age) : null;
+  // Самый активный час — по тем же рядам, что на графике: сегодня вдоль цикла, прошлые дни — по суткам.
+  const best = chart
+    ? busiestCycleHour(chart.steps, chart.heart, age, chart.from, chart.to)
+    : day
+      ? busiestHour(day.stepsByHour, day.heart, age)
+      : null;
   const chartWidth = width - spacing.md * 4;
   // Калории считаем сами для любого дня; нет биометрии — «—».
   const calories = day?.calories ?? null;
   const weekBars = week.map((w) => ({ date: w.date, value: w.day?.calories ?? null }));
   // Оценка недели: средний расход по завершённым дням против коридора от базового обмена и цели.
-  const level = weekActivityLevel({
+  const activity = weekActivity({
     days: weekBars,
     today: dayView.today,
     body: bodyOf(state.profile),
@@ -61,7 +69,8 @@ export default function ActivityTab() {
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
       <View style={styles.hero}>
-        <HeroRing value={day?.scores.activity ?? null} size={HERO_RING} />
+        {/* Индекс активности — по текущему циклу и только за сегодня; шаги, дистанция и калории — за сутки. */}
+        {isToday ? <HeroRing value={cycle?.scores.activity ?? null} size={HERO_RING} /> : null}
         <View style={styles.heroSide}>
           {day?.steps != null ? (
             <View>
@@ -76,7 +85,17 @@ export default function ActivityTab() {
       </View>
 
       <Card title="День">
-        {day ? (
+        {chart ? (
+          <DayActivityChart
+            heart={chart.heart}
+            width={chartWidth}
+            age={age}
+            steps={chart.steps}
+            restingHr={chart.restingHr}
+            from={chart.from}
+            to={chart.to}
+          />
+        ) : day ? (
           <DayActivityChart
             heart={day.heart}
             width={chartWidth}
@@ -93,7 +112,8 @@ export default function ActivityTab() {
         </View>
       </Card>
 
-      <CaloriesWeekCard days={weekBars} width={chartWidth} level={level} />
+      {/* Расход за неделю меняется каждый день — на прошлых датах его нет. */}
+      {isToday ? <CaloriesWeekCard days={weekBars} width={chartWidth} activity={activity} /> : null}
     </Screen>
   );
 }

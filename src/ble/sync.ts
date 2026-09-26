@@ -4,6 +4,9 @@ import {
   autoMeasureCommand,
   type AutoMeasurePeriod,
   batteryCommand,
+  dateForOffset,
+  dateKey,
+  nowRingTs,
   parsePacket,
   liveModeCommand,
   prepareArchiveCommand,
@@ -20,6 +23,13 @@ import { sleep, type Transport } from './transport';
  * а по тишине — только если признака не было. Внутри потока бывают паузы до 2.7 с.
  */
 export const IDLE_MS = 5000;
+/**
+ * Запасная пауза для 0x55 и 0x40. Живой поток этих архивов идёт без пауз: во всех логах
+ * (21.09 a–d, 25.09) между пакетами не больше 0.41 с. Замерший поток сам не продолжается:
+ * так бывает, пока человек идёт и кольцо само шлёт 03/13 (лог d 19:53, лог 25.09 10:55), —
+ * хвост приходит только в окнах следующих запросов. Ждать его 5 с незачем.
+ */
+export const ARCHIVE_IDLE_MS = 2000;
 /** Сколько ждём ПЕРВЫЙ пакет: кольцо поднимает данные из памяти до 8 секунд. */
 export const FIRST_PACKET_MS = 12000;
 /** Тишина после повтора: дальше считаем запрос неудачным и идём к следующему. */
@@ -32,8 +42,11 @@ export const DAY_END_GRACE_MS = 100;
 export const GAP_BETWEEN_REQUESTS_MS = 100;
 /** Сколько ждём разовый ответ на 0x03 и 0x0B. Кольцо отвечает за 30 мс. */
 export const EXTRA_REPLY_MS = 1000;
-/** Пауза после 0x13 перед первым запросом архива. */
-const PREPARE_PAUSE_MS = 300;
+/**
+ * Сколько ждём ответ на 0x13 перед первым запросом архива. Раньше это была пауза 0.3 с;
+ * кольцо отвечает за ~30 мс (лог 25.09), поэтому ждём ответа, а не таймер.
+ */
+const PREPARE_REPLY_MS = 300;
 /** Лёгкие запросы (0x13, 0x03, 0x0B) не чаще одного раза в это время. */
 export const LIGHT_REQUEST_MS = 5000;
 const lightSentAt = new Map<number, number>();
@@ -52,6 +65,33 @@ async function sendLight(t: Transport, packet: Uint8Array): Promise<boolean> {
 }
 const ACK_TIMEOUT_MS = 5000;
 const POLL_MS = 50;
+/**
+ * Подтверждения рукопожатия. Кольцо отвечает эхом за 1–30 мс (лог 25.09: 0x01 — 1 мс, 0x19 — 1 мс,
+ * 0x02 — 30 мс), а приложение раньше ждало по таймеру 1 с и 0.3 с — 3.2 с подготовки вместо ~0.1 с.
+ * Теперь ждём эха; нет его — ждём столько же, сколько раньше, и идём дальше.
+ */
+export const SET_TIME_ACK_MS = 1000;
+export const PROFILE_ACK_MS = 300;
+const ACK_POLL_MS = 10;
+
+/**
+ * Отправляет команду и ждёт ответа с одним из кодов (эхо команды или её «ошибка»), но не дольше
+ * `timeoutMs`. Подписка — до отправки: эхо приходит раньше, чем кончается запись.
+ */
+async function sendAndWait(t: Transport, packet: Uint8Array, replyCodes: readonly number[], timeoutMs: number): Promise<boolean> {
+  let got = false;
+  const off = t.onPacket((d) => {
+    if (replyCodes.includes(d[0])) got = true;
+  });
+  try {
+    await t.send(packet);
+    const started = Date.now();
+    while (!got && Date.now() - started < timeoutMs) await sleep(ACK_POLL_MS);
+  } finally {
+    off();
+  }
+  return got;
+}
 
 export type AutoMeasureResult = 'accepted' | 'rejected' | 'noreply';
 
@@ -73,8 +113,8 @@ export async function handshake(
   now = Date.now(),
   tzOffsetSeconds = -new Date().getTimezoneOffset() * 60,
 ) {
-  await t.send(setTimeCommand(now, tzOffsetSeconds));
-  await sleep(1000);
+  // 0x01 — эхо 0x01, отказ 0x81 (SDK).
+  await sendAndWait(t, setTimeCommand(now, tzOffsetSeconds), [0x01, 0x81], SET_TIME_ACK_MS);
   let result: AutoMeasureResult = 'noreply';
   for (let attempt = 0; attempt < 2 && result === 'noreply'; attempt++) {
     let ack: boolean | null = null;
@@ -84,14 +124,14 @@ export async function handshake(
     });
     await t.send(autoMeasureCommand(autoMeasureMin));
     const started = Date.now();
-    while (ack === null && Date.now() - started < ACK_TIMEOUT_MS) await sleep(POLL_MS);
+    while (ack === null && Date.now() - started < ACK_TIMEOUT_MS) await sleep(ACK_POLL_MS);
     off();
     if (ack !== null) result = ack ? 'accepted' : 'rejected';
   }
   // Профиль уходит после 0x01 и 0x19, как в официальном клиенте. Пустой профиль не отправляем.
   if (profile) {
-    await t.send(profileCommand(profile));
-    await sleep(300);
+    // 0x02 — эхо 0x02, отказ 0x82 (SDK).
+    await sendAndWait(t, profileCommand(profile), [0x02, 0x82], PROFILE_ACK_MS);
   }
   return { autoMeasure: result };
 }
@@ -129,6 +169,11 @@ export interface SyncResult {
 export interface SyncOptions {
   /** Какие дни выгружать: 0 — сегодня, 1 — вчера. По умолчанию только сегодня. */
   days?: number[];
+  /**
+   * Сегодняшняя дата по часам телефона («2026-09-25»); кольцо живёт по ним же после 0x01.
+   * По ней маркер 23:45 сверяется с запрошенным днём. По умолчанию — текущая дата.
+   */
+  today?: string;
   /** Запрашивать разовые 0x03 и 0x0B. */
   extras?: boolean;
   /** Жёсткий предел на всю выгрузку. По истечении новые запросы не отправляем. */
@@ -148,7 +193,10 @@ export interface SyncOptions {
 
 /** Запросов на один день: шаги (с ними приходит сон), пульс, сводка, кислород. */
 const DAY_REQUESTS = ['steps', 'heart', 'summary', 'spo2'] as const;
-const CODE: Record<(typeof DAY_REQUESTS)[number], string> = { steps: '0x10', heart: '0x16', summary: '0x55', spo2: '0x40' };
+type DayRequest = (typeof DAY_REQUESTS)[number];
+/** Потоки, которые кончаются маркером 23:45 (у пульса — счётчик отметок aa). */
+type MarkedStream = Exclude<DayRequest, 'heart'>;
+const CODE: Record<DayRequest, string> = { steps: '0x10', heart: '0x16', summary: '0x55', spo2: '0x40' };
 const END_TEXT: Record<StreamEnd, string> = {
   marker: 'маркер', empty: 'пусто', idle: 'пауза', silent: 'тишина', skipped: 'пропущен',
 };
@@ -165,11 +213,13 @@ export const emptySyncResult = (): SyncResult => ({
  * Важно: кольцо отвечает не строго на «свою» команду. На запрос шагов (0x10) оно присылает
  * вперемешку по времени сон (0x11) и шаги; на сам запрос 0x11 приходит только пустышка.
  * Поэтому входящие пакеты разбираются одним обработчиком и раскладываются по коду пакета.
- * Конец потока — по признаку (маркер 23:45, счётчик aa, `16 ff`), пауза — только запасной вариант.
+ * Конец потока — по признаку (свой маркер 23:45: тот же поток и та же дата; счётчик aa; `16 ff`),
+ * пауза — только запасной вариант.
  * Ошибка связи не выбрасывается наружу: возвращаем то, что успело прийти, и текст ошибки.
  */
 export async function runSync(t: Transport, options: SyncOptions = {}): Promise<SyncResult> {
   const days = options.days ?? [0];
+  const today = options.today ?? dateKey(nowRingTs(Date.now(), -new Date().getTimezoneOffset() * 60));
   const extras = options.extras ?? true;
   const totalRequests = days.length * DAY_REQUESTS.length + (extras ? 2 : 0);
   let doneRequests = 0;
@@ -180,13 +230,26 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
   let lastRx = 0;
   let seen = 0;
   let finished = false;
-  let dayEnd = false;
   let busy = false;
   let heartExpected = 0;
   let heartMarks = 0;
   let lastMarkAt = 0;
   let gotActivity = false;
   let gotBattery = false;
+
+  /**
+   * Маркеры 23:45 — по потоку и дате («summary:2026-09-25»). Кольцо отвечает с запаздыванием:
+   * хвост потока приходит в окне следующего запроса, а замерший поток — даже в следующей выгрузке
+   * (лог 25.09). Поэтому запрос закрывает только СВОЙ маркер, а чужой засчитывается своему дню.
+   * Маркер потока, который в этой выгрузке не запрашивали, — хвост прошлой: он ничего не подтверждает.
+   */
+  const requested = new Set<string>();
+  const markers = new Set<string>();
+  const streamKey = (kind: MarkedStream, date: string) => `${kind}:${date}`;
+  const noteMarker = (kind: MarkedStream, ts: number) => {
+    const key = streamKey(kind, dateKey(ts));
+    if (requested.has(key)) markers.add(key);
+  };
 
   const off = t.onPacket((d) => {
     const p = parsePacket(d);
@@ -198,7 +261,7 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
         // Последним в окне бывает и пакет сна за 23:45 — он тоже маркер конца.
         result[p.kind].push(...p.samples);
         result.packetCounts[p.kind]++;
-        if (p.isDayEnd) dayEnd = true;
+        if (p.isDayEnd) noteMarker('steps', p.ts);
         isData = true;
         break;
       case 'heart':
@@ -220,13 +283,13 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
       case 'spo2':
         result.spo2.push(...p.samples);
         result.packetCounts.spo2++;
-        if (p.isDayEnd) dayEnd = true;
+        if (p.isDayEnd) noteMarker('spo2', p.slotStart);
         isData = true;
         break;
       case 'summary':
         result.summary.push(...p.records);
         result.packetCounts.summary++;
-        if (p.isDayEnd) dayEnd = true;
+        if (p.isDayEnd) noteMarker('summary', p.ts);
         isData = true;
         break;
       case 'battery':
@@ -261,16 +324,18 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
   const outOfTime = () => options.hardCapMs !== undefined && Date.now() - startedAt > options.hardCapMs;
 
   /**
-   * Отправляет запрос и ждёт конца потока: маркер 23:45, счётчик отметок aa, `16 ff`
-   * или тишина IDLE_MS. Повтор — только если за FIRST_PACKET_MS не пришло ничего
-   * и кольцо не ответило «занято».
+   * Отправляет запрос и ждёт конца потока: свой маркер 23:45, счётчик отметок aa, `16 ff`
+   * или тишина (IDLE_MS, у 0x55 и 0x40 — ARCHIVE_IDLE_MS). Повтор — только если за FIRST_PACKET_MS
+   * не пришло ничего и кольцо не ответило «занято».
    */
-  const request = async (kind: (typeof DAY_REQUESTS)[number], day: number): Promise<StreamEnd> => {
+  const request = async (kind: DayRequest, day: number): Promise<StreamEnd> => {
+    const own = kind === 'heart' ? null : streamKey(kind, dateForOffset(day, today));
+    if (own) requested.add(own);
+    const idleMs = kind === 'summary' || kind === 'spo2' ? ARCHIVE_IDLE_MS : IDLE_MS;
     let end: StreamEnd = 'silent';
     for (let attempt = 0; attempt <= 1; attempt++) {
       seen = 0;
       finished = false;
-      dayEnd = false;
       busy = false;
       heartExpected = 0;
       heartMarks = 0;
@@ -289,7 +354,7 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
           end = 'marker';
           break;
         }
-        if (dayEnd && now - lastRx > DAY_END_GRACE_MS) {
+        if (own && markers.has(own) && now - lastRx > DAY_END_GRACE_MS) {
           end = 'marker';
           break;
         }
@@ -300,7 +365,7 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
             end = 'silent';
             break;
           }
-        } else if (now - Math.max(lastRx, lastMarkAt) > IDLE_MS) {
+        } else if (now - Math.max(lastRx, lastMarkAt) > idleMs) {
           end = 'idle';
           break;
         }
@@ -318,9 +383,23 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     while (!got() && Date.now() - started < EXTRA_REPLY_MS) await sleep(POLL_MS);
   };
 
+  /** Чем кончился каждый поток выгруженных дней. */
+  const processed: { day: number; ends: StreamEnd[] }[] = [];
+
   try {
-    await sendLight(t, prepareArchiveCommand());
-    await sleep(PREPARE_PAUSE_MS);
+    // 0x13 — ждём ответа 0x13 (кольцо шлёт его и само), не дольше PREPARE_REPLY_MS.
+    let prepared = false;
+    const offPrepare = t.onPacket((d) => {
+      if (d[0] === 0x13) prepared = true;
+    });
+    try {
+      if (await sendLight(t, prepareArchiveCommand())) {
+        const started = Date.now();
+        while (!prepared && Date.now() - started < PREPARE_REPLY_MS) await sleep(ACK_POLL_MS);
+      }
+    } finally {
+      offPrepare();
+    }
     for (const day of days) {
       // 0x11 не запрашиваем: на него приходит только пустая заглушка,
       // а сам сон кольцо отдаёт в окне запроса шагов.
@@ -338,11 +417,7 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
         doneRequests++;
         report();
       }
-      if (ends.every(isExplicitEnd)) result.completeDays.push(day);
-      options.onNote?.(
-        `день ${day}: ${ends.every(isExplicitEnd) ? 'завершён' : 'не завершён'} (` +
-          DAY_REQUESTS.map((k, i) => `${CODE[k]} ${END_TEXT[ends[i]]}`).join(', ') + ')',
-      );
+      processed.push({ day, ends });
     }
     if (extras) {
       // 0x03 — активность за сегодня, 0x0B — заряд. Оба разовые, не по дням (PROTOCOL.md, раздел 3).
@@ -361,6 +436,18 @@ export async function runSync(t: Transport, options: SyncOptions = {}): Promise<
     options.onNote?.(`выгрузка прервана: ${result.error}`);
   } finally {
     off();
+  }
+
+  // Полноту считаем в конце: маркер потока мог прийти позже, в окне другого запроса.
+  for (const { day, ends } of processed) {
+    const date = dateForOffset(day, today);
+    const late = DAY_REQUESTS.map((k, i) => k !== 'heart' && !isExplicitEnd(ends[i]) && markers.has(streamKey(k, date)));
+    const closed = ends.every((end, i) => isExplicitEnd(end) || late[i]);
+    if (closed) result.completeDays.push(day);
+    options.onNote?.(
+      `день ${day}: ${closed ? 'завершён' : 'не завершён'} (` +
+        DAY_REQUESTS.map((k, i) => `${CODE[k]} ${late[i] ? 'маркер позже' : END_TEXT[ends[i]]}`).join(', ') + ')',
+    );
   }
 
   result.steps = dedupe(result.steps);

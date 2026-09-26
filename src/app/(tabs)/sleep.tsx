@@ -11,9 +11,12 @@ const HERO_RING = 150;
 export default function SleepTab() {
   const { state, statusText, sync } = useVuelo();
   const { width } = useWindowDimensions();
-  const { date: picked, banner } = useTabDay();
+  const { date: picked, banner, isToday, today } = useTabDay();
   const day = findDay(state.days, picked);
-  const sleep = day?.sleep;
+  // Сегодня — сон текущего цикла (ночь, после которой человек проснулся), прошлый день — ночь этой даты.
+  const cycle = isToday ? today?.cycle ?? null : null;
+  const sleep = isToday ? cycle?.sleep : day?.sleep;
+  const segments = (isToday ? cycle?.sleepSegments : day?.sleepSegments) ?? [];
   // Пульс во сне — отдельной карточкой: минимум и среднее против своей нормы за 7 дней.
   const sleepHr = sleepHrFor(state, picked);
   const chartWidth = width - spacing.md * 4;
@@ -28,14 +31,17 @@ export default function SleepTab() {
       onSync={() => sync('refresh')}
       banner={<DayBanner kind={banner} onRetry={() => sync('retry')} />}
     >
-      <View style={styles.hero}>
-        <HeroRing value={day?.scores.sleep ?? null} size={HERO_RING} />
-        <View style={styles.heroSide}>
-          <TrendInline trend={trendFor(state, 'sleep', picked)} />
+      {isToday ? (
+        // Оценка и динамика — только за сегодня: на прошлых датах плавающих индексов нет.
+        <View style={styles.hero}>
+          <HeroRing value={cycle?.scores.sleep ?? null} size={HERO_RING} />
+          <View style={styles.heroSide}>
+            <TrendInline trend={trendFor(state, 'sleep', picked)} />
+          </View>
         </View>
-      </View>
+      ) : null}
 
-      {day?.sleepSegments.length ? (
+      {segments.length ? (
         // Длительность стоит здесь, а не в шапке: шапка тогда одной высоты со всеми вкладками.
         <Card
           title="Ночь"
@@ -48,7 +54,7 @@ export default function SleepTab() {
             ) : null
           }
         >
-          <SleepWave segments={day.sleepSegments} width={chartWidth} />
+          <SleepWave segments={segments} width={chartWidth} />
         </Card>
       ) : null}
 
@@ -72,19 +78,24 @@ export default function SleepTab() {
       {sleepHr ? (
         <Card title="Пульс во сне">
           {/* Два числа ночи и отклонение каждого от своей нормы; ниже — вывод по категории. */}
-          <HrRow label="Минимальный" value={sleepHr.night.min} delta={sleepHr.deltaMin} />
-          <HrRow label="Средний" value={sleepHr.night.avg} delta={sleepHr.deltaAvg} />
-          {/* Вывод читается по цвету точки: зелёная — ночь как обычно или лучше, красная — есть отклонение. */}
-          <View style={styles.hrVerdict}>
-            <View
-              style={[
-                styles.hrDot,
-                sleepHr.tone === 'good' && styles.hrDotGood,
-                sleepHr.tone === 'alert' && styles.hrDotAlert,
-              ]}
-            />
-            <Text style={styles.hrText}>{sleepHr.text}</Text>
-          </View>
+          {/* Отклонение от нормы — только за сегодня: норма со временем меняется, и на прошлой дате
+              сегодняшняя норма вводила бы в заблуждение. */}
+          <HrRow label="Минимальный" value={sleepHr.night.min} delta={isToday ? sleepHr.deltaMin : null} />
+          <HrRow label="Средний" value={sleepHr.night.avg} delta={isToday ? sleepHr.deltaAvg : null} />
+          {/* Вывод читается по цвету точки: зелёная — ночь как обычно или лучше, красная — есть отклонение.
+              Только за сегодня: на прошлых датах — одни замеры, без выводов. */}
+          {isToday ? (
+            <View style={styles.hrVerdict}>
+              <View
+                style={[
+                  styles.hrDot,
+                  sleepHr.tone === 'good' && styles.hrDotGood,
+                  sleepHr.tone === 'alert' && styles.hrDotAlert,
+                ]}
+              />
+              <Text style={styles.hrText}>{sleepHr.text}</Text>
+            </View>
+          ) : null}
         </Card>
       ) : null}
     </Screen>

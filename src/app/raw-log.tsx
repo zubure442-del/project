@@ -16,7 +16,8 @@ const stamp = (at: number) => {
 /** Меню разработчика: сырые пакеты кольца (время, направление, hex) для разбора и демо-режим. */
 export default function RawLogScreen() {
   const insets = useSafeAreaInsets();
-  const { demo, setDemo } = useVuelo();
+  const { demo, setDemo, state } = useVuelo();
+  const background = state.lastBackground;
   const [items, setItems] = useState<LoggedPacket[]>(packetLog);
   const [copied, setCopied] = useState(false);
 
@@ -47,6 +48,12 @@ export default function RawLogScreen() {
         </View>
         <Text style={styles.note}>
           {items.length ? `${items.length} пакетов · «<-» от кольца, «->» команды приложения` : 'Пакетов пока нет.'}
+        </Text>
+        {/* Фоновое обновление: журнал в памяти мог пропасть, отметка — нет. */}
+        <Text style={styles.note}>
+          {background
+            ? `Фоновое обновление: ${new Date(background.at).toLocaleDateString('ru-RU')} ${stamp(background.at).slice(0, 5)} — ${background.note}`
+            : 'Фонового обновления ещё не было'}
         </Text>
         {/* Демо: синтетические показатели через настоящий расчёт; реальные данные не трогаются. */}
         <Pressable style={[styles.button, styles.demo]} onPress={() => setDemo(!demo)}>

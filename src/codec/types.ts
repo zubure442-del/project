@@ -26,9 +26,10 @@ export type Packet =
   | { kind: 'heart'; phase: 'mark'; index: number }
   | { kind: 'heart'; phase: 'end' }
   | { kind: 'heart'; phase: 'data'; samples: HeartSample[] }
-  | { kind: 'steps'; isDayEnd: boolean; samples: Sample[] }
-  | { kind: 'sleep'; isDayEnd: boolean; samples: Sample[] }
-  | { kind: 'summary'; isDayEnd: boolean; records: SummaryRecord[] }
+  /** ts — метка пакета: по ней маркер 23:45 сверяется с датой запрошенного дня. */
+  | { kind: 'steps'; ts: number; isDayEnd: boolean; samples: Sample[] }
+  | { kind: 'sleep'; ts: number; isDayEnd: boolean; samples: Sample[] }
+  | { kind: 'summary'; ts: number; isDayEnd: boolean; records: SummaryRecord[] }
   /** 0x06 — кольцо занято: надо ждать, а не повторять запрос. */
   | { kind: 'busy' }
   /** 0x14 — живой замер пульса с меткой времени. */

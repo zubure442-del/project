@@ -7,6 +7,7 @@ import { demoState } from '../../src/state/demo';
 import fn from './index.js';
 
 const NOW = new Date(2026, 8, 25, 15, 0);
+const GOOD = 'Весь день идёт на ровном, но натянутом фоне. Похоже, накопилось от долгой неподвижности за работой.';
 
 /** Запрос ровно такой, какой шлёт приложение. */
 function appPayload() {
@@ -47,7 +48,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const payload = appPayload();
     expect(fn.validate(payload)).toBeNull();
     const input = fn.modelInput(payload);
-    expect(Object.keys(input)).toEqual(['current_time', 'person', 'days', 'today_by_hour', 'previously_suggested_actions']);
+    expect(Object.keys(input)).toEqual(['current_time', 'person', 'days', 'today_by_hour', 'previous_opinions']);
     expect(input.current_time).toBe('15:00');
     expect(input.person).toEqual({ sex: 'женщина', age: 32, goal: 'поддерживать форму' });
     expect(Object.keys(input.days[0])).toEqual([
@@ -62,50 +63,56 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(fn.validate({ ...payload, hours: { ...payload.hours, pulse: [500] } })).toBe('hours');
   });
 
-  it('системный запрос: без готовых действий, первое предложение — тренд датчиков, стоп-лист, до 130 символов', () => {
+  it('системный запрос: картина и причина, без команд, стоп-лист, до 130 символов', () => {
     const prompt = fn.SYSTEM_PROMPT;
     expect(prompt).toContain('current_time');
     expect(prompt).toContain('pulse — средний пульс');
-    expect(prompt).toContain('Первое предложение — этот тренд словами о теле: какой датчик что показывает и за какое время');
-    expect(prompt).toContain('эргономика позы и рабочего места, микроразминка кистей, шеи или плечевого пояса, смена зрительной дистанции, терморегуляция и свежий воздух, темп движения');
-    expect(prompt).toContain('«вы устали», «вы напряжены», «вы сосредоточены»');
-    expect(prompt).toContain('погладить, обнять себя, массировать лицо или щёки');
-    expect(prompt).toContain('не длиннее 130 символов, ровно два предложения');
-    // Готовых действий в повелительном наклонении, которые модель могла бы скопировать, нет.
-    expect(prompt).not.toMatch(/опустите|посмотрите|выпейте|выпрямите|проветрите|сбавьте|например|Пример/i);
+    expect(prompt).toContain('previous_opinions');
+    expect(prompt).toContain('Ищи первопричину, а не отдельное отклонение');
+    expect(prompt).toContain('Ответ — ровно два коротких предложения, вместе не длиннее 130 символов');
+    expect(prompt).toContain('Твоё дружеское предположение о причине этой картины');
+    expect(prompt).toContain('никаких «сделайте», «попробуйте», «встаньте», «отдохните», «разомните»');
+    expect(prompt).toContain('ярлыки вроде «вы устали» или «вы напряжены»');
+    // Готовых фраз, которые модель могла бы скопировать, нет.
+    expect(prompt).not.toMatch(/например|Пример/i);
   });
 
-  it('прежние советы — из недели приложения или, у старых сборок, из recent', async () => {
+  it('прежние мнения — из недели приложения или, у старых сборок, из recent', async () => {
     const sample = await readSample();
-    expect(fn.modelInput(sample).previously_suggested_actions).toEqual([
-      'Лягте между 23:00 и 23:30, ночь пройдёт спокойнее.',
-      'Сегодня поужинайте по графику Vuelo, в 18:45.',
+    expect(fn.modelInput(sample).previous_opinions).toEqual([
+      'День вышел насыщенным, но вечер затянулся. Лягте между 23:00 и 23:30, ночь пройдёт спокойнее.',
+      'Похоже, поздний ужин снова затянул вечер, и ночью телу было не до отдыха. Сегодня поужинайте по графику Vuelo, в 18:45.',
     ]);
     const week = {
       ...sample,
       past_opinions: [
-        { ago: 0, slot: 'morning', text: 'Утро идёт туговато. Выпейте стакан прохладной воды.' },
-        { ago: 2, slot: 'evening', text: 'Плечи весь день у ушей. Опустите их вниз и задержите.' },
+        { ago: 0, slot: 'morning', text: 'Утро идёт туговато. Похоже, ночь вышла короче обычного.' },
+        { ago: 2, slot: 'evening', text: 'Вечер прошёл на взводе. Кажется, день был почти без движения.' },
       ],
     };
     expect(fn.validate(week)).toBeNull();
-    expect(fn.modelInput(week).previously_suggested_actions).toEqual(['Выпейте стакан прохладной воды.', 'Опустите их вниз и задержите.']);
+    expect(fn.modelInput(week).previous_opinions).toEqual([
+      'Утро идёт туговато. Похоже, ночь вышла короче обычного.',
+      'Вечер прошёл на взводе. Кажется, день был почти без движения.',
+    ]);
     expect(fn.validate({ ...sample, past_opinions: [{ ago: 1, slot: 'night', text: 'x' }] })).toBe('past_opinions');
   });
 
-  it('ответ: до 130 символов, два предложения, тренд датчиков, без гороскопа, прикосновений, дыхания, ночи днём и повторов', () => {
-    const good = 'Уже пару часов почти нет шагов, а пульс держится выше покоя. Встаньте и прокрутите плечами назад, пока закипает чайник.';
+  it('ответ: до 130 символов, два предложения, без команд, цифр, ярлыков, прикосновений, дыхания, ночи днём и повторов', () => {
+    const good = GOOD;
     expect(good.length).toBeLessThanOrEqual(130);
     expect(fn.answerProblem(good)).toBeNull();
-    expect(fn.answerProblem('Шагов с обеда почти нет. ' + 'Поставьте монитор на уровень глаз, отодвиньте его на вытянутую руку и проверьте, что стопы стоят на полу ровно.')).toBe('long');
-    expect(fn.answerProblem('Вы устали и перегружены. Поставьте ноги ровно на пол.')).toBe('ring');
-    expect(fn.answerProblem('Фон напряжения растёт — вы устали. Поставьте ноги ровно на пол.')).toBe('horoscope');
-    expect(fn.answerProblem('Пульс держится выше покоя. Погладьте себя по голове.')).toBe('touchy');
-    expect(fn.answerProblem('Пульс держится выше покоя. Сделайте пять глубоких вдохов.')).toBe('breathing');
-    expect(fn.answerProblem('Пульс выше, чем после плохой ночи. Разомните кисти.', [], '17:00')).toBe('time');
-    expect(fn.answerProblem('Пульс вырос на 12 ударов. Разомните кисти.')).toBe('numbers');
-    expect(fn.answerProblem('Шагов нет. Встаньте. Прокрутите плечами.')).toBe('sentences');
-    expect(fn.answerProblem(good, ['Встаньте и прокрутите плечами назад несколько раз.'])).toBe('repeat');
+    expect(fn.answerProblem('После обеда тело будто притихло и держится настороже. Кажется, долгое сидение за столом копит напряжение.')).toBeNull();
+    expect(fn.answerProblem('Весь день идёт на ровном, но натянутом фоне. ' + 'Похоже, всё копилось от долгой неподвижности за работой, поздних созвонов и того, что обед снова съехал на вечер.')).toBe('long');
+    expect(fn.answerProblem('Весь день идёт на натянутом фоне. Встаньте и пройдитесь до окна.')).toBe('command');
+    expect(fn.answerProblem('Весь день идёт на натянутом фоне. Попробуйте сменить позу.')).toBe('command');
+    expect(fn.answerProblem('Похоже, вы устали к вечеру. Кажется, день был без движения.')).toBe('horoscope');
+    expect(fn.answerProblem('Весь день идёт на натянутом фоне. Погладьте себя по голове.')).toBe('touchy');
+    expect(fn.answerProblem('Весь день идёт на натянутом фоне. Сделайте пять глубоких вдохов.')).toBe('breathing');
+    expect(fn.answerProblem('День идёт тяжеловато. Похоже, после плохой ночи тело не догнало.', [], '17:00')).toBe('time');
+    expect(fn.answerProblem('Уже 3 часа почти без движения. Похоже, работа затянула.')).toBe('numbers');
+    expect(fn.answerProblem('Фон натянутый. Движения мало. Похоже, работа.')).toBe('sentences');
+    expect(fn.answerProblem(good, ['Весь день идёт на ровном, но натянутом фоне. Похоже, накопилось от неподвижности за работой.'])).toBe('repeat');
     expect(fn.cleanAnswer('Лис: «' + good + '»')).toBe(good);
   });
 
@@ -128,7 +135,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     vi.stubEnv('APP_KEY', 'secret');
     vi.stubEnv('FOLDER_ID', 'b1gfolder');
     const calls = [];
-    const text = 'Уже пару часов почти нет шагов, а пульс держится выше покоя. Встаньте и прокрутите плечами назад, пока закипает чайник.';
+    const text = GOOD;
     vi.stubGlobal('fetch', async (url, init) => {
       calls.push({ url, init });
       return modelAnswer(text);
@@ -151,9 +158,9 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     vi.stubEnv('APP_KEY', 'secret');
     vi.stubEnv('FOLDER_ID', 'b1gfolder');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const good = 'Уже пару часов почти нет шагов, а пульс держится выше покоя. Встаньте и прокрутите плечами назад, пока закипает чайник.';
+    const good = GOOD;
     const bodies = [];
-    let answers = ['Пульс держится выше покоя. Сделайте пять глубоких вдохов.', good];
+    let answers = ['Весь день идёт на натянутом фоне. Встаньте и пройдитесь до окна.', good];
     vi.stubGlobal('fetch', async (url, init) => {
       bodies.push(JSON.parse(init.body));
       return modelAnswer(answers.shift());
@@ -161,8 +168,8 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const res = await fn.handler(event(await readSample()), context);
     expect(JSON.parse(res.body).text).toBe(good);
     expect(bodies[1].messages.slice(-2)).toEqual([
-      { role: 'assistant', text: 'Пульс держится выше покоя. Сделайте пять глубоких вдохов.' },
-      { role: 'user', text: 'Ответ не подходит: дыхательные упражнения запрещены — предложи другое простое действие. Напиши заново по правилам — ровно два предложения, до 130 символов.' },
+      { role: 'assistant', text: 'Весь день идёт на натянутом фоне. Встаньте и пройдитесь до окна.' },
+      { role: 'user', text: 'Ответ не подходит: никаких советов и команд — только картина состояния и дружеское предположение о причине. Напиши заново по правилам — ровно два коротких предложения, до 130 символов: картина состояния и предположение о причине.' },
     ]);
 
     answers = ['Отдохните.', 'Подышите.'];

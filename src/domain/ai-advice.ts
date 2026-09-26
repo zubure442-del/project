@@ -60,7 +60,7 @@ export interface AdvicePayload {
   history?: { ago: number; focus: string[] }[];
   /**
    * Мнения от модели за последние 7 дней (сколько дней назад, отрезок, текст): из них посредник берёт
-   * `previously_suggested_actions` — модель не повторяет уже предложенные микро-действия.
+   * `previous_opinions` — модель не повторяет уже сказанные мысли.
    */
   past_opinions?: { ago: number; slot: ReportMode; text: string }[];
 }

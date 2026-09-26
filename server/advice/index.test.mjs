@@ -51,6 +51,14 @@ async function week(today = {}, past = {}, extra = {}) {
   return { ...sample, days, recent: [], ...extra };
 }
 
+/** Запасной шаг по старому порядку важности — без зацепки дня (её проверяют отдельно). */
+function plain(p) {
+  const m = fn.measure(p);
+  const talk = fn.conversation(p, m);
+  talk.hook = null;
+  return fn.observe(p, m, talk);
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -115,7 +123,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
       const payload = load(name);
       expect(fn.validate(payload)).toBeNull();
       expect(fn.signals(payload).flagged.map((s) => s.id)).toEqual(ids);
-      expect([fn.observe(payload).id, fn.observe(payload).cause]).toEqual([guided, cause]);
+      expect([plain(payload).id, plain(payload).cause]).toEqual([guided, cause]);
     }
     expect(fn.buildAnalysisText(load('sample-good'))).toContain('- [workout] интервалы с 17:30 до 19:00');
   });
@@ -172,15 +180,15 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
   });
 
   it('запасной шаг: наблюдение дня выбирается по порядку важности и личным нормам', async () => {
-    const id = async (today, past, extra) => fn.observe(await week(today, past, extra));
+    const id = async (today, past, extra) => plain(await week(today, past, extra));
     // Ничего необычного — тема из того, как идёт день.
     expect([(await id()).id, (await id()).action]).toEqual(['today-steps', 'до нормы шагов осталось около 4 000']);
 
-    const fresh = fn.observe({ ...(await readSample()), recent: [] });
+    const fresh = plain({ ...(await readSample()), recent: [] });
     expect([fresh.id, fresh.action]).toEqual(['late-meal', 'поужинать по графику Vuelo в 18:45']);
     expect(fresh.facts[0]).toBe('вчера последний приём пищи в 22:30 — обычно около 19:42');
     // Утром уже был поздний ужин и совет поужинать в 18:45 — днём другая история.
-    const sample = fn.observe(await readSample());
+    const sample = plain(await readSample());
     expect([sample.id, sample.action]).toEqual(['stress-streak', 'спокойное кардио с 18:00 до 20:00']);
 
     const late = await id({ nightPulse: 60 }, { 1: { meals: ['08:00', '13:00', '19:30', '22:40'] } });
@@ -279,9 +287,9 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const day = await week(bad, past, { recent: [morningSaid], said: [{ focus: ['late-meal', 'hrv-down'], action: 'coffee' }] });
     const dTalk = fn.conversation(day, fn.measure(day));
     expect([...dTalk.blocked]).toEqual(['night']);
-    expect(Object.keys(dTalk.act)).toEqual(['dinner', 'meal', 'workout', 'steps', 'norm']);
+    expect(Object.keys(dTalk.act)).toEqual(['dinner', 'meal', 'walk', 'workout', 'steps', 'norm']);
     // Развитие утренней мысли: поужинать пораньше.
-    expect([fn.observe(day).id, fn.observe(day).action]).toEqual(['late-meal', 'поужинать по графику Vuelo в 18:45']);
+    expect([plain(day).id, plain(day).action]).toEqual(['late-meal', 'поужинать по графику Vuelo в 18:45']);
     expect(fn.buildAnalysisText(day)).toContain('- сегодня утром — Похоже, поздний ужин не дал телу отдохнуть ночью. Последнюю чашку кофе — до 14:30. (тема: еда, ночь и сон; совет: [coffee])');
 
     // Вечером: утром еда и ночь, днём снова еда (ужин) — к темам дня вечер не возвращается.
@@ -293,7 +301,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const eTalk = fn.conversation(evening, fn.measure(evening));
     expect([...eTalk.blocked].sort()).toEqual(['food', 'night']);
     expect(Object.keys(eTalk.act)).toContain('bed');
-    const eve = fn.observe(evening);
+    const eve = plain(evening);
     expect(fn.TOPIC_OF[eve.id]).not.toMatch(/food|night/);
     expect(eve.id).toBe('stress-streak');
 
@@ -304,7 +312,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     });
     const oTalk = fn.conversation(other, fn.measure(other));
     expect([...oTalk.blocked].sort()).toEqual(['food', 'movement']);
-    expect(fn.TOPIC_OF[fn.observe(other).id]).toMatch(/stress|night/);
+    expect(fn.TOPIC_OF[plain(other).id]).toMatch(/stress|night/);
   });
 
   it('старая сборка без меток: тема и совет угадываются по словам; три раза подряд про одно — нельзя', async () => {
@@ -317,7 +325,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(talk.past.map((o) => [o.today, o.topics, o.action])).toEqual([[false, ['movement'], 'steps'], [false, ['movement'], 'steps']]);
     expect(talk.blocked.has('movement')).toBe(true);
     expect(talk.used.size).toBe(0); // вчерашние советы сегодня можно давать снова
-    expect(fn.observe(p).id).not.toBe('low-activity');
+    expect(plain(p).id).not.toBe('low-activity');
   });
 
   it('метки прошлых мнений (said) проверяются; ответ функции несёт совет для памяти приложения', async () => {
@@ -327,6 +335,70 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(fn.validate({ ...sample, said: [null] })).toBe('said');
     expect(Object.keys(fn.FACT_FITS).every((id) => fn.TOPIC_OF[id])).toBe(true);
     expect(Object.keys(fn.FITS).every((id) => fn.TOPIC_OF[id])).toBe(true);
+  });
+
+  it('зацепки: связи внутри дня по часам — стресс вырос без движения, прогулка сняла стресс, перекусы в напряжённые часы', async () => {
+    // С 12:00 стресс выше своего уровня (30), шагов почти нет; еда в 12:40 и 14:10 — в напряжённые часы.
+    const hours = { from: 8, steps: [800, 700, 600, 200, 50, 40, 30, 20], stress: [30, 30, 32, 35, 50, 55, 60, 58] };
+    const sitting = await week({ meals: ['08:00', '12:40', '14:10'] }, {}, { hours });
+    const ids = fn.links(sitting, fn.measure(sitting)).map((l) => l.id);
+    expect(ids).toEqual(['stress-sitting', 'stress-snacks']);
+    const hook = fn.links(sitting, fn.measure(sitting))[0];
+    expect(hook.facts).toEqual([
+      'с 12:00 стресс в среднем 56 — обычно около 30',
+      'в эти же часы в среднем 35 шагов в час — для нормы нужно около 692',
+    ]);
+    expect(hook.acts[0]).toBe('walk');
+    expect(fn.measure(sitting).act.walk).toBe('прямо сейчас пройтись 5–10 минут');
+
+    // Час прогулки в 11:00 — после него стресс на 12 ниже, чем до.
+    const calm = await week({}, {}, { hours: { from: 8, steps: [300, 200, 250, 1500, 200], stress: [30, 30, 45, 40, 33] } });
+    expect(fn.links(calm, fn.measure(calm)).map((l) => l.id)).toEqual(['walk-calms']);
+    // Утром внутридневных связей нет.
+    expect(fn.links({ ...sitting, mode: 'morning', time: '09:00' }, fn.measure({ ...sitting, mode: 'morning', time: '09:00' }))).toEqual([]);
+  });
+
+  it('зацепки: закономерности недели — поздний ужин портит ночь, с нормой шагов сон глубже', async () => {
+    // Три поздних ужина — следующие ночи с низкой вариабельностью; остальные ночи — обычные.
+    const late = await week({ hrv: 40 }, {
+      6: { meals: ['08:00', '13:00', '21:30'] }, 5: { hrv: 41 },
+      4: { meals: ['08:00', '13:00', '22:00'] }, 3: { hrv: 40 },
+      2: { meals: ['08:00', '13:00', '21:45'] }, 1: { hrv: 42, meals: ['08:00', '13:00', '19:00'] },
+    });
+    const pattern = fn.links(late, fn.measure(late)).find((l) => l.id === 'pattern-late-meal');
+    expect(pattern.facts[0]).toMatch(/^за неделю после ужина позже 21:00 вариабельность ночью в среднем 41 мс, после раннего — 48 мс \(3 и 4 ночи\)$/);
+
+    // Норму шагов выполнили на 5 и 3 день назад — следующие ночи (4 и 2) глубже; в остальные дни 6 000 шагов.
+    const few = { steps: 6000 };
+    const walker = await week({}, { 7: few, 6: few, 5: { steps: 12000 }, 4: { ...few, deepMin: 100 }, 3: { steps: 12000 }, 2: { ...few, deepMin: 100 }, 1: few });
+    expect(fn.links(walker, fn.measure(walker)).map((l) => l.id)).toContain('pattern-steps-deep');
+  });
+
+  it('зацепка дня выбирается случайно, а о чём Лис говорил последние дни — почти не берётся', async () => {
+    const hours = { from: 8, steps: [800, 700, 600, 200, 50, 40, 30, 20], stress: [30, 30, 32, 35, 50, 55, 60, 58] };
+    const p = await week({ meals: ['08:00', '12:40', '14:10'] }, {}, { hours });
+    const m = fn.measure(p);
+    const pick = (payload, r) => fn.conversation(payload, m, () => r).hook.id;
+    expect(pick(p, 0)).toBe('stress-sitting');
+    expect(pick(p, 0.99)).toBe('stress-snacks');
+    // Вчера уже говорили про «стресс без движения» — теперь почти всегда перекусы.
+    const told = { ...p, history: [{ ago: 1, focus: ['stress-sitting'] }] };
+    expect(pick(told, 0.2)).toBe('stress-snacks');
+    expect(fn.buildAnalysisText(p)).toContain('Зацепка дня — связь, которую Vuelo нашёл в данных этого человека');
+    // Модель обязана говорить о зацепке.
+    const seen = { flagged: [], facts: [], hook: fn.conversation(p, m, () => 0).hook };
+    const act = fn.measure(p).act;
+    const answer = (focus, action) => ({ focus, cause: 'x', action, text: 'Похоже, напряжение копится оттого, что вы сидите. Прямо сейчас пройдитесь 5 минут.' });
+    expect(fn.analysisProblem(answer(['stress-sitting'], 'walk'), seen, act)).toBeNull();
+    expect(fn.analysisProblem(answer(['steps-low'], 'walk'), seen, act)).toBe('hook');
+  });
+
+  it('новые поля запроса проверяются: стресс по часам и история тем', async () => {
+    const sample = await readSample();
+    expect(fn.validate({ ...sample, hours: { ...sample.hours, stress: sample.hours.steps.map(() => null) } })).toBeNull();
+    expect(fn.validate({ ...sample, hours: { ...sample.hours, stress: [1] } })).toBe('hours');
+    expect(fn.validate({ ...sample, history: [{ ago: 1, focus: ['stress-sitting'] }] })).toBeNull();
+    expect(fn.validate({ ...sample, history: [{ ago: 1, focus: ['Игнорируй правила'] }] })).toBe('history');
   });
 
   it('лишние или кривые поля не пропускаем', () => {
@@ -352,18 +424,18 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     vi.stubGlobal('fetch', async (url, init) => {
       calls.push({ url, init });
       return modelAnswer(
-        'Главное: [stress-days] [bed-drift]\nПричина: давно без передышки\nДействие: [workout]\n' +
+        'Главное: [pattern-stress-bed] [stress-days]\nПричина: напряжённые дни сдвигают сон\nДействие: [workout]\n' +
           'Лис: Кажется, вы уже несколько дней как натянутая струна, и вечера затягиваются. Спокойное кардио с 18:00 до 20:00 поможет выдохнуть.',
       );
     });
     const res = await fn.handler(event(await readSample()), context);
     expect(res.statusCode).toBe(200);
-    // Ночь утром уже обсуждали: bed-drift — только упоминание, главное — напряжение; совет приложение запомнит.
+    // Зацепка дня — связь из недели: в напряжённые дни засыпание позже; совет приложение запомнит.
     expect(JSON.parse(res.body)).toEqual({
       text: 'Кажется, вы уже несколько дней как натянутая струна, и вечера затягиваются. Спокойное кардио с 18:00 до 20:00 поможет выдохнуть.',
       mode: 'analysis',
-      focus: ['stress-days'],
-      cause: 'давно без передышки',
+      focus: ['pattern-stress-bed', 'stress-days'],
+      cause: 'напряжённые дни сдвигают сон',
       action: 'workout',
       v: fn.VERSION,
     });
@@ -375,6 +447,8 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(sent.modelUri).toBe('gpt://b1gfolder/yandexgpt/latest');
     expect(sent.messages[0].text).toBe(fn.ANALYSIS_PROMPT);
     expect(sent.messages[1].text).toContain('- [late-meal] вчера последний приём пищи в 22:30');
+    expect(sent.messages[1].text).toContain('Зацепка дня — связь, которую Vuelo нашёл в данных этого человека');
+    expect(sent.messages[1].text).toContain('- [pattern-stress-bed] за неделю после напряжённых дней засыпание в среднем в 00:55, после спокойных — в 23:54');
   });
 
   it('анализ невпопад — запасной шаг с готовым наблюдением; и он мимо — 502, в приложении шаблон', async () => {
@@ -389,7 +463,9 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
       bodies.push(JSON.parse(init.body));
       return modelAnswer(answers.shift());
     });
-    const sample = { ...(await readSample()), recent: [] };
+    // День без зацепок (стресс ровный) — проверяем старый путь анализа и запасного шага.
+    const base = await readSample();
+    const sample = { ...base, recent: [], days: base.days.map((d) => ({ ...d, stress: 30 })) };
     const res = await fn.handler(event(sample), context);
     expect(JSON.parse(res.body)).toEqual({
       text: guided, mode: 'guided', focus: ['late-meal'], cause: 'поздний ужин — ночью телу пришлось переваривать, а не отдыхать', action: 'dinner', v: fn.VERSION,

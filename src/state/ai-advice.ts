@@ -99,6 +99,19 @@ export function recentOpinions(reports: readonly StoredReport[], date: string, e
   return recentReports(reports, date, except).map((r) => `${day(r.date)} ${SLOT_WHEN[r.mode]} — ${r.text}`);
 }
 
+/** Сколько дней истории тем уходит посреднику. */
+export const AI_ADVICE_HISTORY_DAYS = 7;
+
+/** О чём Лис говорил за последние дни: метки главного, свежие первыми (текущий отрезок не входит). */
+export function focusHistory(reports: readonly StoredReport[], date: string, except: StoredReport | null): { ago: number; focus: string[] }[] {
+  const ago = (d: string) => Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86400000);
+  return [...reports]
+    .filter((r) => r !== except && r.focus?.length && ago(r.date) >= 0 && ago(r.date) < AI_ADVICE_HISTORY_DAYS)
+    .sort((a, b) => b.date.localeCompare(a.date) || SLOT_ORDER[b.mode] - SLOT_ORDER[a.mode])
+    .slice(0, AI_ADVICE_HISTORY_DAYS * 3)
+    .map((r) => ({ ago: ago(r.date), focus: (r.focus ?? []).slice(0, 4) }));
+}
+
 /**
  * О чём были те же мнения — строка в строку с `recentOpinions` (владелец 26.09: «выдаёт одно и то же
  * три раза подряд»): по меткам посредник не даёт Лису говорить об одном и том же и повторять совет.
@@ -223,6 +236,7 @@ export function aiAdviceRequest(state: VueloState, now = new Date(), force = fal
       },
       recent: recentOpinions(state.reports, cycle.date, stored),
       said: recentAbout(state.reports, cycle.date, stored),
+      history: focusHistory(state.reports, cycle.date, stored),
     },
   };
 }
@@ -243,7 +257,7 @@ export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: 
 export type AiAdviceResult = { text: string; about?: AdviceAbout; server?: number } | { error: string };
 
 /** Версия кода облачной функции, с которой приложение работает полностью (разговор за день, метки). */
-export const AI_ADVICE_SERVER_VERSION = 2;
+export const AI_ADVICE_SERVER_VERSION = 3;
 
 /** Запрос к посреднику. Любая неудача — `error` с причиной для отладочного лога, без исключений. */
 export async function fetchAiAdvice(

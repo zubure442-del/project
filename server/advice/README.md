@@ -86,7 +86,10 @@ curl -X POST 'https://functions.yandexcloud.net/ВАШ_ID' \
 `night-pulse-down` пульс во сне, `hrv-down` / `hrv-up` вариабельность, `stress-days` / `stress-up`
 стресс, `workout-yesterday` вчерашняя тренировка, `steps-low` / `steps-done` шаги; факты дня —
 `today-steps`, `today-meals`, `today-stress`, `yesterday-move`, `night-summary`.
-Метки `action`: `bed` окно сна, `dinner` ужин, `meal` без перекусов до еды, `coffee` кофе, `workout`
+Зацепки дня (связи в данных человека, одна выбирается случайно): `stress-sitting`, `walk-calms`,
+`stress-snacks`, `snacks-today`, `pattern-late-meal`, `pattern-steps-deep`, `pattern-stress-bed`,
+`steps-deep-night`.
+Метки `action`: `walk` пройтись прямо сейчас, `bed` окно сна, `dinner` ужин, `meal` без перекусов до еды, `coffee` кофе, `workout`
 тренировка, `steps` шаги до нормы.
 
 Примеры разных дней — подставьте файл в конце команды вместо `sample.json`:

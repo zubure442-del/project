@@ -9,10 +9,15 @@ const shiftDate = (date: string, days: number) =>
 /** Сколько прошлых дней кладём в таблицу: неделя — видно и «обычно», и то, что копится. */
 export const ADVICE_DAYS_BACK = 7;
 
-/** Шаги сегодня по часам: с часа подъёма (не раньше 7:00) до часа данных. */
+/**
+ * Сегодня по часам: с часа подъёма (не раньше 7:00) до часа данных. Шаги и средний стресс часа
+ * (null — замеров в этот час не было): по ним посредник ищет связи внутри дня («с 12:00 стресс
+ * вырос, а шагов почти не было»).
+ */
 export interface AdviceHours {
   from: number;
   steps: number[];
+  stress: (number | null)[];
 }
 
 /**
@@ -43,7 +48,13 @@ export function adviceDaysFor(state: VueloState, now = new Date()): { days: Advi
     const wake = todayDay.sleepSegments.length ? Math.max(...todayDay.sleepSegments.map((s) => s.to)) : 7 * 60;
     const from = Math.floor(Math.max(wake, 7 * 60) / 60);
     const to = Math.floor(upTo / 60);
-    if (to >= from) hours = { from, steps: todayDay.stepsByHour.slice(from, to + 1) };
+    if (to >= from) {
+      const stress = Array.from({ length: to - from + 1 }, (_, i) => {
+        const inHour = todayDay.stress.filter((p) => Math.floor(p.m / 60) === from + i).map((p) => p.v);
+        return inHour.length ? Math.round(inHour.reduce((a, b) => a + b, 0) / inHour.length) : null;
+      });
+      hours = { from, steps: todayDay.stepsByHour.slice(from, to + 1), stress };
+    }
   }
   return { days, hours };
 }

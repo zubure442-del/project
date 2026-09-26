@@ -35,8 +35,8 @@ export interface AdvicePayload {
    * (`adviceDaysFor`). Решение владельца 26.09: мнение Лиса — из чисел, а не из готовых фраз.
    */
   days: AdviceDay[];
-  /** Шаги сегодня по часам с часа `from`; сегодняшних данных нет — null. */
-  hours: { from: number; steps: number[] } | null;
+  /** Шаги и средний стресс сегодня по часам с часа `from` (стресс null — замеров не было); нет данных — null. */
+  hours: { from: number; steps: number[]; stress?: (number | null)[] } | null;
   /** План Vuelo на сегодня из карточек карусели: человек его видит, на него можно сослаться. */
   plan: {
     workout: { title: string; effort: string; minutes: number; from: string; to: string } | null;
@@ -53,6 +53,11 @@ export interface AdvicePayload {
    * совет). По меткам посредник держит разговор за день: темы и советы не ходят по кругу.
    */
   said?: (AdviceAbout | null)[];
+  /**
+   * О чём Лис говорил за последние 7 дней (метки главного, `ago` — сколько дней назад): посредник
+   * не повторяет одну и ту же зацепку день за днём (владелец 26.09: «каждый день про шаги — скучно»).
+   */
+  history?: { ago: number; focus: string[] }[];
 }
 
 /** Метки мнения от посредника: что было главным (`late-meal`, `stress-days`…) и какой совет (`dinner`…). */

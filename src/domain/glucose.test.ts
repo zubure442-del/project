@@ -55,6 +55,23 @@ describe('СИНТЕТИЧЕСКИЕ: одиночный выброс глюко
     expect(kept(dropGlucoseSpikes(series([...CALM, 9.5, 8.8]))).slice(-2)).toEqual([9.5, 8.8]);
   });
 
+  it('скриншот владельца 26.09 ночью: 5.7 → 5.0 → 6.7 последней точкой — ждёт подтверждения', () => {
+    // Уровень 6.0 (вчерашний день), ночь: 6.0, 5.9, 5.9, 5.7, 5.0, 6.7 — раз в 30 минут с полуночи.
+    const night = (tail: number[]) => [...series(CALM, 0), ...series([6, 5.9, 5.9, 5.7, 5, 6.7, ...tail], 1440)];
+    // Следующего замера ещё нет: 6.7 на 1.7 выше предыдущего — не показываем (раньше сравнивали
+    // с уровнем 6.0: всего 0.7, и точка попадала на график).
+    expect(kept(dropGlucoseSpikes(night([]))).at(-1)).toBeNull();
+    // Следующий «примерно такой же» — подтвердил: точка появляется.
+    expect(kept(dropGlucoseSpikes(night([6.5]))).slice(-2)).toEqual([6.7, 6.5]);
+    // Следующий снова низкий — выброс, так и не показываем.
+    expect(kept(dropGlucoseSpikes(night([5.4]))).slice(-2)).toEqual([null, 5.4]);
+  });
+
+  it('плавный подъём последними точками виден сразу: от предыдущего меньше скачка', () => {
+    const values = [...CALM, 6.5, 7, 7.4];
+    expect(kept(dropGlucoseSpikes(series(values)))).toEqual(values);
+  });
+
   it('сосед дальше двух часов не сосед: вместо него обычный уровень', () => {
     const last = 360 + 11 * 30;
     const far = [...series(CALM), { ts: at(last + 150), glucose: 9, systolic: 120 }, { ts: at(last + 300), glucose: 8.9, systolic: 120 }];

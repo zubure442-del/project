@@ -111,7 +111,9 @@ describe('РЕАЛЬНЫЙ ЛОГ 25.09: выбросы глюкозы', () => {
     const after = dropGlucoseSpikes(result.summary);
     const at = (r: { ts: number }) => new Date(r.ts * 1000).toISOString().slice(5, 16);
     const dropped = result.summary.filter((r, i) => r.glucose !== null && after[i].glucose === null).map(at);
-    expect(dropped).toEqual(['09-24T16:45', '09-25T00:45', '09-25T03:15']);
+    // 24.09 18:15 — 5.1 → 6.7, а следующий замер только в 22:15 (через 4 ч): подтвердить нечем,
+    // с 26.09 такой скачок не показываем (владелец: «проверять следующей точкой, нет — пропустить»).
+    expect(dropped).toEqual(['09-24T16:45', '09-24T18:15', '09-25T00:45', '09-25T03:15']);
     const keptAt = new Set(after.filter((r) => r.glucose !== null).map(at));
     for (const meal of ['09-25T07:45', '09-25T08:45', '09-25T09:15', '09-25T09:45', '09-24T13:15']) expect(keptAt).toContain(meal);
   });

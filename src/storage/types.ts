@@ -108,6 +108,12 @@ export interface StoredReport {
   mode: ReportMode;
   templateId: string;
   text: string;
+  /**
+   * О чём было мнение Лиса от модели: метки главного и совета (`AdviceAbout`). По ним посредник
+   * знает, о чём Лис уже говорил, и не ходит по кругу. У шаблонных и старых советов полей нет.
+   */
+  focus?: string[];
+  action?: string | null;
 }
 
 export interface VueloState {

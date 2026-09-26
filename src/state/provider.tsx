@@ -207,7 +207,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         logNote(`мнение Лиса (${slot}) от модели: ${result.error}, остаётся шаблонное`);
         return;
       }
-      const next = withAiAdvice(latest.current, request, result.text);
+      const next = withAiAdvice(latest.current, request, result.text, result.about ?? null);
       if (next === latest.current) {
         logNote(`мнение Лиса (${slot}) от модели получено, но пока ждали, совет сменился — не применяем`);
         return;

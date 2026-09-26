@@ -80,7 +80,7 @@ export async function backgroundSync(now = new Date()): Promise<BackgroundOutcom
       const reply = await fetchAiAdvice(request.payload, config, fetch, Math.max(1000, left() - 1000));
       if ('text' in reply) {
         const current = ringSession.host ? ringSession.host.get() : next;
-        const withAi = withAiAdvice(current, request, reply.text);
+        const withAi = withAiAdvice(current, request, reply.text, reply.about ?? null);
         if (withAi !== current) await store(withAi);
         logNote('фоновое обновление: мнение Лиса получено');
       } else {

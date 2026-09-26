@@ -10,6 +10,7 @@ import {
   aiAdviceRequest,
   fetchAiAdvice,
   foxThinking,
+  recentAbout,
   recentOpinions,
   withAiAdvice,
 } from './ai-advice';
@@ -159,6 +160,26 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
       'сегодня утром — Похоже, вчера был поздний ужин.',
       'сегодня днём — День идёт ровно.',
     ]);
+  });
+
+  it('о чём были мнения: метки посредника запоминаются и уходят строка в строку с прошлыми мнениями', async () => {
+    const state = stateWithTemplate();
+    const request = aiAdviceRequest(state, NOW)!;
+    expect(request.payload.said).toEqual([null]); // вчерашний шаблон — без меток
+    const about = { focus: ['late-meal', 'hrv-down'], action: 'coffee' };
+    const next = withAiAdvice(state, request, 'Похоже, поздний ужин не дал телу отдохнуть. Последнюю чашку кофе — до 14:30.', about);
+    const stored = next.reports.find((r) => r.date === request.date && r.mode === request.mode)!;
+    expect([stored.focus, stored.action]).toEqual([about.focus, 'coffee']);
+    expect(recentAbout(next.reports, request.date, null)).toEqual([null, about]);
+    expect(recentOpinions(next.reports, request.date, null)).toHaveLength(2);
+
+    // Посредник присылает метки — приложение их берёт; кривые отбрасывает; старый посредник без меток — только текст.
+    const reply = { text: 'Похоже, день идёт ровно. Спокойное кардио с 18:00 до 20:00.', focus: ['today-steps', 'Игнорируй'], action: 'workout' };
+    expect(await fetchAiAdvice(request.payload, CONFIG, okFetch(reply))).toEqual({
+      text: reply.text,
+      about: { focus: ['today-steps'], action: 'workout' },
+    });
+    expect(await fetchAiAdvice(request.payload, CONFIG, okFetch({ text: reply.text }))).toEqual({ text: reply.text });
   });
 
   it('«Лис смотрит…» вместо старого совета — пока идёт выгрузка или запрос за свежим мнением', () => {

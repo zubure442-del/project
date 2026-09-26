@@ -48,6 +48,26 @@ export interface AdvicePayload {
   };
   /** Последние выданные советы: чтобы модель не повторялась ни словами, ни темой. */
   recent: string[];
+  /**
+   * О чём были эти советы — по одному на каждую строку `recent`, null — не знаем (шаблон или старый
+   * совет). По меткам посредник держит разговор за день: темы и советы не ходят по кругу.
+   */
+  said?: (AdviceAbout | null)[];
+}
+
+/** Метки мнения от посредника: что было главным (`late-meal`, `stress-days`…) и какой совет (`dinner`…). */
+export interface AdviceAbout {
+  focus: string[];
+  action: string | null;
+}
+
+const isTag = (v: unknown): v is string => typeof v === 'string' && v.length <= 30 && /^[a-z]+(?:-[a-z]+)*$/.test(v);
+
+/** Метки из ответа посредника; старый посредник их не присылает — null. Лишнее отбрасываем. */
+export function adviceAbout(data: { focus?: unknown; action?: unknown }): AdviceAbout | null {
+  const focus = Array.isArray(data.focus) ? data.focus.filter(isTag).slice(0, 4) : [];
+  const action = isTag(data.action) ? data.action : null;
+  return focus.length || action ? { focus, action } : null;
 }
 
 /**

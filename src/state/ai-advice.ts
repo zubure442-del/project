@@ -1,10 +1,12 @@
 import {
   AI_TEMPLATE_ID,
   EFFORT_TEXT,
+  adviceAbout,
   cleanAdvice,
   coffeeClock,
   isAiTemplate,
   isSafeAdvice,
+  type AdviceAbout,
   type AdvicePayload,
   type ReportMode,
 } from '../domain';
@@ -77,6 +79,14 @@ const SLOT_WHEN: Record<ReportMode, string> = { morning: 'утром', day: 'д�
 const shiftDate = (date: string, days: number) =>
   new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 
+/** Недавние советы по порядку — последние AI_ADVICE_RECENT до текущего. */
+function recentReports(reports: readonly StoredReport[], date: string, except: StoredReport | null): StoredReport[] {
+  return [...reports]
+    .filter((r) => r !== except && r.date <= date)
+    .sort((a, b) => a.date.localeCompare(b.date) || SLOT_ORDER[a.mode] - SLOT_ORDER[b.mode])
+    .slice(-AI_ADVICE_RECENT);
+}
+
 /**
  * Недавние мнения для модели — с тем, когда они были сказаны («сегодня утром — …»), по порядку:
  * Лис продолжает историю дня (утром советовал лечь пораньше — вечером видит, что вышло), а не
@@ -84,11 +94,17 @@ const shiftDate = (date: string, days: number) =>
  */
 export function recentOpinions(reports: readonly StoredReport[], date: string, except: StoredReport | null): string[] {
   const day = (d: string) => (d === date ? 'сегодня' : d === shiftDate(date, -1) ? 'вчера' : 'раньше');
-  return [...reports]
-    .filter((r) => r !== except && r.date <= date)
-    .sort((a, b) => a.date.localeCompare(b.date) || SLOT_ORDER[a.mode] - SLOT_ORDER[b.mode])
-    .slice(-AI_ADVICE_RECENT)
-    .map((r) => `${day(r.date)} ${SLOT_WHEN[r.mode]} — ${r.text}`);
+  return recentReports(reports, date, except).map((r) => `${day(r.date)} ${SLOT_WHEN[r.mode]} — ${r.text}`);
+}
+
+/**
+ * О чём были те же мнения — строка в строку с `recentOpinions` (владелец 26.09: «выдаёт одно и то же
+ * три раза подряд»): по меткам посредник не даёт Лису говорить об одном и том же и повторять совет.
+ */
+export function recentAbout(reports: readonly StoredReport[], date: string, except: StoredReport | null): (AdviceAbout | null)[] {
+  return recentReports(reports, date, except).map((r) =>
+    r.focus || r.action ? { focus: r.focus ?? [], action: r.action ?? null } : null,
+  );
 }
 
 /** Цикл в кэше, скорее всего, уже закончился: с подъёма прошло столько часов, а новая ночь ещё на кольце. */
@@ -204,6 +220,7 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
           : null,
       },
       recent: recentOpinions(state.reports, cycle.date, stored),
+      said: recentAbout(state.reports, cycle.date, stored),
     },
   };
 }
@@ -211,15 +228,17 @@ export function aiAdviceRequest(state: VueloState, now = new Date()): AiAdviceRe
 /**
  * Совет от модели вместо шаблонного — только если шаблонный за время запроса не сменился
  * (шаблона не было, а выгрузка успела его записать, — не смена: мнение модели его и заменяет).
+ * `about` — о чём мнение (метки посредника): запоминаем, чтобы Лис не ходил по кругу.
  */
-export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: string): VueloState {
+export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: string, about: AdviceAbout | null = null): VueloState {
   const stored = state.reports.find((r) => r.date === request.date && r.mode === request.mode);
   const same = stored === undefined || stored.templateId === request.templateId || (request.templateId === null && !isAiTemplate(stored.templateId));
   if (!same) return state;
-  return { ...state, reports: addReport(state.reports, { date: request.date, mode: request.mode, templateId: AI_TEMPLATE_ID, text }) };
+  const report: StoredReport = { date: request.date, mode: request.mode, templateId: AI_TEMPLATE_ID, text, ...(about ?? {}) };
+  return { ...state, reports: addReport(state.reports, report) };
 }
 
-export type AiAdviceResult = { text: string } | { error: string };
+export type AiAdviceResult = { text: string; about?: AdviceAbout } | { error: string };
 
 /** Запрос к посреднику. Любая неудача — `error` с причиной для отладочного лога, без исключений. */
 export async function fetchAiAdvice(
@@ -238,10 +257,12 @@ export async function fetchAiAdvice(
       signal: controller.signal,
     });
     if (!response.ok) return { error: `посредник ответил ${response.status}` };
-    const data = (await response.json()) as { text?: unknown };
+    const data = (await response.json()) as { text?: unknown; focus?: unknown; action?: unknown };
     if (typeof data.text !== 'string') return { error: 'в ответе нет текста' };
     const text = cleanAdvice(data.text);
-    return isSafeAdvice(text) ? { text } : { error: 'текст не прошёл проверку' };
+    if (!isSafeAdvice(text)) return { error: 'текст не прошёл проверку' };
+    const about = adviceAbout(data);
+    return about ? { text, about } : { text };
   } catch (e) {
     return { error: controller.signal.aborted ? 'нет ответа за 15 с' : `нет связи (${String(e)})` };
   } finally {

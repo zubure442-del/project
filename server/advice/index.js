@@ -18,8 +18,16 @@
  * 2. Запасной шаг (`observe`), если ответ анализа не прошёл проверку: главное наблюдение выбирает
  *    правило, модель только говорит его голосом Лиса. Раньше модель читала всю таблицу сама —
  *    Lite путалась и связывала несвязанное («легли поздно — поешьте по графику»; владелец 26.09: «бред»).
- * Функция отдаёт `{ text, mode, focus, cause }`: приложение показывает text; остальное — для проверки
- * через curl (mode: analysis — решил ИИ, guided — запасной шаг).
+ * Разговор за день (владелец 26.09: «выдаёт одно и то же три раза подряд — про сбитый режим сна, да ещё
+ * почти теми же словами, что на карточках»): три мнения цикла — это разговор, а не три повтора. У каждого
+ * своя роль (`SLOT_ROLE`): утром — ночь и её причина, днём — развитие утренней мысли или новая тема дня,
+ * вечером — итог дня. Функция помнит, о чём Лис уже говорил (`conversation`): ночь — одна тема за цикл,
+ * другая тема — не больше двух раз за цикл и не трижды подряд, одно действие — один раз за цикл, окно сна —
+ * только вечером. Пересказывать карточки («режим сбился», «долг сна», «окно для кофе») нельзя (`CARD_REPEAT`).
+ * Когда необычного нет или его уже обсудили — темой становится то, как идёт день (`dayFacts`).
+ * Функция отдаёт `{ text, mode, focus, cause, action }`: приложение показывает text и запоминает focus
+ * и action (так Лис знает, о чём уже говорил); остальное — для проверки через curl (mode: analysis — решил
+ * ИИ, guided — запасной шаг).
  *
  * Ключей API здесь нет: функция ходит в YandexGPT от имени своего сервисного аккаунта
  * (роль ai.languageModels.user), токен выдаёт сама платформа (context.token).
@@ -57,20 +65,27 @@ const WORKOUT_TEXT = { cardio: 'кардио', strength: 'силовая' };
  */
 const ANALYSIS_PROMPT = `Ты — Лис, маскот Vuelo — приложения к умному кольцу. Ты давно наблюдаешь за этим человеком и знаешь его ритм. Говоришь с ним сам, от первого лица, как близкий друг, а не как врач или аналитик. Обращайся на «вы».
 
-Тебе дают всё, что Vuelo заметил по кольцу за последние дни, — уже в сравнении с тем, что обычно для этого человека, — и действия из плана Vuelo на сегодня. Разберись сам, как друг, который хорошо знает этого человека: что с ним происходит и из-за чего. Сложи из наблюдений одну живую историю и скажи её смело — не общими словами, а так, будто ты видел его вчерашний вечер.
+Тебе дают всё, что Vuelo заметил по кольцу за последние дни, — уже в сравнении с тем, что обычно для этого человека, — как идёт сегодняшний день и действия из плана Vuelo на сегодня. Разберись сам, как друг, который хорошо знает этого человека: что с ним происходит и из-за чего. Сложи из наблюдений одну живую историю и скажи её смело — не общими словами, а так, будто ты видел его вчерашний вечер.
 
 Какие истории обычно стоят за наблюдениями:
 - пульс во сне выше и вариабельность ниже обычного — тело ночью не восстановилось. Была поздняя еда — поздний плотный ужин; вчера тренировка — тело ещё не отошло от нагрузки; вчера был стресс — голова не отпускала дела; ничего из этого — скорее всего, вчера был бокал-другой или кофе после обеда;
 - позднее засыпание и стресс днём — засиделись с работой или делами допоздна;
 - поздняя еда и позднее засыпание — поздний ужин затянул вечер;
 - много приёмов пищи за день — день прошёл на перекусах;
-- засыпание всё позже или в разное время — сбился режим;
-- короткий сон несколько ночей или долг сна — накопилась усталость;
+- засыпание всё позже или в разное время — вечера затягиваются: дела и заботы переезжают на ночь;
+- короткий сон несколько ночей — накопилась усталость;
 - стресс несколько дней подряд — вы давно на взводе, без передышки;
 - пульс во сне ниже и вариабельность выше, сон не короче обычного — тело отлично восстановилось, можно дать нагрузку;
-- мало шагов к середине дня — день выходит сидячим.
-Выбери одну историю — самую важную сейчас, остальное оставь. Причина — одна и конкретная. Действие помогает именно с ней: не восстановились или поздно легли — окно сна или кофе пораньше, поздний ужин — ужин по плану, отлично восстановились — тренировка или шаги.
-Ты говоришь с человеком трижды за день — смотри на первую строку «Сейчас»: утро, после пробуждения — про прошедшую ночь и день впереди; день — как идёт день и что успеть до вечера; вечер, перед сном — про прошедший день и сон, действие — вечер и окно сна.
+- мало шагов к середине дня — день выходит сидячим; много шагов вчера — ноги ещё помнят вчерашний день.
+Выбери одну историю — самую важную сейчас, остальное оставь. Причина — одна и конкретная. Действие помогает именно с ней: не восстановились — кофе пораньше или тренировка полегче, поздний ужин — ужин по плану, сидячий день — шаги, отлично восстановились — тренировка.
+
+Ты говоришь с человеком трижды за день, и это разговор, а не три одинаковых сообщения: каждый раз — новая мысль. Смотри на строку «Сейчас» и «Твоя задача сейчас»:
+- утро, после пробуждения — как прошла ночь и почему: причина во вчерашнем дне. Действие — на день;
+- день — разверни утреннюю мысль дальше, по-новому (утром поздний ужин помешал ночи — днём предложи поужинать пораньше, чтобы завтра было лучше), или возьми новую тему из того, как идёт день: движение, еда, напряжение;
+- вечер, перед сном — итог дня: как он прошёл и получилось ли то, что ты советовал; действие — на вечер.
+Темы, которые вы уже обсуждали, главными не бери, действие не повторяй. Не своди всё к сну: ночь — одна тема за день, человек и так видит её на экране.
+
+Человек видит на главном экране карточки Vuelo: окно сна и долг сна, окно для кофе, тренировку дня, приёмы пищи. Не пересказывай их («режим сбился», «долг сна», «окно для кофе»): твоё дело — почему так вышло и что с чем связано. Время из плана — только в действии, одной короткой фразой.
 
 Ответ — ровно четыре строки:
 Главное: метки наблюдений этой истории (одна или две), например [late-meal] [hrv-down]
@@ -82,7 +97,7 @@ const ANALYSIS_PROMPT = `Ты — Лис, маскот Vuelo — приложе�
 - Первое предложение — твоя история: что с человеком и почему, смело, но как догадка («похоже», «кажется», «скорее всего»). Второе — выбранное действие с его временем, можно с короткой поддержкой.
 - Не называй показатели и числа из наблюдений: никаких «пульс», «вариабельность», «стресс», «глубокий сон», процентов и «выше/ниже обычного». Говори о человеке: теле, ночи, вечере, работе, привычках. Числа — только из выбранного действия.
 - Учитывай пол, возраст и цель, но не называй их и не оценивай фигуру.
-- Ты рядом весь день и помнишь, что уже говорил (внизу — с тем, когда). Если сегодня вы уже говорили — продолжи ту же историю, как друг, который помнит утренний разговор: что изменилось с тех пор и получилось ли то, что ты советовал, если это видно по наблюдениям. Слова прошлых мнений не повторяй.
+- Ты рядом весь день и помнишь, что уже говорил (внизу — с тем, когда). Сегодня вы уже говорили — сошлись на это одним словом и скажи новое: что изменилось с тех пор, получилось ли то, что ты советовал. Слова и советы прошлых мнений не повторяй.
 - Нельзя: приветствия, прощания, вопросы; болезни, диагнозы, лекарства, врачи, обещания результата; слова «глюкоза», «сахар», «давление»; оценки «из 100»; другие приложения и бренды, кроме Vuelo; эмодзи, списки, кавычки; общие слова вроде «что-то задержало», «выделите время для себя», «не перегружайте себя», «берегите себя».
 
 Пример ответа:
@@ -92,12 +107,12 @@ const ANALYSIS_PROMPT = `Ты — Лис, маскот Vuelo — приложе�
 Лис: Похоже, вчера был бокал-другой — тело всю ночь разбиралось с ним вместо отдыха. Сегодня без подвигов, а лечь лучше между 22:45 и 23:15.
 
 Ещё примеры строки «Лис:» — только для тона; историю и время бери из своих наблюдений и плана:
-Лис: Кажется, вчера вы засиделись с работой допоздна — голова так и не выключилась к ночи. Сегодня закончите дела пораньше и лягте между 22:45 и 23:15.
-Лис: Похоже, вчерашняя тренировка ещё отзывается в теле. Сегодня спокойное кардио с 17:30 до 18:30 — ровно то, что нужно.
+Лис: Похоже, поздний ужин не дал телу отдохнуть ночью. Последнюю чашку кофе — до 13:00, а вечер оставим спокойным.
+Лис: Утром ночь подвёл поздний ужин — давайте сегодня его обгоним. Поужинайте в 18:30, к ночи тело успеет управиться с едой.
+Лис: Кажется, день выходит сидячим — голове нужен воздух не меньше, чем ногам. До нормы около 4 000 шагов: прогулка после работы их закроет.
+Лис: Вы уже несколько дней на взводе, как натянутая струна. Спокойное кардио с 18:00 до 19:00 поможет выдохнуть.
 Лис: Тело отлично восстановилось — это ваш день. Интервалы с 18:00 до 19:00 пройдут на ура.
-Лис: Вы уже несколько дней на взводе, как натянутая струна. Сегодня вечер без дел, а лечь — между 22:45 и 23:15.
-Лис: Похоже, поздний ужин затянул вечер, и телу было не до сна. Сегодня поужинайте по графику Vuelo, в 19:30.
-Лис: Утром я волновался за вашу ночь, а день вы прожили спокойно — тело отходит. Лягте между 22:45 и 23:15, закрепим.`;
+Лис: День вышел подвижным, а перекусы вы сегодня обошли — утренний план сработал. Лягте между 22:45 и 23:15, закрепим.`;
 
 /**
  * Правила запасного шага: наблюдение уже выбрано (`observe`), модель его только говорит — два
@@ -111,12 +126,14 @@ const GUIDED_PROMPT = `Ты — Лис, маскот Vuelo — приложен�
 1. Твоё мнение: что с человеком и почему. Причину говори как свою догадку: «похоже», «кажется», «думаю». Причина не видна — скажи только о том, что видно, и ничего не додумывай.
 2. Действие из «Что предложить» — с его временем, если оно там есть. Можно добавить короткую поддержку.
 
-Смотри на первую строку «Сейчас»: утро, после пробуждения — про прошедшую ночь и день впереди; день — про остаток дня; вечер, перед сном — про прошедший день и сон.
+Смотри на первую строку «Сейчас»: утро, после пробуждения — про прошедшую ночь и день впереди; день — про остаток дня; вечер, перед сном — про прошедший день.
+
+Человек видит на главном экране карточки Vuelo: окно сна и долг сна, окно для кофе, тренировку дня, приёмы пищи. Не пересказывай их («режим сбился», «долг сна», «окно для кофе») — говори, почему так вышло.
 
 Правила:
 - Не называй показатели и числа из «Что видно»: никаких «пульс», «вариабельность», «стресс», «глубокий сон», процентов и «выше/ниже обычного». Говори о человеке: теле, ночи, вечере, режиме, привычках. Числа — только из «Что предложить».
 - Учитывай пол, возраст и цель, но не называй их и не оценивай фигуру.
-- Если сегодня ты уже говорил с человеком (внизу) — можно коротко сослаться на это; слова прошлых мнений не повторяй.
+- Если сегодня ты уже говорил с человеком (внизу) — можно коротко сослаться на это; слова и советы прошлых мнений не повторяй.
 - Нельзя: приветствия, прощания, вопросы; болезни, диагнозы, лекарства, врачи, обещания результата; слова «глюкоза», «сахар», «давление»; оценки «из 100»; другие приложения и бренды, кроме Vuelo; эмодзи, списки, кавычки; общие слова вроде «что-то задержало», «выделите время для себя», «не перегружайте себя», «берегите себя».
 
 Примеры (времена в них чужие — бери свои из «Что предложить»):
@@ -220,11 +237,13 @@ function planActions(p, now, today) {
   const next = plan.meals.find((m) => ahead(m.time));
   const genitive = { завтрак: 'завтрака', обед: 'обеда', ужин: 'ужина', 'первый приём': 'первого приёма пищи', 'второй приём': 'второго приёма пищи' };
   if (next) act.meal = `до ${genitive[next.title.toLowerCase()] || 'еды'} в ${next.time} обойтись без перекусов`;
-  if (plan.noCoffee) act.coffee = 'сегодня обойтись без кофе';
+  if (lateNight) {
+    // Ночью про кофе не говорим: впереди только сон.
+  } else if (plan.noCoffee) act.coffee = 'сегодня обойтись без кофе';
   else if (plan.coffee) act.coffee = ahead(plan.coffee.until) ? `последнюю чашку кофе — до ${plan.coffee.until}` : 'кофе на сегодня уже хватит';
   const w = plan.workout;
   if (w && ahead(w.to)) act.workout = `${w.title.toLowerCase()} с ${w.from} до ${w.to}`;
-  if (today && present(today.steps) && today.stepNorm) {
+  if (!lateNight && today && present(today.steps) && today.stepNorm) {
     const left = Math.round((today.stepNorm - today.steps) / 100) * 100;
     if (left > 0) act.steps = `до нормы шагов осталось около ${count(left)}`;
     act.norm = `норма на сегодня ${count(today.stepNorm)} шагов`;
@@ -310,6 +329,145 @@ function measure(p) {
   };
 }
 
+// ── Разговор за день ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Тема наблюдения: одна история — одна тема. Ночь — сон, засыпание, долг сна и то, как тело
+ * восстановилось; её человек и так видит на «Сне» и в карточке «Режим сна».
+ */
+const TOPIC_OF = {
+  'late-meal': 'food', 'many-meals': 'food', 'today-meals': 'food',
+  'bed-late': 'night', 'bed-drift': 'night', 'bed-irregular': 'night', 'sleep-short': 'night', 'sleep-long': 'night',
+  'sleep-debt': 'night', 'deep-low': 'night', 'deep-high': 'night', 'night-pulse-up': 'night', 'night-pulse-down': 'night',
+  'hrv-down': 'night', 'hrv-up': 'night', 'night-summary': 'night',
+  'stress-days': 'stress', 'stress-up': 'stress', 'today-stress': 'stress',
+  'workout-yesterday': 'movement', 'steps-low': 'movement', 'steps-done': 'movement', 'today-steps': 'movement',
+  'yesterday-move': 'movement',
+  // Наблюдения запасного шага (`observe`).
+  'after-workout': 'movement', 'stress-streak': 'stress', 'night-strain': 'night', 'bedtime-drift': 'night',
+  'short-sleep': 'night', 'late-bed': 'night', snacks: 'food', 'low-activity': 'movement', 'good-recovery': 'night',
+};
+const TOPIC_TEXT = { night: 'ночь и сон', food: 'еда', stress: 'напряжение', movement: 'движение' };
+/** Другая тема (не ночь) — главной не больше стольких раз за цикл. */
+const TOPIC_MAX_PER_CYCLE = 2;
+/** Шаги до нормы и сама норма — один совет. */
+const SAME_ACTION = { norm: 'steps' };
+const actionKey = (key) => SAME_ACTION[key] || key;
+
+/**
+ * Приложение без памяти о метках (старая сборка) присылает только тексты: тему и действие угадываем
+ * по словам. Грубо, но для «не повторяй» этого хватает.
+ */
+const TOPIC_WORDS = {
+  night: /(лечь|лягте|ложит|засып|уснул|режим|отбой|недосып|выспал|ночь|ночью)/,
+  food: /(ужин|завтрак|обед|перекус|поесть|приём пищи|приёма пищи|еда|еды)/,
+  stress: /(стресс|напряж|взвод|струн|передышк|выдохн|работ)/,
+  movement: /(шаг|трениров|кардио|интервал|силов|прогул|пробеж|нагрузк)/,
+};
+const ACTION_WORDS = [
+  ['bed', /(лечь|лягте|ложитесь)/],
+  ['dinner', /(поужина|ужин\S* (в|по)|последний приём)/],
+  ['coffee', /(кофе|чашк)/],
+  ['workout', /(трениров|кардио|интервал|силов|растяжк|кругов)/],
+  ['meal', /перекус/],
+  ['steps', /(шаг|прогулк)/],
+];
+
+/**
+ * Что Лис уже говорил — по порядку, последнее в конце: сегодня ли это, текст, темы и действие.
+ * `said` — метки от приложения, по одной на каждую строку `recent`; нет — угадываем по словам.
+ */
+function pastOpinions(p) {
+  const meta = Array.isArray(p.said) && p.said.length === p.recent.length ? p.said : null;
+  return p.recent.map((line, i) => {
+    const lead = /^(сегодня|вчера|раньше) (утром|днём|вечером) — /.exec(line);
+    const text = lead ? line.slice(lead[0].length) : line;
+    const lower = text.toLowerCase();
+    const known = meta ? meta[i] : null;
+    const tagged = known ? [...new Set(known.focus.map((id) => TOPIC_OF[id]).filter(Boolean))] : [];
+    const topics = tagged.length ? tagged : Object.keys(TOPIC_WORDS).filter((t) => TOPIC_WORDS[t].test(lower));
+    const guess = ACTION_WORDS.find(([, re]) => re.test(lower));
+    const action = known && known.action ? known.action : guess ? guess[0] : null;
+    return { today: !!lead && lead[1] === 'сегодня', slot: lead ? lead[2] : null, text, topics, action: action && actionKey(action) };
+  });
+}
+
+/**
+ * Что можно сказать сейчас, чтобы разговор не ходил по кругу:
+ * - ночь — главной одна за цикл (обычно утром);
+ * - другая тема — не больше TOPIC_MAX_PER_CYCLE раз за цикл и не три мнения подряд (со вчерашними);
+ * - действие — одно за цикл; окно сна — только вечером (утром и днём его показывает «Режим сна»).
+ * Советовать больше нечего — хотя бы не то же, что в прошлый раз.
+ */
+function conversation(p, m) {
+  const past = pastOpinions(p);
+  const today = past.filter((o) => o.today);
+  const blocked = new Set();
+  if (today.some((o) => o.topics.includes('night'))) blocked.add('night');
+  const [a, b] = past.slice(-2);
+  for (const topic of ['food', 'stress', 'movement']) {
+    if (today.filter((o) => o.topics.includes(topic)).length >= TOPIC_MAX_PER_CYCLE) blocked.add(topic);
+    if (a && b && a.topics.includes(topic) && b.topics.includes(topic)) blocked.add(topic);
+  }
+  const used = new Set(today.map((o) => o.action).filter(Boolean));
+  const last = past.length ? past[past.length - 1].action : null;
+  const bedOk = p.mode === 'evening' || m.now < NIGHT_UNTIL;
+  const pick = (ok) => Object.fromEntries(Object.entries(m.act).filter(([key]) => (key !== 'bed' || bedOk) && ok(actionKey(key))));
+  let act = pick((key) => !used.has(key));
+  if (!Object.keys(act).length) act = pick((key) => key !== last);
+  return { past, today, blocked, used, act };
+}
+
+/**
+ * Как идёт день — не отклонения, а факты, из которых Лис может взять тему, когда необычного нет
+ * или его уже обсудили (владелец 26.09: «лучше всегда о разных вещах»). Без порогов и выводов.
+ */
+function dayFacts(p, m) {
+  const { today, yesterday, norm } = m;
+  const facts = [];
+  const add = (id, text) => facts.push({ id, text });
+  if (today && present(today.steps) && today.stepNorm && p.mode !== 'morning') {
+    let busiest = '';
+    if (p.hours && p.hours.steps.some((v) => v > 0)) {
+      const i = p.hours.steps.indexOf(Math.max(...p.hours.steps));
+      busiest = `, больше всего шагов — с ${p.hours.from + i}:00 до ${p.hours.from + i + 1}:00`;
+    }
+    add('today-steps', `к ${p.time} — ${count(today.steps)} шагов, норма дня ${count(today.stepNorm)}${busiest}`);
+  }
+  if (today && today.meals.length && p.mode !== 'morning') {
+    const usualCount = norm.meals !== null ? ` — обычно приёмов пищи за день около ${Math.round(norm.meals)}` : '';
+    add('today-meals', `сегодня еда около ${today.meals.join(', ')}${usualCount}`);
+  }
+  if (today && present(today.stress) && norm.dayStress !== null && p.mode !== 'morning') {
+    add('today-stress', `стресс днём сегодня ${today.stress}${usual(norm.dayStress)}`);
+  }
+  if (yesterday && p.mode === 'morning') {
+    const moved = [
+      present(yesterday.steps) && `вчера ${count(yesterday.steps)} шагов${yesterday.stepNorm ? ` при норме ${count(yesterday.stepNorm)}` : ''}`,
+      yesterday.workout && `вчера тренировка (${WORKOUT_TEXT[yesterday.workout]})`,
+    ].filter(Boolean);
+    if (moved.length) add('yesterday-move', moved.join(', '));
+  }
+  if (today && present(today.sleepMin) && p.mode === 'morning') {
+    add('night-summary', `сон ${hm(today.sleepMin)}${usual(norm.sleepMin, hm)}${today.asleep ? `, уснули в ${today.asleep}` : ''}`);
+  }
+  return facts;
+}
+
+/** Задача Лиса в этот раз — по отрезку дня и тому, что уже сказано сегодня. */
+function slotRole(p, talk) {
+  const said = talk.today.length > 0;
+  if (p.mode === 'morning') return 'как прошла ночь и почему — причина во вчерашнем дне; действие — на день, не про сон.';
+  if (p.mode === 'day') {
+    return said
+      ? 'разверни утреннюю мысль дальше, по-новому — что сделать сегодня, чтобы завтра было лучше, — или возьми новую тему из того, как идёт день. Утреннее действие и слова не повторяй.'
+      : 'как идёт день: движение, еда, напряжение — и что успеть до вечера.';
+  }
+  return said
+    ? 'итог дня: как он прошёл и получилось ли то, что ты советовал; действие — на вечер. Не повторяй дневные темы и слова.'
+    : 'итог дня: как он прошёл — движение, еда, напряжение; действие — на вечер.';
+}
+
 /**
  * Что Vuelo заметил по кольцу — всё, что заметно отличается от обычного для человека, с метками.
  * Это вход для ИИ-анализа (как «составляющие» у Oura Advisor): что из этого главное, что с чем
@@ -390,7 +548,7 @@ const FITS = {
   'many-meals': ['meal', 'dinner'],
   'bed-late': ['bed', 'coffee'],
   'bed-drift': ['bed', 'coffee'],
-  'bed-irregular': ['bed'],
+  'bed-irregular': ['bed', 'coffee'],
   'sleep-short': ['bed', 'coffee'],
   'sleep-debt': ['bed', 'coffee'],
   'sleep-long': ['workout', 'steps', 'norm'],
@@ -400,80 +558,100 @@ const FITS = {
   'hrv-down': ['bed', 'coffee', 'dinner', 'workout'],
   'night-pulse-down': ['workout', 'steps', 'norm'],
   'hrv-up': ['workout', 'steps', 'norm'],
-  'stress-days': ['bed', 'workout'],
-  'stress-up': ['bed', 'workout'],
-  'workout-yesterday': ['workout', 'bed'],
+  'stress-days': ['bed', 'workout', 'steps'],
+  'stress-up': ['bed', 'workout', 'steps'],
+  'workout-yesterday': ['workout', 'bed', 'steps', 'norm'],
   'steps-low': ['steps', 'workout'],
   'steps-done': ['bed', 'workout'],
 };
 
+/** То же для фактов дня (`dayFacts`). */
+const FACT_FITS = {
+  'today-steps': ['steps', 'norm', 'workout'],
+  'today-meals': ['meal', 'dinner'],
+  'today-stress': ['workout', 'steps', 'bed'],
+  'yesterday-move': ['workout', 'steps', 'norm', 'coffee'],
+  'night-summary': ['coffee', 'workout', 'steps', 'norm'],
+};
+const fits = (id, action) => (FITS[id] || FACT_FITS[id] || []).includes(action);
+
 /**
  * Запасной режим: главное наблюдение выбирает правило, по порядку важности (как ежедневные
  * сообщения Oura): что видно, причина (или null — не гадаем) и одно действие.
- * Нужен, когда ответ ИИ-анализа не прошёл проверку.
+ * Нужен, когда ответ ИИ-анализа не прошёл проверку. Темы, которые уже обсудили сегодня, и советы,
+ * которые уже давали, пропускаются (`conversation`); ничего необычного не осталось — тема из того,
+ * как идёт день (`dayFacts`).
  */
-function observe(p, m = measure(p)) {
-  const { today, yesterday, norm, evening, act } = m;
+function observe(p, m = measure(p), talk = conversation(p, m)) {
+  const { today, yesterday, norm, evening } = m;
+  const act = talk.act;
   const action = (...keys) => keys.map((k) => act[k]).find(Boolean) || null;
-  const found = (id, facts, cause, todo) => ({ id, facts: facts.filter(Boolean), cause, action: todo });
+  const fresh = (id) => !talk.blocked.has(TOPIC_OF[id]);
+  const options = [];
+  const found = (id, facts, cause, todo) => options.push({ id, facts: facts.filter(Boolean), cause, action: todo });
   const nightParts = [m.pulseText, m.hrvText].filter(Boolean);
   const strainFact = `этой ночью тело отдыхало хуже обычного: ${nightParts.join(', ')}`;
   const bedFact = m.bedLate !== null && `уснули в ${today.asleep}${usual(norm.asleep, clockOf)}`;
+  // Не восстановились: днём — кофе пораньше или тренировка полегче, вечером — лечь вовремя.
+  const easyDay = () => action(!evening && m.coffeeOpen ? 'coffee' : 'bed', 'workout', 'bed', 'coffee');
 
-  if (m.lateMeal && (m.strain || (m.bedLate !== null && m.bedLate >= LATE_BED_MIN))) {
-    return found(
+  if (fresh('late-meal') && m.lateMeal && (m.strain || (m.bedLate !== null && m.bedLate >= LATE_BED_MIN))) {
+    found(
       'late-meal',
       [`вчера последний приём пищи в ${m.lateMeal}${usual(norm.lastMeal, clockOf)}`, m.strain && strainFact, m.bedLate >= LATER_BED_MIN && bedFact],
       'поздний ужин — ночью телу пришлось переваривать, а не отдыхать',
       action('dinner', 'bed'),
     );
   }
-  if (m.strain && m.heavy) {
+  if (fresh('after-workout') && m.strain && m.heavy) {
     const what = yesterday.workout ? `вчера была тренировка (${WORKOUT_TEXT[yesterday.workout]})` : 'вчера нагрузка была заметно выше обычной';
-    return found('after-workout', [what, strainFact], 'вчерашняя нагрузка — телу нужно больше времени, чтобы восстановиться', action(evening ? 'bed' : 'workout', 'bed'));
+    found('after-workout', [what, strainFact], 'вчерашняя нагрузка — телу нужно больше времени, чтобы восстановиться', action(evening ? 'bed' : 'workout', 'steps', 'bed'));
   }
-  if (m.stressStreak) {
-    return found(
+  if (fresh('stress-streak') && m.stressStreak) {
+    found(
       'stress-streak',
       [`стресс днём выше обычного несколько дней подряд: ${m.streak.join(', ')}${usual(m.stressBase)}`, m.strain && strainFact],
       'вы давно без передышки — много дел, голова не отключается',
-      action(evening ? 'bed' : 'workout', 'bed'),
+      action(evening ? 'bed' : 'workout', 'steps', 'bed'),
     );
   }
-  if (m.strain) {
-    return m.tense
-      ? found('night-strain', [strainFact, `вчера днём стресс ${yesterday.stress}${usual(norm.dayStress)}`],
-          'напряжённый день — голова долго не отпускала дела', action('bed'))
-      : found('night-strain', [strainFact], 'бокал-другой вчера вечером или кофе после обеда', action(!evening && m.coffeeOpen ? 'coffee' : 'bed', 'bed'));
+  if (fresh('night-strain') && m.strain) {
+    if (m.tense) {
+      found('night-strain', [strainFact, `вчера днём стресс ${yesterday.stress}${usual(norm.dayStress)}`],
+          'напряжённый день — голова долго не отпускала дела', action('bed', 'workout', 'coffee'));
+    } else {
+      found('night-strain', [strainFact], 'бокал-другой вчера вечером или кофе после обеда', easyDay());
+    }
   }
-  if (m.drift) {
+  if (fresh('bedtime-drift') && m.drift) {
     const times = [2, 1, 0].map((a) => m.byAgo.get(a).asleep).join(', ');
-    return found('bedtime-drift', [`засыпание три ночи подряд всё позже: ${times}${usual(norm.asleep, clockOf)}`],
-      'сбился режим — вечер каждый раз затягивается', action('bed'));
+    found('bedtime-drift', [`засыпание три ночи подряд всё позже: ${times}${usual(norm.asleep, clockOf)}`],
+      'вечер каждый раз затягивается — дела переезжают на ночь', action('bed', 'coffee'));
   }
-  if (m.shortStreak) {
-    return found(
-      'short-sleep',
-      [`сон три последние ночи: ${m.sleeps.map(hm).join(', ')}${usual(norm.sleepMin, hm)}`, m.debt > 0 && `долг сна ${duration(m.debt)}`],
-      'накопилась усталость',
-      action('bed'),
-    );
+  if (fresh('short-sleep') && m.shortStreak) {
+    found('short-sleep', [`сон три последние ночи: ${m.sleeps.map(hm).join(', ')}${usual(norm.sleepMin, hm)}`], 'накопилась усталость', action('bed', 'coffee'));
   }
-  if (m.bedLate !== null && m.bedLate >= LATE_BED_MIN) return found('late-bed', [bedFact], null, action('bed'));
-  if (m.snackDay) {
+  if (fresh('late-bed') && m.bedLate !== null && m.bedLate >= LATE_BED_MIN) found('late-bed', [bedFact], null, action('bed', 'coffee'));
+  if (fresh('snacks') && m.snackDay) {
     const when = m.snackDay === today ? 'сегодня' : 'вчера';
-    return found('snacks', [`${when} ${m.snackDay.meals.length} приёмов пищи: ${m.snackDay.meals.join(', ')}`], 'много перекусов', action('meal', 'dinner'));
+    found('snacks', [`${when} ${m.snackDay.meals.length} приёмов пищи: ${m.snackDay.meals.join(', ')}`], 'много перекусов', action('meal', 'dinner'));
   }
-  if (m.lowActivity) {
-    return found('low-activity', [`к ${p.time} — ${count(today.steps)} шагов из ${count(today.stepNorm)}`], 'день выходит сидячим', action('steps'));
+  if (fresh('low-activity') && m.lowActivity) {
+    found('low-activity', [`к ${p.time} — ${count(today.steps)} шагов из ${count(today.stepNorm)}`], 'день выходит сидячим', action('steps', 'workout'));
   }
   const sleptEnough = today && present(today.sleepMin) && today.sleepMin >= (norm.sleepMin !== null ? norm.sleepMin : 420) - 15;
   const noNorms = m.pulseUp === null && m.hrvDrop === null && p.scores.sleep >= 85 && p.scores.organism >= 80;
-  if (sleptEnough && (m.recovered || noNorms)) {
-    return found('good-recovery', [`сон ${hm(today.sleepMin)}`, nightParts.length && `ночью тело отлично отдохнуло: ${nightParts.join(', ')}`],
+  if (fresh('good-recovery') && sleptEnough && (m.recovered || noNorms)) {
+    found('good-recovery', [`сон ${hm(today.sleepMin)}`, nightParts.length && `ночью тело отлично отдохнуло: ${nightParts.join(', ')}`],
       'тело отлично восстановилось', action(evening ? 'bed' : 'workout', 'norm'));
   }
-  return found('steady', ['сон, восстановление и нагрузка — как обычно'], 'ровный режим', action(evening ? 'bed' : 'workout', 'meal', 'bed', 'norm'));
+  // Необычного нет или его уже обсудили — тема из того, как идёт день, с подходящим действием.
+  for (const f of dayFacts(p, m)) if (fresh(f.id)) found(f.id, [f.text], null, action(...FACT_FITS[f.id]));
+  // Первое по важности, к которому ещё есть что посоветовать; советовать нечего — просто первое.
+  const pick = options.find((o) => o.action) || options[0];
+  if (pick) return pick;
+  found('steady', ['сон, восстановление и нагрузка — как обычно'], 'ровный режим', action(evening ? 'bed' : 'workout', 'meal', 'steps', 'bed', 'norm', 'coffee'));
+  return options[0];
 }
 
 // ── Ответ модели ────────────────────────────────────────────────────────────────────────────────
@@ -490,6 +668,18 @@ const VAGUE = [
   /время для себя/,
   /не перегружайте себя/,
   /берегите себя/,
+];
+
+/**
+ * Пересказ карточек (владелец 26.09: «я и так даю пользователю инфу, что у него сбит режим, — на
+ * главном экране, практически теми же словами»): с ними просим модель переписать.
+ */
+const CARD_REPEAT = [
+  /режим\S*(\s+\S+){0,3}\s+(сбил|сбит|наруш|поехал|съехал)/,
+  /(сбил|сбит|наруш|поехал|съехал)\S*(\s+\S+){0,2}\s+режим/,
+  /долг\S* (сна|по сну)/,
+  /окн\S* (для )?кофе/,
+  /кофейн\S* окн/,
 ];
 
 /** Текст ответа: без «Ответ:» / «Лис:» в начале и рассуждений, если модель их всё же дописала. */
@@ -512,6 +702,7 @@ function answerProblem(text, action = null) {
   if (text.length > ANSWER_MAX_CHARS) return 'long';
   const lower = text.toLowerCase();
   if (VAGUE.some((re) => re.test(lower))) return 'vague';
+  if (CARD_REPEAT.some((re) => re.test(lower))) return 'card';
   const allowed = numbersIn(action || '');
   const used = numbersIn(text);
   if (used.some((n) => !allowed.includes(n))) return 'numbers';
@@ -542,16 +733,38 @@ function parseAnalysis(raw) {
 }
 
 /**
- * Что не так с ответом ИИ-анализа: null — годится. Главное — из того, что заметил Vuelo;
- * действие — из плана и подходит к главному (`FITS`); текст — по правилам `answerProblem`.
+ * Что не так с ответом ИИ-анализа: null — годится. Главное — из того, что заметил Vuelo и что ещё
+ * не обсуждали (`seen.flagged`), или из фактов дня (`seen.facts`); уже обсуждённое можно упомянуть,
+ * но главным оно не считается. Действие — из доступных сейчас и подходит к главному (`FITS`);
+ * текст — по правилам `answerProblem`.
  */
 function analysisProblem(answer, seen, act) {
   if (!answer.text) return 'format';
   if (!answer.action || !has(act, answer.action)) return 'action';
-  const focus = answer.focus.filter((id) => seen.flagged.some((s) => s.id === id));
-  if (seen.flagged.length && !focus.length) return 'focus';
-  if (focus.length && !focus.some((id) => (FITS[id] || []).includes(answer.action))) return 'mismatch';
+  const usable = [...seen.flagged, ...(seen.facts || [])];
+  const focus = answer.focus.filter((id) => usable.some((s) => s.id === id));
+  if (usable.length && !focus.length) return 'focus';
+  if (focus.length && !focus.some((id) => fits(id, answer.action))) return 'mismatch';
   return answerProblem(answer.text, act[answer.action]);
+}
+
+/** Главное ответа — только настоящие метки из того, что ушло модели. */
+const focusOf = (answer, seen) => answer.focus.filter((id) => [...seen.flagged, ...(seen.facts || [])].some((s) => s.id === id));
+
+/**
+ * Что уходит ИИ-анализу: свежие наблюдения (темы, которые сегодня ещё не обсуждали), уже обсуждённые
+ * (только как фон), факты дня по свежим темам и действия, которые ещё можно советовать.
+ */
+function offer(p, m = measure(p), talk = conversation(p, m), seen = signals(p, m)) {
+  const fresh = (id) => !talk.blocked.has(TOPIC_OF[id]);
+  return {
+    flagged: seen.flagged.filter((s) => fresh(s.id)),
+    known: seen.flagged.filter((s) => !fresh(s.id)),
+    facts: dayFacts(p, m).filter((f) => fresh(f.id)),
+    normal: seen.normal,
+    act: talk.act,
+    talk,
+  };
 }
 
 // ── Запрос ──────────────────────────────────────────────────────────────────────────────────────
@@ -638,7 +851,18 @@ function validate(p) {
   if (!Array.isArray(p.recent) || p.recent.length > 5 || p.recent.some((t) => typeof t !== 'string' || t.length > 400)) {
     return 'recent';
   }
+  // Необязательно (старые сборки не шлют): метки прошлых мнений, по одной на строку `recent`.
+  if (p.said !== undefined && !validateSaid(p.said, p.recent.length)) return 'said';
   return null;
+}
+
+const isTag = (v) => typeof v === 'string' && /^[a-z]+(?:-[a-z]+)*$/.test(v) && v.length <= 30;
+function validateSaid(said, length) {
+  return (
+    Array.isArray(said) &&
+    said.length === length &&
+    said.every((x) => x === null || (isObject(x) && Array.isArray(x.focus) && x.focus.length <= 4 && x.focus.every(isTag) && (x.action === null || isTag(x.action))))
+  );
 }
 
 const plural = (n, forms) => {
@@ -671,26 +895,53 @@ function personLine(pr) {
   return `Человек: ${person || 'профиль не заполнен'}. Цель: ${pr.goal ? GOAL_TEXT[pr.goal] : 'не указана'}.`;
 }
 
-/** Что Лис уже говорил — с тем, когда («сегодня утром — …»; приложение подписывает сама). */
-const recentLine = (p) => (p.recent.length ? ['Что ты уже говорил этому человеку:', ...p.recent.map((t) => `- ${t}`)] : []);
+/**
+ * Что Лис уже говорил — с тем, когда («сегодня утром — …»; приложение подписывает сама), и о чём
+ * это было: тема и совет, чтобы модель видела, что уже сказано.
+ */
+function recentLine(p, talk) {
+  if (!p.recent.length) return [];
+  const about = (o) => {
+    const parts = [o.topics.length && `тема: ${o.topics.map((t) => TOPIC_TEXT[t]).join(', ')}`, o.action && `совет: [${o.action}]`].filter(Boolean);
+    return parts.length ? ` (${parts.join('; ')})` : '';
+  };
+  return ['Что ты уже говорил этому человеку:', ...p.recent.map((t, i) => `- ${t}${talk ? about(talk.past[i]) : ''}`)];
+}
 
-/** Вход ИИ-анализа: кто человек, всё, что заметил Vuelo (с метками), что в норме и действия плана. */
-function buildAnalysisText(p, m = measure(p), seen = signals(p, m)) {
-  const actions = Object.entries(m.act).map(([key, text]) => `- [${key}] ${text}`);
+/** Что сегодня уже обсуждали: темы — главными не брать, советы — не повторять. */
+function discussedLine(talk) {
+  const topics = [...talk.blocked].map((t) => TOPIC_TEXT[t]);
+  const used = [...talk.used].map((a) => `[${a}]`);
+  return [
+    topics.length && `Уже обсуждали — главным не бери: ${topics.join(', ')}.`,
+    used.length && `Уже советовал сегодня — не повторяй: ${used.join(', ')}.`,
+  ].filter(Boolean);
+}
+
+/**
+ * Вход ИИ-анализа: кто человек, что заметил Vuelo (свежие темы — с метками, уже обсуждённые — фоном),
+ * как идёт день, что в норме, действия, которые ещё можно советовать, что уже сказано и задача сейчас.
+ */
+function buildAnalysisText(p, m = measure(p), seen = offer(p, m)) {
+  const actions = Object.entries(seen.act).map(([key, text]) => `- [${key}] ${text}`);
   return [
     `Сейчас: ${MODE_TEXT[p.mode]}, ${p.time}.`,
     personLine(p.profile),
     'Что Vuelo заметил по кольцу (в сравнении с обычным для этого человека за неделю):',
     ...(seen.flagged.length ? seen.flagged.map((s) => `- [${s.id}] ${s.text}`) : ['- ничего необычного']),
+    ...(seen.known.length ? ['Это уже обсуждали — можно упомянуть как причину, но не главным:', ...seen.known.map((s) => `- ${s.text}`)] : []),
+    ...(seen.facts.length ? ['Как идёт день (не отклонения, просто факты — годятся как тема):', ...seen.facts.map((f) => `- [${f.id}] ${f.text}`)] : []),
     `В норме: ${seen.normal.length ? seen.normal.join(', ') : 'данных мало'}.`,
     'Действия из плана Vuelo на сегодня (ещё впереди):',
-    ...actions,
-    ...recentLine(p),
+    ...(actions.length ? actions : ['- нет']),
+    ...recentLine(p, seen.talk),
+    ...discussedLine(seen.talk),
+    `Твоя задача сейчас: ${slotRole(p, seen.talk)}`,
   ].join('\n');
 }
 
 /** Вход запасного шага: кто человек и одно наблюдение дня — что видно, причина, что предложить. */
-function buildUserText(p, seen = observe(p)) {
+function buildUserText(p, seen = observe(p), talk = null) {
   return [
     `Сейчас: ${MODE_TEXT[p.mode]}, ${p.time}.`,
     personLine(p.profile),
@@ -698,7 +949,7 @@ function buildUserText(p, seen = observe(p)) {
     `Что видно: ${seen.facts.join('; ')}.`,
     `Причина: ${seen.cause || 'не видна — не додумывай, скажи только о том, что видно'}.`,
     `Что предложить: ${seen.action || 'одно простое действие по теме наблюдения на ближайшие часы'}.`,
-    ...recentLine(p),
+    ...recentLine(p, talk),
   ].join('\n');
 }
 
@@ -737,23 +988,23 @@ async function handler(event, context) {
   const model = process.env.MODEL || 'yandexgpt';
 
   const m = measure(payload);
+  const talk = conversation(payload, m);
   const started = Date.now();
   const timeLeft = () => Math.min(LLM_TIMEOUT_MS, DEADLINE_MS - (Date.now() - started));
   // Анализу — чуть больше свободы (живее истории), запасному шагу — меньше: он только пересказывает.
   const ask = (system, user, temperature) =>
     askModel({ token, folder, model, temperature, timeoutMs: timeLeft(), messages: [{ role: 'system', text: system }, { role: 'user', text: user }] });
 
-  // 1. ИИ-анализ: главное, причину и действие выбирает модель. Без действий в плане — сразу шаг 2.
+  // 1. ИИ-анализ: главное, причину и действие выбирает модель. Советовать нечего — сразу шаг 2.
   let problem = 'no actions';
-  if (Object.keys(m.act).length) {
-    const seen = signals(payload, m);
+  if (Object.keys(talk.act).length) {
+    const seen = offer(payload, m, talk);
     const result = await ask(ANALYSIS_PROMPT, buildAnalysisText(payload, m, seen), 0.7);
     if (result.status) return reply(result.status, { error: result.error });
     const answer = parseAnalysis(result.text);
-    problem = analysisProblem(answer, seen, m.act);
+    problem = analysisProblem(answer, seen, talk.act);
     if (!problem) {
-      const focus = answer.focus.filter((id) => seen.flagged.some((s) => s.id === id));
-      return reply(200, { text: answer.text, mode: 'analysis', focus, cause: answer.cause });
+      return reply(200, { text: answer.text, mode: 'analysis', focus: focusOf(answer, seen), cause: answer.cause, action: actionKey(answer.action) });
     }
     // Причина — в лог функции без текста ответа: видно, как часто анализ промахивается.
     console.warn('analysis rejected', problem);
@@ -761,12 +1012,15 @@ async function handler(event, context) {
 
   // 2. Запасной шаг: наблюдение выбирает правило, модель его только говорит. Если приложение ещё ждёт.
   if (DEADLINE_MS - (Date.now() - started) < RETRY_MIN_MS) return reply(502, { error: `answer ${problem}` });
-  const seen = observe(payload, m);
-  const result = await ask(GUIDED_PROMPT, buildUserText(payload, seen), 0.5);
+  const seen = observe(payload, m, talk);
+  const result = await ask(GUIDED_PROMPT, buildUserText(payload, seen, talk), 0.5);
   if (result.status) return reply(result.status, { error: result.error });
   const text = parseAnswer(result.text);
   const guided = text ? answerProblem(text, seen.action) : 'format';
-  if (!guided) return reply(200, { text, mode: 'guided', focus: [seen.id], cause: seen.cause });
+  if (!guided) {
+    const key = Object.keys(talk.act).find((k) => talk.act[k] === seen.action) || null;
+    return reply(200, { text, mode: 'guided', focus: [seen.id], cause: seen.cause, action: key && actionKey(key) });
+  }
   console.warn('guided rejected', guided);
   return reply(502, { error: `answer ${problem} / ${guided}` });
 }
@@ -805,6 +1059,6 @@ async function askModel({ token, folder, model, messages, timeoutMs, temperature
 }
 
 module.exports = {
-  handler, validate, measure, signals, observe, buildAnalysisText, buildUserText,
-  parseAnalysis, analysisProblem, parseAnswer, answerProblem, ANALYSIS_PROMPT, GUIDED_PROMPT, FITS,
+  handler, validate, measure, signals, observe, buildAnalysisText, buildUserText, conversation, dayFacts, offer,
+  parseAnalysis, analysisProblem, parseAnswer, answerProblem, ANALYSIS_PROMPT, GUIDED_PROMPT, FITS, FACT_FITS, TOPIC_OF,
 };

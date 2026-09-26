@@ -28,7 +28,7 @@ const { Buffer } = require('node:buffer');
 
 const API_URL = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion';
 /** Версия кода — в каждом ответе (`v`): по ней приложение видит, что в Yandex Cloud свежий код. */
-const VERSION = 11;
+const VERSION = 12;
 const MAX_BODY_CHARS = 16000;
 /** Длина фразы движка: короткие предложения без цифр. */
 const INSIGHT_MAX_CHARS = 200;
@@ -95,6 +95,8 @@ function modelInput(p) {
 const ANSWER_MIN_CHARS = 70;
 /** Плашка на главном экране маленькая: длиннее текст обрезается на полуслове (владелец 26.09). */
 const ANSWER_MAX_CHARS = 130;
+/** Связка движка как запасной ответ — до предела карточки в приложении (`AI_ADVICE_MAX_CHARS`). */
+const ENGINE_MAX_CHARS = 140;
 /** Модель просим короче (125): так ответ почти никогда не упирается в предел проверки. */
 
 /** Дыхательные практики — под полным запретом: модель предлагала их через раз (владелец 26.09). */
@@ -349,7 +351,22 @@ async function handler(event, context) {
     console.warn('answer rejected', problem);
     messages.push({ role: 'assistant', text: result.text }, { role: 'user', text: `Ответ не подходит: ${PROBLEM_TEXT[problem]}. Напиши заново по правилам — ровно два коротких предложения, до 130 символов: первое — consequence, второе — root_cause.` });
   }
+  // Модель дважды не справилась — отдаём саму связку движка: она уже без цифр и простыми словами,
+  // и карточка не остаётся без инсайта (владелец 26.09: «посредник ответил 502»). Причина — в `rejected`.
+  if (problem) {
+    const own = engineAnswer(payload.insight);
+    if (own) return reply(200, { text: own, mode: 'engine', rejected: problem, v: VERSION });
+  }
   return reply(502, { error: `answer ${problem || 'timeout'}` });
+}
+
+/** Связка движка как ответ: следствие и причина подряд, если помещается и проходит основные проверки. */
+function engineAnswer(insight) {
+  const text = `${insight.consequence} ${insight.root_cause}`.replace(/\s+/g, ' ').trim();
+  if (text.length > ENGINE_MAX_CHARS || /\d/.test(text)) return null;
+  const lower = text.toLowerCase();
+  if (FORBIDDEN.some((re) => re.test(lower)) || COMMANDS.test(lower) || INVENTED_LIFE.test(lower)) return null;
+  return text;
 }
 
 /** Один запрос к YandexGPT: `{ text }` или `{ status, error }`. */
@@ -386,5 +403,5 @@ async function askModel({ token, folder, model, messages, timeoutMs, temperature
 }
 
 module.exports = {
-  handler, validate, modelInput, pastOf, sentences, answerProblem, cleanAnswer, similar, SYSTEM_PROMPT, VERSION,
+  handler, validate, modelInput, engineAnswer, pastOf, sentences, answerProblem, cleanAnswer, similar, SYSTEM_PROMPT, VERSION,
 };

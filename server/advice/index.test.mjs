@@ -157,7 +157,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(JSON.parse(sent.messages[1].text)).toEqual({ consequence: sample.insight.consequence, root_cause: sample.insight.root_cause });
   });
 
-  it('ответ не прошёл проверку — один повтор с причиной; и он мимо — 502, в приложении шаблон', async () => {
+  it('ответ не прошёл проверку — один повтор с причиной; и он мимо — связка движка вместо 502', async () => {
     vi.stubEnv('APP_KEY', 'secret');
     vi.stubEnv('FOLDER_ID', 'b1gfolder');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -176,8 +176,21 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     ]);
 
     answers = ['Отдохните.', 'Подышите.'];
-    const again = await fn.handler(event(await readSample()), context);
-    expect(again.statusCode).toBe(502);
+    const sample = await readSample();
+    const again = await fn.handler(event(sample), context);
+    expect(again.statusCode).toBe(200);
+    expect(JSON.parse(again.body)).toEqual({
+      text: `${sample.insight.consequence} ${sample.insight.root_cause}`,
+      mode: 'engine',
+      rejected: 'short',
+      v: fn.VERSION,
+    });
+    // Связка не помещается в карточку — тогда честная ошибка с причиной.
+    const long = { ...sample, insight: { ...sample.insight, consequence: 'Сейчас движения почти нет, а пульс заметно выше обычного уже несколько часов подряд.', root_cause: 'Две ночи подряд глубокого сна заметно меньше вашей нормы, и тело не успевает восстановиться.' } };
+    answers = ['Отдохните.', 'Подышите.'];
+    const failed = await fn.handler(event(long), context);
+    expect(failed.statusCode).toBe(502);
+    expect(JSON.parse(failed.body)).toEqual({ error: 'answer short' });
   });
 
   it('модель недоступна — 502, приложение оставит шаблонный совет', async () => {

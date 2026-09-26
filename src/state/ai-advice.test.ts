@@ -227,7 +227,14 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
     expect(await fetchAiAdvice(payload, CONFIG, okFetch({ text: ' Сегодня хороший день для прогулки после обеда. ' }))).toEqual({
       text: 'Сегодня хороший день для прогулки после обеда.',
     });
-    expect(await fetchAiAdvice(payload, CONFIG, okFetch({ error: 'x' }, 502))).toHaveProperty('error');
+    // Причину от посредника видно в «Сыром логе».
+    expect(await fetchAiAdvice(payload, CONFIG, okFetch({ error: 'answer repeat' }, 502))).toEqual({ error: 'посредник ответил 502 (answer repeat)' });
+    // Модель не справилась — посредник вернул связку движка: берём её и отмечаем почему.
+    expect(await fetchAiAdvice(payload, CONFIG, okFetch({ text: 'Пульс сейчас чуть выше обычного. Прошлой ночью вы легли позже обычного.', mode: 'engine', rejected: 'repeat', v: 12 }))).toEqual({
+      text: 'Пульс сейчас чуть выше обычного. Прошлой ночью вы легли позже обычного.',
+      server: 12,
+      engine: 'repeat',
+    });
     expect(await fetchAiAdvice(payload, CONFIG, okFetch({}))).toHaveProperty('error');
     expect(await fetchAiAdvice(payload, CONFIG, okFetch({ text: 'Сходите к врачу, это важно для вашего здоровья.' }))).toHaveProperty('error');
     const offline = (async () => {

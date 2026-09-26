@@ -202,10 +202,14 @@ export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: 
   return { ...state, reports: addReport(state.reports, report) };
 }
 
-export type AiAdviceResult = { text: string; server?: number } | { error: string };
+/**
+ * `engine` — модель дважды не прошла проверку, и посредник вернул саму связку движка; здесь — какая
+ * проверка не прошла (для «Сырого лога»).
+ */
+export type AiAdviceResult = { text: string; server?: number; engine?: string } | { error: string };
 
 /** Версия кода облачной функции, с которой приложение работает (запрос — вывод движка физиологии). */
-export const AI_ADVICE_SERVER_VERSION = 11;
+export const AI_ADVICE_SERVER_VERSION = 12;
 
 /** Запрос к посреднику. Любая неудача — `error` с причиной для отладочного лога, без исключений. */
 export async function fetchAiAdvice(
@@ -223,12 +227,17 @@ export async function fetchAiAdvice(
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
-    if (!response.ok) return { error: `посредник ответил ${response.status}` };
-    const data = (await response.json()) as { text?: unknown; v?: unknown };
+    if (!response.ok) {
+      // Причина от посредника («answer repeat», «llm 403»…) — чтобы в «Сыром логе» было видно, что не так.
+      const reason = await response.json().then((b: { error?: unknown }) => (typeof b?.error === 'string' ? b.error.slice(0, 60) : null)).catch(() => null);
+      return { error: `посредник ответил ${response.status}${reason ? ` (${reason})` : ''}` };
+    }
+    const data = (await response.json()) as { text?: unknown; v?: unknown; mode?: unknown; rejected?: unknown };
     if (typeof data.text !== 'string') return { error: 'в ответе нет текста' };
     const text = cleanAdvice(data.text);
     if (!isSafeAdvice(text)) return { error: 'текст не прошёл проверку' };
-    return typeof data.v === 'number' ? { text, server: data.v } : { text };
+    const engine = data.mode === 'engine' ? { engine: typeof data.rejected === 'string' ? data.rejected.slice(0, 30) : 'answer' } : {};
+    return typeof data.v === 'number' ? { text, server: data.v, ...engine } : { text, ...engine };
   } catch (e) {
     return { error: controller.signal.aborted ? 'нет ответа за 15 с' : `нет связи (${String(e)})` };
   } finally {

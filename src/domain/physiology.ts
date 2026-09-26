@@ -98,6 +98,19 @@ export type RootCause =
   | 'oxygen-ok'
   | 'past-bed-window'
   | 'past-dinner-plan'
+  | 'late-wake'
+  | 'early-wake'
+  | 'restless-night'
+  | 'short-nights-row'
+  | 'low-steps-days'
+  | 'active-days'
+  | 'late-first-meal'
+  | 'long-fast'
+  | 'early-dinner'
+  | 'pressure-days'
+  | 'workout-today'
+  | 'rest-trend'
+  | 'long-day'
   | 'no-cause';
 
 /** Оценка текущего цикла и её норма — среднее прошлых циклов недели (как «ниже вашей нормы» на вкладке). */
@@ -247,6 +260,35 @@ export const PLAN_LATE_MIN = 30;
 export const SLEEP_DEBT_MIN = 60;
 /** Стресс сегодня как причина — не раньше, чем через столько минут после подъёма. */
 export const STRESS_TODAY_AFTER_WAKE_MIN = 180;
+/** Подъём позже или раньше привычного — на столько минут. */
+export const WAKE_SHIFT_MIN = 60;
+/** Рваная ночь — пробуждений внутри сна на столько минут больше своей нормы. */
+export const RESTLESS_OVER_MIN = 15;
+/** Короткие ночи подряд — обе на столько минут короче нормы. */
+export const SHORT_ROW_MIN = 30;
+/** Движение двух дней против недели до них: меньше 0.7 или больше 1.3. */
+export const STEPS_DAYS_LOW = 0.7;
+export const STEPS_DAYS_HIGH = 1.3;
+/** Первая еда позже своей обычной — на столько минут. */
+export const LATE_FIRST_MEAL_MIN = 90;
+/** Долго без еды днём — столько минут с последнего приёма (или с подъёма). */
+export const LONG_FAST_MIN = 300;
+/** Ранний ужин — последний приём пищи вчера не позже чем за столько минут до сна. */
+export const EARLY_DINNER_MIN = 240;
+/** Давление двух дней выше недели до них — на столько мм рт. ст. */
+export const PRESSURE_DAYS_OVER = 6;
+/** Пульс покоя третий день растёт — в сумме на столько ударов. */
+export const REST_TREND_RISE = 3;
+/** Долгий день — на ногах от стольких минут с подъёма. */
+export const LONG_DAY_MIN = 14 * 60;
+/**
+ * Что Лис говорил в последних мнениях (владелец 26.09: «постоянно говорит, что организм не восстановился
+ * из-за недосыпа — неужели нельзя проверять, что он до этого писал?»): та же причина в последних
+ * RECENT_OPINIONS мнениях (и вчерашних тоже) — вес ×0.15, та же семья (ночь и недосып — одна семья) — ×0.35.
+ */
+export const RECENT_OPINIONS = 3;
+export const RECENT_CAUSE_FACTOR = 0.15;
+export const RECENT_FAMILY_FACTOR = 0.35;
 /** Своей нормы нет, пока дней с данными меньше этого. */
 export const BASELINE_MIN_DAYS = 3;
 /**
@@ -290,63 +332,58 @@ const NO_CAUSE: Weights = { 'no-cause': 0.5 };
  * статикой, вариабельность — вариабельностью, короткий сон — короткой ночью.
  */
 export const CAUSES_FOR: Record<BodyState, Weights> = {
-  idle: { ...NIGHT_BAD, 'recent-meal': 1.2, 'hrv-down': 0.9, 'stress-days': 0.8, 'stress-today': 0.6, 'heavy-yesterday': 0.7, snacking: 0.6, 'sugar-swings': 0.7 },
-  'tense-still': { ...NIGHT_BAD, 'stress-days': 1, 'hrv-down': 0.9, 'sugar-swings': 0.7 },
-  saving: { ...NIGHT_BAD, ...NIGHT_GOOD, 'recent-meal': 1, 'active-earlier': 1, 'heavy-yesterday': 0.9, repair: 1, 'hrv-up': 0.7, 'sugar-swings': 0.6, snacking: 0.6 },
-  exertion: { ...NIGHT_GOOD, 'hrv-up': 0.7, 'heavy-yesterday': 0.6, 'short-night': 0.6, 'deep-debt': 0.6, 'calm-days': 0.5 },
-  still: { ...NIGHT_BAD, 'heavy-yesterday': 0.8, repair: 0.9, 'hrv-down': 0.7, 'stress-today': 0.6 },
-  moving: { ...NIGHT_GOOD, 'hrv-up': 0.8, 'calm-days': 0.6, 'light-yesterday': 0.6 },
-  fade: { ...NIGHT_BAD, 'hrv-down': 0.9, 'heavy-yesterday': 0.8, repair: 0.9, 'late-meal': 0.7, 'past-dinner-plan': 0.6, snacking: 0.8, 'sugar-swings': 0.8 },
-  tense: { ...NIGHT_BAD, 'stress-days': 1, 'hrv-down': 0.9, 'late-meal': 0.6, 'long-still': 0.8, 'sugar-swings': 0.8 },
-  'calm-now': { ...NIGHT_GOOD, 'hrv-up': 0.9, 'calm-days': 0.8, 'active-earlier': 0.8 },
-  'pressure-up': { ...NIGHT_BAD, 'stress-days': 0.9, 'stress-today': 1, 'long-still': 0.7, snacking: 0.5, 'late-meal': 0.5 },
-  'pressure-down': { ...NIGHT_GOOD, 'calm-days': 0.6, 'active-earlier': 0.6, 'hrv-up': 0.6 },
-  'hrv-low': { ...NIGHT_BAD, 'heavy-yesterday': 1, repair: 1.1, 'late-meal': 0.9, 'past-dinner-plan': 0.7, 'stress-days': 0.8, 'stress-today': 0.7 },
-  'hrv-high': { ...NIGHT_GOOD, 'calm-days': 0.8, 'light-yesterday': 0.7 },
+  idle: { ...NIGHT_BAD, 'recent-meal': 1.2, 'hrv-down': 0.9, 'stress-days': 0.8, 'stress-today': 0.6, 'heavy-yesterday': 0.7, snacking: 0.6, 'sugar-swings': 0.7, 'early-wake': 0.7, 'restless-night': 0.8, 'pressure-days': 0.6, 'rest-trend': 0.7, 'short-nights-row': 0.9, 'long-day': 0.5 },
+  'tense-still': { ...NIGHT_BAD, 'stress-days': 1, 'hrv-down': 0.9, 'sugar-swings': 0.7, 'restless-night': 0.6, 'long-fast': 0.6, 'long-day': 0.7, 'pressure-days': 0.5 },
+  saving: { ...NIGHT_BAD, ...NIGHT_GOOD, 'recent-meal': 1, 'active-earlier': 1, 'heavy-yesterday': 0.9, repair: 1, 'hrv-up': 0.7, 'sugar-swings': 0.6, snacking: 0.6, 'workout-today': 1, 'late-first-meal': 0.7, 'long-fast': 0.9, 'late-wake': 0.5, 'active-days': 0.6, 'early-dinner': 0.5 },
+  exertion: { ...NIGHT_GOOD, 'hrv-up': 0.7, 'heavy-yesterday': 0.6, 'short-night': 0.6, 'deep-debt': 0.6, 'calm-days': 0.5, 'active-days': 0.5, 'early-dinner': 0.4 },
+  still: { ...NIGHT_BAD, 'heavy-yesterday': 0.8, repair: 0.9, 'hrv-down': 0.7, 'stress-today': 0.6, 'late-wake': 0.6, 'low-steps-days': 0.7, 'long-fast': 0.6, 'long-day': 0.7, 'workout-today': 0.8, 'restless-night': 0.6, 'short-nights-row': 0.8 },
+  moving: { ...NIGHT_GOOD, 'hrv-up': 0.8, 'calm-days': 0.6, 'light-yesterday': 0.6, 'active-days': 0.7, 'early-dinner': 0.4, 'early-wake': 0.4 },
+  fade: { ...NIGHT_BAD, 'hrv-down': 0.9, 'heavy-yesterday': 0.8, repair: 0.9, 'late-meal': 0.7, 'past-dinner-plan': 0.6, snacking: 0.8, 'sugar-swings': 0.8, 'long-day': 1, 'long-fast': 0.8, 'early-wake': 0.8, 'restless-night': 0.8, 'short-nights-row': 0.8, 'workout-today': 0.7 },
+  tense: { ...NIGHT_BAD, 'stress-days': 1, 'hrv-down': 0.9, 'late-meal': 0.6, 'long-still': 0.8, 'sugar-swings': 0.8, 'long-fast': 0.7, 'restless-night': 0.7, 'long-day': 0.7, 'pressure-days': 0.6, 'early-wake': 0.6 },
+  'calm-now': { ...NIGHT_GOOD, 'hrv-up': 0.9, 'calm-days': 0.8, 'active-earlier': 0.8, 'active-days': 0.6, 'workout-today': 0.7, 'early-dinner': 0.5, 'late-wake': 0.5 },
+  'pressure-up': { ...NIGHT_BAD, 'stress-days': 0.9, 'stress-today': 1, 'long-still': 0.7, snacking: 0.5, 'late-meal': 0.5, 'restless-night': 0.6, 'long-fast': 0.5, 'long-day': 0.6, 'short-nights-row': 0.7 },
+  'pressure-down': { ...NIGHT_GOOD, 'calm-days': 0.6, 'active-earlier': 0.6, 'hrv-up': 0.6, 'active-days': 0.6, 'workout-today': 0.6, 'early-dinner': 0.4 },
+  'hrv-low': { ...NIGHT_BAD, 'heavy-yesterday': 1, repair: 1.1, 'late-meal': 0.9, 'past-dinner-plan': 0.7, 'stress-days': 0.8, 'stress-today': 0.7, 'restless-night': 0.9, 'short-nights-row': 0.9, 'pressure-days': 0.6, 'rest-trend': 0.7, 'workout-today': 0.7, 'early-wake': 0.6 },
+  'hrv-high': { ...NIGHT_GOOD, 'calm-days': 0.8, 'light-yesterday': 0.7, 'early-dinner': 0.8, 'active-days': 0.5, 'late-wake': 0.5 },
   // Пульс покоя берётся из той же ночи, что и пульс во сне, — ночным пульсом его не объясняем.
-  'rest-up': { ...NIGHT_BAD, 'night-pulse': 0, 'late-recovery': 0, 'heavy-yesterday': 0.9, 'late-meal': 0.9, 'past-dinner-plan': 0.7, 'stress-days': 0.8, 'hrv-down': 0.7 },
-  'rest-down': { ...NIGHT_GOOD, 'low-night-pulse': 0, 'calm-days': 0.7, 'hrv-up': 0.7, 'light-yesterday': 0.6 },
-  'sugar-swing': { snacking: 1, 'late-meal': 0.6, 'short-night': 0.8, 'deep-debt': 0.7, 'sleep-debt': 0.7, 'long-still': 0.7, 'stress-days': 0.6, 'stress-today': 0.6 },
+  'rest-up': { ...NIGHT_BAD, 'night-pulse': 0, 'late-recovery': 0, 'heavy-yesterday': 0.9, 'late-meal': 0.9, 'past-dinner-plan': 0.7, 'stress-days': 0.8, 'hrv-down': 0.7, 'restless-night': 0.8, 'short-nights-row': 0.8, 'pressure-days': 0.6, 'early-wake': 0.5 },
+  'rest-down': { ...NIGHT_GOOD, 'low-night-pulse': 0, 'calm-days': 0.7, 'hrv-up': 0.7, 'light-yesterday': 0.6, 'early-dinner': 0.9, 'active-days': 0.6, 'late-wake': 0.5 },
+  'sugar-swing': { snacking: 1, 'late-meal': 0.6, 'short-night': 0.8, 'deep-debt': 0.7, 'sleep-debt': 0.7, 'long-still': 0.7, 'stress-days': 0.6, 'stress-today': 0.6, 'long-fast': 0.8, 'late-first-meal': 0.7, 'restless-night': 0.5, 'low-steps-days': 0.6 },
   // Ровный сахар — от еды и движения; ночь его не объясняет.
-  'sugar-calm': { 'active-earlier': 0.8, 'calm-days': 0.5, 'good-night': 0.4 },
-  'steps-ahead': { ...NIGHT_GOOD, 'hrv-up': 0.8, 'calm-days': 0.6, 'light-yesterday': 0.6 },
-  'steps-behind': { ...NIGHT_BAD, 'heavy-yesterday': 0.8, repair: 0.8, 'hrv-down': 0.7, 'stress-days': 0.6, 'stress-today': 0.6 },
-  'burn-ahead': { ...NIGHT_GOOD, 'hrv-up': 0.8, 'light-yesterday': 0.6 },
-  'burn-behind': { ...NIGHT_BAD, 'heavy-yesterday': 0.8, repair: 0.8, 'hrv-down': 0.7 },
+  'sugar-calm': { 'active-earlier': 0.8, 'calm-days': 0.5, 'good-night': 0.4, 'early-dinner': 0.6, 'active-days': 0.6, 'workout-today': 0.6 },
+  'steps-ahead': { ...NIGHT_GOOD, 'hrv-up': 0.8, 'calm-days': 0.6, 'light-yesterday': 0.6, 'early-wake': 0.5, 'early-dinner': 0.3 },
+  'steps-behind': { ...NIGHT_BAD, 'heavy-yesterday': 0.8, repair: 0.8, 'hrv-down': 0.7, 'stress-days': 0.6, 'stress-today': 0.6, 'late-wake': 1, 'restless-night': 0.6, 'short-nights-row': 0.7, 'long-fast': 0.5 },
+  'burn-ahead': { ...NIGHT_GOOD, 'hrv-up': 0.8, 'light-yesterday': 0.6, 'early-wake': 0.5, 'early-dinner': 0.3 },
+  'burn-behind': { ...NIGHT_BAD, 'heavy-yesterday': 0.8, repair: 0.8, 'hrv-down': 0.7, 'late-wake': 0.9, 'restless-night': 0.5, 'short-nights-row': 0.6 },
   // Ровный день — только с хорошей причиной: «день ровный, хотя вы не выспались» звучал как случайный факт.
-  steady: { ...GOOD, 'active-earlier': 0.6 },
+  steady: { ...GOOD, 'active-earlier': 0.6, 'early-dinner': 0.6, 'workout-today': 0.5 },
 
   // Организм: причина объясняет ту составляющую, которая тянет оценку.
-  'org-low': { ...NIGHT_BAD, ...DAY_BAD, 'hrv-down': 0.8, repair: 0.9, 'late-meal': 0.8, snacking: 0.6, 'sugar-swings': 0.6, ...NO_CAUSE },
+  'org-low': { ...NIGHT_BAD, ...DAY_BAD, 'hrv-down': 0.8, repair: 0.9, 'late-meal': 0.8, snacking: 0.6, 'sugar-swings': 0.6, 'restless-night': 0.9, 'short-nights-row': 0.9, 'pressure-days': 0.6, 'rest-trend': 0.7, 'long-fast': 0.5, 'long-day': 0.6, 'early-wake': 0.6, 'workout-today': 0.6, ...NO_CAUSE},
   'org-low-hrv': {
-    ...NIGHT_BAD, ...DAY_BAD, 'heavy-yesterday': 1, repair: 1.1, 'late-meal': 0.9, 'past-dinner-plan': 0.7, snacking: 0.4, ...NO_CAUSE,
-  },
+    ...NIGHT_BAD, ...DAY_BAD, 'heavy-yesterday': 1, repair: 1.1, 'late-meal': 0.9, 'past-dinner-plan': 0.7, snacking: 0.4, 'restless-night': 0.9, 'short-nights-row': 0.9, 'pressure-days': 0.6, 'rest-trend': 0.7, 'workout-today': 0.8, 'early-wake': 0.6, 'long-day': 0.5, ...NO_CAUSE},
   'org-low-pulse': {
-    ...NIGHT_BAD, 'night-pulse': 0, 'late-recovery': 0.5, ...DAY_BAD, 'late-meal': 1, 'past-dinner-plan': 0.7, 'hrv-down': 0.6, repair: 0.8, ...NO_CAUSE,
-  },
-  'org-low-oxygen': { 'short-night': 0.4, 'late-bed': 0.3, 'late-meal': 0.4, 'heavy-yesterday': 0.4, ...NO_CAUSE },
+    ...NIGHT_BAD, 'night-pulse': 0, 'late-recovery': 0.5, ...DAY_BAD, 'late-meal': 1, 'past-dinner-plan': 0.7, 'hrv-down': 0.6, repair: 0.8, 'restless-night': 0.8, 'short-nights-row': 0.8, 'pressure-days': 0.6, 'workout-today': 0.6, 'early-wake': 0.5, ...NO_CAUSE},
+  'org-low-oxygen': { 'short-night': 0.4, 'late-bed': 0.3, 'late-meal': 0.4, 'heavy-yesterday': 0.4, 'restless-night': 0.5, ...NO_CAUSE},
   'org-low-bp': {
-    ...NIGHT_BAD, 'night-oxygen': 0.5, 'stress-today': 1.1, 'stress-days': 1, 'long-still': 0.8, snacking: 0.5, 'late-meal': 0.5, 'recent-meal': 0.5, ...NO_CAUSE,
-  },
+    ...NIGHT_BAD, 'night-oxygen': 0.5, 'stress-today': 1.1, 'stress-days': 1, 'long-still': 0.8, snacking: 0.5, 'late-meal': 0.5, 'recent-meal': 0.5, 'restless-night': 0.7, 'short-nights-row': 0.7, 'long-fast': 0.5, 'long-day': 0.7, 'early-wake': 0.5, ...NO_CAUSE},
   'org-low-glucose': {
     snacking: 1.1, 'recent-meal': 1, 'late-meal': 0.8, 'past-dinner-plan': 0.7, 'long-still': 0.8, 'short-night': 0.6, 'deep-debt': 0.5,
-    'sleep-debt': 0.5, 'stress-today': 0.5, ...NO_CAUSE,
-  },
-  'org-high': { ...GOOD, 'active-earlier': 0.6 },
-  'org-high-hrv': { ...GOOD, 'hrv-up': 0 },
-  'org-high-pulse': { ...GOOD, 'low-night-pulse': 0 },
-  'org-high-oxygen': { ...NIGHT_GOOD, 'oxygen-ok': 0, 'calm-days': 0.5 },
-  'org-high-bp': { ...GOOD, 'active-earlier': 0.7 },
-  'org-high-glucose': { ...NIGHT_GOOD, 'active-earlier': 0.9, 'calm-days': 0.5 },
+    'sleep-debt': 0.5, 'stress-today': 0.5, 'low-steps-days': 0.7, 'late-first-meal': 0.5, 'restless-night': 0.5, ...NO_CAUSE},
+  'org-high': { ...GOOD, 'active-earlier': 0.6, 'early-dinner': 0.8, 'active-days': 0.6, 'late-wake': 0.5, 'workout-today': 0.4 },
+  'org-high-hrv': { ...GOOD, 'hrv-up': 0, 'early-dinner': 0.8, 'active-days': 0.6, 'late-wake': 0.5 },
+  'org-high-pulse': { ...GOOD, 'low-night-pulse': 0, 'early-dinner': 0.8, 'active-days': 0.6, 'late-wake': 0.5 },
+  'org-high-oxygen': { ...NIGHT_GOOD, 'oxygen-ok': 0, 'calm-days': 0.5, 'early-dinner': 0.5 },
+  'org-high-bp': { ...GOOD, 'active-earlier': 0.7, 'early-dinner': 0.6, 'workout-today': 0.6 },
+  'org-high-glucose': { ...NIGHT_GOOD, 'active-earlier': 0.9, 'calm-days': 0.5, 'early-dinner': 0.7, 'workout-today': 0.8, 'active-days': 0.6 },
 
   // Сон: причина объясняет, почему ночь такая. Своей составляющей сон не объясняем.
-  'sleep-low': { 'late-bed': 1, 'past-bed-window': 0.9, 'late-meal': 0.9, 'past-dinner-plan': 0.7, 'heavy-yesterday': 0.7, 'stress-days': 0.8, 'night-oxygen': 0.6, ...NO_CAUSE },
+  'sleep-low': { 'late-bed': 1, 'past-bed-window': 0.9, 'late-meal': 0.9, 'past-dinner-plan': 0.7, 'heavy-yesterday': 0.7, 'stress-days': 0.8, 'night-oxygen': 0.6, 'restless-night': 0.8, 'pressure-days': 0.5, ...NO_CAUSE},
   'sleep-low-short': { 'late-bed': 1.1, 'past-bed-window': 1, 'stress-days': 0.6, 'late-meal': 0.5, ...NO_CAUSE },
   'sleep-low-deep': {
-    'late-meal': 1, 'past-dinner-plan': 0.8, 'heavy-yesterday': 0.8, 'stress-days': 0.8, 'late-bed': 0.6, 'night-oxygen': 0.6, snacking: 0.4, ...NO_CAUSE,
-  },
-  'sleep-low-pulse': { 'late-meal': 1.1, 'past-dinner-plan': 0.8, 'heavy-yesterday': 0.9, 'stress-days': 0.8, 'late-bed': 0.5, ...NO_CAUSE },
-  'sleep-high': { 'early-bed': 0.9, 'regular-bed': 0.7, 'calm-days': 0.8, 'light-yesterday': 0.6 },
+    'late-meal': 1, 'past-dinner-plan': 0.8, 'heavy-yesterday': 0.8, 'stress-days': 0.8, 'late-bed': 0.6, 'night-oxygen': 0.6, snacking: 0.4, 'restless-night': 0.8, 'low-steps-days': 0.5, 'pressure-days': 0.5, ...NO_CAUSE},
+  'sleep-low-pulse': { 'late-meal': 1.1, 'past-dinner-plan': 0.8, 'heavy-yesterday': 0.9, 'stress-days': 0.8, 'late-bed': 0.5, 'pressure-days': 0.6, 'low-steps-days': 0.4, ...NO_CAUSE},
+  'sleep-high': { 'early-bed': 0.9, 'regular-bed': 0.7, 'calm-days': 0.8, 'light-yesterday': 0.6, 'early-dinner': 0.9, 'active-days': 0.7 },
 };
 
 /** Следствия «сейчас» (последний час) — между собой согласованы: «ровно» только без остальных. */
@@ -354,6 +391,7 @@ const NOW_STATES = new Set<BodyState>(['idle', 'tense-still', 'saving', 'exertio
 
 /** Причины из прошлой ночи: вечером они звучат, только если сильные (`NIGHT_CAUSE_WEIGHT`). */
 const NIGHT_CAUSES = new Set<RootCause>([
+  'restless-night', 'short-nights-row', 'early-wake', 'late-wake', 'early-dinner',
   'short-night', 'long-night', 'deep-debt', 'good-night', 'late-bed', 'early-bed', 'regular-bed', 'night-pulse', 'low-night-pulse',
   'late-recovery', 'night-oxygen', 'oxygen-ok', 'sleep-debt', 'past-bed-window', 'late-meal', 'past-dinner-plan',
 ]);
@@ -503,7 +541,49 @@ export const CAUSE_TEXT: Record<RootCause, Pair> = {
   'oxygen-ok': ['Ночью кислород держался ровно, и сон хорошо восстановил тело', 'Ночью кислород держался ровно, и сон хорошо восстановил тело'],
   'past-bed-window': ['Вы легли позже окна, которое советует Vuelo, и сна стало меньше', 'Вы легли намного позже окна, которое советует Vuelo, и сна стало меньше'],
   'past-dinner-plan': ['Вчера ужин был позже, чем советует Vuelo, и ночью тело переваривало еду', 'Вчера ужин был намного позже, чем советует Vuelo, ночью тело было занято едой'],
+  'late-wake': ['Сегодня вы проснулись позже обычного, и день начался позже', 'Сегодня вы проснулись намного позже обычного, и день сдвинулся'],
+  'early-wake': ['Сегодня вы проснулись раньше обычного, и день начался раньше', 'Сегодня вы проснулись намного раньше обычного, и день вышел длиннее'],
+  'restless-night': ['Ночью вы просыпались чаще обычного, и сон вышел рваным', 'Ночью вы просыпались намного чаще обычного, сон был совсем рваным'],
+  'short-nights-row': ['Уже вторую ночь подряд сна меньше обычного, и это накапливается', 'Уже вторую ночь подряд сна заметно меньше обычного, и это накапливается'],
+  'low-steps-days': ['Два дня подряд движения было меньше обычного, и тело засиделось', 'Два дня подряд движения было намного меньше обычного, тело засиделось'],
+  'active-days': ['Последние два дня вы двигались больше обычного, и тело в тонусе', 'Последние два дня вы двигались намного больше обычного, тело в тонусе'],
+  'late-first-meal': ['Сегодня первая еда была позже обычного, и утро прошло без подзарядки', 'Сегодня первая еда была намного позже обычного, утро прошло без подзарядки'],
+  'long-fast': ['Еды не было уже несколько часов, и тело переходит на запасы', 'Еды не было уже долго, и тело живёт на запасах'],
+  'early-dinner': ['Вчера вы поужинали задолго до сна, и ночью тело спокойно отдыхало', 'Вчера ужин был задолго до сна, и ночью телу ничто не мешало'],
+  'pressure-days': ['Давление уже второй день выше обычного, и сердцу приходится стараться', 'Давление два дня подряд заметно выше обычного, и сердцу непросто'],
+  'workout-today': ['Сегодня уже была тренировка, и тело после неё отходит', 'Сегодня была серьёзная тренировка, и тело после неё отходит'],
+  'rest-trend': ['Пульс покоя третий день подряд понемногу растёт, и усталость копится', 'Пульс покоя третий день подряд заметно растёт, и усталость копится'],
+  'long-day': ['Вы на ногах уже очень долго, и к вечеру сил естественно меньше', 'День вышел очень длинным, и к вечеру сил естественно меньше'],
   'no-cause': ['Явной причины в данных кольца не видно, так что спад похож на разовый', 'Явной причины в данных кольца не видно, так что спад похож на разовый'],
+};
+
+/**
+ * Другая формулировка той же причины — когда Лис уже называл её на этой неделе: иначе «тело не успело
+ * восстановиться» звучало раз за разом одними словами (владелец 26.09).
+ */
+export const CAUSE_ALT: Partial<Record<RootCause, string>> = {
+  'short-night': 'Сна прошлой ночью не хватило, и запас сил на сегодня меньше',
+  'deep-debt': 'Глубокой фазы две ночи подряд мало, а без неё отдых неполный',
+  'late-bed': 'Отбой был позже обычного, и ночь получилась короче',
+  'night-pulse': 'Ночью сердце так и не сбавило обороты до привычного',
+  'late-recovery': 'Ночью пульс долго держался высоким и успокоился лишь к утру',
+  'night-oxygen': 'Ночью кислорода было меньше обычного, и отдых вышел неполным',
+  'hrv-down': 'Второй день подряд тело откликается тяжелее обычного',
+  repair: 'После вчерашней нагрузки мышцам нужно время, и тело занято ими',
+  'stress-days': 'Напряжение держится уже второй день и не успевает уйти',
+  'stress-today': 'Весь день прошёл в напряжении выше привычного',
+  'heavy-yesterday': 'Вчерашний день был нагруженнее обычного, и это ещё чувствуется',
+  'late-meal': 'Поздний ужин накануне занял тело ночью вместо отдыха',
+  'recent-meal': 'Совсем недавно была еда, и силы сейчас уходят на неё',
+  snacking: 'Частые перекусы сегодня не дают сахару выровняться',
+  'long-still': 'Последние часы прошли в одной позе, почти без шагов',
+  'sleep-debt': 'Сна в последние ночи меньше, чем телу нужно, и это копится',
+  'past-bed-window': 'Отбой был позже окна, которое советует Vuelo, и ночь стала короче',
+  'restless-night': 'Сон прерывался чаще обычного, и цельного отдыха не вышло',
+  'short-nights-row': 'Две короткие ночи подряд, и недосып уже складывается',
+  'long-day': 'Позади длинный день, и вечерняя усталость вполне понятна',
+  'active-days': 'Пара активных дней подряд держит тело в хорошем тонусе',
+  'good-night': 'Ночь прошла полноценно, и сил на день хватает',
 };
 
 /** Уточнённые фразы, когда данные позволяют сказать точнее. */
@@ -828,6 +908,54 @@ export function rootCauses(input: PhysioInput): Found<RootCause>[] {
   }
   const normMet = d0?.steps != null && d0.stepNorm != null && d0.steps >= d0.stepNorm;
   if (r.stepsMid >= ACTIVE_EARLIER_STEPS || normMet) push('active-earlier', normMet ? 1.2 : 1);
+  // Подъём, рваная ночь, короткие ночи подряд, ранний ужин.
+  const wakeNorm = norm(days, (d) => (d.awake ? clockMin(d.awake) : null), 1, 7);
+  if (r.wake !== null && wakeNorm !== null) {
+    if (r.wake - wakeNorm >= WAKE_SHIFT_MIN) push('late-wake', 0.6 + (r.wake - wakeNorm) / 180);
+    if (wakeNorm - r.wake >= WAKE_SHIFT_MIN) push('early-wake', 0.6 + (wakeNorm - r.wake) / 180);
+  }
+  const awakeNorm = norm(days, (d) => d.awakeMin, 1, 7);
+  if (d0?.awakeMin != null && awakeNorm !== null && d0.awakeMin - awakeNorm >= RESTLESS_OVER_MIN) {
+    push('restless-night', (d0.awakeMin - awakeNorm) / (RESTLESS_OVER_MIN * 1.3));
+  }
+  const sleepOlder = norm(days, (d) => d.sleepMin, 2, 7);
+  if (d0?.sleepMin != null && d1?.sleepMin != null && sleepOlder !== null) {
+    const gap = Math.min(sleepOlder - d0.sleepMin, sleepOlder - d1.sleepMin);
+    if (gap >= SHORT_ROW_MIN) push('short-nights-row', 0.7 + gap / 90);
+  }
+  if (lastMeal !== null && bed !== null && bed - lastMeal >= EARLY_DINNER_MIN) push('early-dinner', 0.7);
+
+  // Движение и давление двух дней против недели до них; пульс покоя третий день растёт.
+  const stepsRecent = norm(days, (d) => d.steps, 1, 2, 2);
+  const stepsOlder = norm(days, (d) => d.steps, 3, 7);
+  if (stepsRecent !== null && stepsOlder !== null && stepsOlder > 0) {
+    const ratio = stepsRecent / stepsOlder;
+    if (ratio <= STEPS_DAYS_LOW) push('low-steps-days', 0.6 + (1 - ratio));
+    if (ratio >= STEPS_DAYS_HIGH) push('active-days', 0.6 + (ratio - 1));
+  }
+  const sysRecent = norm(days, (d) => d.systolic, 1, 2, 2);
+  const sysOlder = norm(days, (d) => d.systolic, 3, 7);
+  if (sysRecent !== null && sysOlder !== null && sysRecent - sysOlder >= PRESSURE_DAYS_OVER) push('pressure-days', (sysRecent - sysOlder) / (PRESSURE_DAYS_OVER * 1.5));
+  const d2 = day(2);
+  if (d0?.restingPulse != null && d1?.restingPulse != null && d2?.restingPulse != null) {
+    const rise = d0.restingPulse - d2.restingPulse;
+    if (d0.restingPulse > d1.restingPulse && d1.restingPulse > d2.restingPulse && rise >= REST_TREND_RISE) push('rest-trend', rise / (REST_TREND_RISE * 1.3));
+  }
+
+  // Еда сегодня: первая позже обычного, давно без еды; тренировка сегодня; длинный день.
+  const firstNorm = norm(days, (d) => (d.meals.length ? Math.min(...d.meals.map(clockMin)) : null), 1, 7);
+  const todayMeals = (d0?.meals ?? []).map(clockMin).filter((m) => m <= now);
+  if (firstNorm !== null && todayMeals.length && Math.min(...todayMeals) - firstNorm >= LATE_FIRST_MEAL_MIN) {
+    push('late-first-meal', 0.6 + (Math.min(...todayMeals) - firstNorm) / 180);
+  }
+  if (input.mode !== 'morning' && r.sugarRange !== null && r.wake !== null) {
+    const since = now - Math.max(r.wake, ...todayMeals);
+    // Еду видим только по подъёмам сахара — сила скромная: пропущенный перекус кольцо могло не заметить.
+    if (since >= LONG_FAST_MIN) push('long-fast', Math.min(1.2, 0.6 + (since - LONG_FAST_MIN) / 240));
+  }
+  if (d0?.workout) push('workout-today', 1);
+  if (r.wake !== null && now - r.wake >= LONG_DAY_MIN) push('long-day', 0.6 + (now - r.wake - LONG_DAY_MIN) / 240);
+
   // «Явной причины не видно» — только для отклонения оценки, и только если настоящей причины нет (`rankInsights`).
   push('no-cause', 1);
   return oneSide(out);
@@ -840,10 +968,13 @@ export function rootCauses(input: PhysioInput): Found<RootCause>[] {
 const SIDES: readonly [readonly RootCause[], readonly RootCause[]][] = [
   [
     // Долга сна (копится неделями) здесь нет: он не спорит с тем, что прошлая ночь была обычной.
-    ['short-night', 'deep-debt', 'late-bed', 'past-bed-window', 'night-pulse', 'late-recovery', 'night-oxygen'],
+    ['short-night', 'deep-debt', 'late-bed', 'past-bed-window', 'night-pulse', 'late-recovery', 'night-oxygen', 'restless-night', 'short-nights-row'],
     ['good-night', 'long-night', 'early-bed', 'regular-bed', 'low-night-pulse', 'oxygen-ok'],
   ],
   [['stress-days', 'stress-today'], ['calm-days']],
+  [['low-steps-days'], ['active-days']],
+  [['late-meal', 'past-dinner-plan'], ['early-dinner']],
+  [['early-wake'], ['late-wake']],
   [['hrv-down', 'repair'], ['hrv-up']],
   [['heavy-yesterday', 'repair'], ['light-yesterday']],
 ];
@@ -923,8 +1054,15 @@ const CAUSE_TOPIC: Record<RootCause, string> = {
   'heavy-yesterday': 'load', 'light-yesterday': 'load',
   'late-meal': 'food', 'recent-meal': 'food', snacking: 'food', 'sugar-swings': 'food', 'past-dinner-plan': 'food',
   'long-still': 'move', 'active-earlier': 'move',
+  'late-wake': 'wake', 'early-wake': 'wake', 'restless-night': 'sleep', 'short-nights-row': 'sleep',
+  'low-steps-days': 'move-days', 'active-days': 'move-days', 'late-first-meal': 'food', 'long-fast': 'food', 'early-dinner': 'food',
+  'pressure-days': 'pressure', 'workout-today': 'load', 'rest-trend': 'recovery', 'long-day': 'day-length',
   'no-cause': 'none',
 };
+/** Семьи причин для памяти о прошлых мнениях: всё про ночь и недосып — одна мысль «не выспались». */
+const NIGHT_TOPICS = new Set(['sleep', 'debt', 'bedtime', 'night-heart', 'oxygen', 'wake']);
+const familyOf = (c: RootCause) => (NIGHT_TOPICS.has(CAUSE_TOPIC[c]) ? 'night' : CAUSE_TOPIC[c]);
+
 /** План Vuelo как причина — не чаще раза за цикл (владелец 26.09: «не часто, но можно»). */
 const PLAN_CAUSES = new Set<RootCause>(['past-bed-window', 'past-dinner-plan']);
 /** Отклонения оценок приложения — главное на экране. */
@@ -937,6 +1075,14 @@ function splitKey(key: string): { state: BodyState; cause: RootCause } | null {
   if (!state) return null;
   const cause = key.slice(state.length + 1) as RootCause;
   return cause in CAUSE_TOPIC ? { state, cause } : null;
+}
+
+/** Последние мнения Лиса — этого цикла и прошлых дней, свежие первыми. */
+function recentSaid(input: PhysioInput) {
+  return [...new Set([...input.said.today, ...input.said.week])]
+    .slice(0, RECENT_OPINIONS)
+    .map(splitKey)
+    .filter((x): x is { state: BodyState; cause: RootCause } => x !== null);
 }
 
 /** Связка с весом: `weight` — смысл (сила × правдоподобие × отрезок), `score` — с поправкой на сказанное. */
@@ -952,6 +1098,8 @@ export function rankInsights(input: PhysioInput): Ranked[] {
   const states = bodyStates(input);
   const causes = rootCauses(input);
   const night = NIGHT_CAUSE_WEIGHT[input.mode];
+  const recent = recentSaid(input);
+  const recentFamilies = new Set(recent.map((x) => familyOf(x.cause)));
   const pairs: Ranked[] = [];
   for (const state of states) {
     const weights = CAUSES_FOR[state.key];
@@ -967,6 +1115,8 @@ export function rankInsights(input: PhysioInput): Ranked[] {
       const weight = score;
       if (input.said.week.includes(key)) score *= SAID_WEEK_FACTOR;
       if (input.said.today.some((k) => splitKey(k)?.cause === cause.key)) score *= SAID_TODAY_FACTOR;
+      if (recent.some((x) => x.cause === cause.key)) score *= RECENT_CAUSE_FACTOR;
+      else if (recentFamilies.has(familyOf(cause.key))) score *= RECENT_FAMILY_FACTOR;
       if (PLAN_CAUSES.has(cause.key) && input.said.today.some((k) => PLAN_CAUSES.has(splitKey(k)?.cause as RootCause))) continue;
       own.push({ state, cause, score, weight });
     }
@@ -993,10 +1143,11 @@ export function findInsight(input: PhysioInput): Insight | null {
   const floor = Math.max(MIN_PAIR_SCORE, Math.max(0, ...all.map((p) => p.weight)) * MIN_PAIR_SHARE);
   const ranked = all.filter((p, i) => i === 0 || p.weight >= floor);
   const keyOf = (p: (typeof ranked)[number]) => `${p.state.key}-${p.cause.key}`;
-  const said = input.said.today.map(splitKey).filter((x): x is { state: BodyState; cause: RootCause } => x !== null);
+  const said = [...input.said.today.map(splitKey).filter((x): x is { state: BodyState; cause: RootCause } => x !== null), ...recentSaid(input)];
   const saidStates = new Set(said.map((x) => STATE_TOPIC[x.state]));
   const saidCauses = new Set(said.map((x) => CAUSE_TOPIC[x.cause]));
-  const lastTopic = said[0] ? STATE_TOPIC[said[0].state] : null;
+  const last = input.said.today.length ? splitKey(input.said.today[0]) : recentSaid(input)[0] ?? null;
+  const lastTopic = last ? STATE_TOPIC[last.state] : null;
   // Сказанное — от самого давнего: к нему возвращаемся, когда новое кончилось.
   const oldest = [...ranked].sort((a, b) => input.said.today.indexOf(keyOf(b)) - input.said.today.indexOf(keyOf(a)));
   const fresh = (p: (typeof ranked)[number]) => !input.said.today.includes(keyOf(p));
@@ -1004,6 +1155,7 @@ export function findInsight(input: PhysioInput): Insight | null {
   const newCause = (p: (typeof ranked)[number]) => p.cause.key === 'no-cause' || !saidCauses.has(CAUSE_TOPIC[p.cause.key]);
   const best =
     ranked.find((p) => fresh(p) && newState(p) && newCause(p)) ??
+    ranked.find((p) => fresh(p) && (newState(p) || newCause(p)) && STATE_TOPIC[p.state.key] !== lastTopic) ??
     ranked.find((p) => fresh(p) && (newState(p) || newCause(p))) ??
     // Темы кончились — хотя бы не о том же, о чём только что: «мало движения» два раза подряд звучит как заело.
     ranked.find((p) => fresh(p) && STATE_TOPIC[p.state.key] !== lastTopic) ??
@@ -1018,11 +1170,22 @@ export function findInsight(input: PhysioInput): Insight | null {
     state: state.key,
     cause: cause.key,
     consequence: `${STATE_TEXT[state.key][input.mode][strong(state.strength)]}.`,
-    rootCause: `${cause.text ?? CAUSE_TEXT[cause.key][strong(cause.strength)]}.`,
+    rootCause: `${causeText(cause, input)}.`,
     options: ranked.length,
     debug: debugLine(input),
   };
 }
+
+/** Фраза причины: уточнённая, иначе обычная, а если Лис уже называл эту причину за неделю — другими словами. */
+function causeText(cause: Found<RootCause>, input: PhysioInput): string {
+  if (cause.text) return cause.text;
+  const saidBefore = input.said.week.some((k) => splitKey(k)?.cause === cause.key);
+  const alt = CAUSE_ALT[cause.key];
+  return saidBefore && alt ? alt : CAUSE_TEXT[cause.key][cause.strength >= 1.5 ? 1 : 0];
+}
+
+/** Сколько связок «следствие ← причина» знает движок всего (на конкретный день подходит часть из них). */
+export const INSIGHT_CATALOG_SIZE = Object.values(CAUSES_FOR).reduce((n, w) => n + Object.values(w).filter((v) => v).length, 0);
 
 /** Для тестов и документации: следствия «сейчас», между которыми «ровно» не выбирается. */
 export const NOW_STATE_KEYS = NOW_STATES;

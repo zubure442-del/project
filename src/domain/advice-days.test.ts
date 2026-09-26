@@ -35,6 +35,7 @@ describe('СИНТЕТИЧЕСКИЕ: таблица чисел для «Мне�
       awake: '07:10',
       sleepMin: 440,
       deepMin: 75,
+      awakeMin: null,
       nightPulse: 56,
       hrv: 49,
       restingPulse: 54,

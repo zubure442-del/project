@@ -22,6 +22,8 @@ export interface AdviceDay {
   awake: string | null;
   sleepMin: number | null;
   deepMin: number | null;
+  /** Минуты бодрствования внутри сна (пробуждения ночью); фаз нет — null. */
+  awakeMin: number | null;
   /** Средний пульс во сне. */
   nightPulse: number | null;
   hrv: number | null;
@@ -55,7 +57,7 @@ export interface AdviceDay {
 
 /** Что нужно от сводки дня (совпадает с полями `DaySnapshot`). */
 export interface AdviceDayInput {
-  sleepSegments: readonly { from: number; to: number }[];
+  sleepSegments: readonly { from: number; to: number; stage?: string }[];
   sleep: { totalMin: number; deepMin: number } | null;
   nightHr?: { avg: number } | null;
   estimates: { hrv: number | null };
@@ -154,6 +156,9 @@ export function adviceDay(
     awake: segments.length ? coffeeClock(Math.max(...segments.map((s) => s.to))) : null,
     sleepMin: day.sleep?.totalMin ?? null,
     deepMin: day.sleep?.deepMin ?? null,
+    awakeMin: segments.length && segments.every((s) => s.stage !== undefined)
+      ? segments.filter((s) => s.stage === 'awake').reduce((a, s) => a + s.to - s.from, 0)
+      : null,
     nightPulse: round(day.nightHr?.avg),
     hrv: round(day.estimates.hrv),
     restingPulse: round(day.restingHr),

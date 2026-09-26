@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { nowRingTs } from '../codec';
-import type { ReportMode } from '../domain';
+import { INSIGHT_CATALOG_SIZE, type ReportMode } from '../domain';
 import {
   RingBle,
   clearPacketLog,
@@ -227,7 +227,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
       const engineLine = result.engine ? `\n(модель не прошла проверку «${result.engine}» — показана фраза движка)` : '';
       const links = request.options === 1
         ? '\nСвязка сейчас одна — по данным больше не о чем сказать, смысл будет повторяться.'
-        : `\nСвязка ${request.payload.insight.key}, всего сейчас ${request.options}.`;
+        : `\nСвязка ${request.payload.insight.key}; по вашим данным сейчас подходят ${request.options} из ${INSIGHT_CATALOG_SIZE} связок, которые знает Лис.`;
       return `Новое мнение (${slot}) — на главном экране:\n${result.text}${engineLine}${links}\n${request.debug}${old}`;
     } finally {
       adviceBusy.current = false;

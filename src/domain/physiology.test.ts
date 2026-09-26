@@ -3,7 +3,9 @@ import type { AdviceDay, MinutePoint } from './advice-days';
 import { AI_ADVICE_FORBIDDEN } from './ai-advice';
 import {
   CAUSES_FOR,
+  CAUSE_ALT,
   CAUSE_DETAIL,
+  INSIGHT_CATALOG_SIZE,
   MIN_PAIR_SCORE,
   MIN_PAIR_SHARE,
   CAUSE_TEXT,
@@ -19,7 +21,7 @@ import {
 /** Обычный день: сон 7.5 ч, глубокий 90 мин, пульс во сне 58, покоя 60, вариабельность 50, стресс 35, кислород ночью 97. */
 function row(ago: number, over: Partial<AdviceDay> = {}): AdviceDay {
   return {
-    ago, asleep: '23:30', awake: '07:00', sleepMin: 450, deepMin: 90, nightPulse: 58, hrv: 50, restingPulse: 60, quietPulse: 64,
+    ago, asleep: '23:30', awake: '07:00', sleepMin: 450, deepMin: 90, awakeMin: 20, nightPulse: 58, hrv: 50, restingPulse: 60, quietPulse: 64,
     spo2: 97, nightSpo2: 97, systolic: 118, diastolic: 76, glucoseRange: 1.2, stress: 35, steps: 8000, stepNorm: 9000,
     calories: 300, load: 40, workout: null, meals: ['08:30', '13:30', '19:00'],
     ...over,
@@ -215,6 +217,31 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
     expect(move.some((m, i) => m && move[i - 1])).toBe(false);
   });
 
+  it('Лис помнит прошлые мнения: вчера говорил про недосып — сегодня про ночь не начинает, а если и скажет, то другими словами', () => {
+    // Короткая ночь, долг сна, и заодно стресс сегодня выше обычного.
+    const days = week({ sleepMin: 380, stress: 50, meals: ['08:30'] });
+    const base = { ...input({ pulse: 80, days, mode: 'day' }), sleepDebtMin: 200 };
+    const first = findInsight(base)!;
+    expect(first.cause).toBe('short-night');
+    // Вчера вечером Лис уже сказал «не выспались» — сегодня ночь не первая причина.
+    const said = { today: [], week: [first.key] };
+    const next = findInsight({ ...base, said })!;
+    expect(['short-night', 'sleep-debt', 'deep-debt', 'late-bed']).not.toContain(next.cause);
+    // Та же причина через неделю звучит иначе, без «не успело восстановиться».
+    const again = findInsight({ ...base, days: week({ sleepMin: 380 }), said: { today: [], week: ['hrv-low-short-night', 'x', 'y', 'z'] } })!;
+    if (again.cause === 'short-night') expect(again.rootCause).toBe(`${CAUSE_ALT['short-night']}.`);
+  });
+
+  it('связок много: каталог — сотни, на насыщенный день подходят десятки (сколько — решают данные, а не список)', () => {
+    expect(INSIGHT_CATALOG_SIZE).toBeGreaterThan(500);
+    const days = week(
+      { sleepMin: 370, awakeMin: 60, hrv: 40, restingPulse: 66, stress: 52, awake: '06:00', meals: ['11:00'] },
+      { 1: { sleepMin: 380, restingPulse: 63, systolic: 128, steps: 3000 }, 2: { restingPulse: 61, systolic: 127, steps: 3500 } },
+    );
+    const ranked = rankInsights({ ...input({ pulse: 82, stress: 55, days }), sleepDebtMin: 200, scores: { state: { value: 55, norm: 64 } }, organismParts: { hrv: { today: 40, usual: 58 } } });
+    expect(ranked.length).toBeGreaterThanOrEqual(25);
+  });
+
   it('утро: оценка сна ниже нормы — что её тянет и почему (легли поздно, поздний ужин)', () => {
     const days = week({ sleepMin: 380, asleep: '00:50' }, { 1: { meals: ['09:00', '13:30', '23:00'] } });
     const insight = findInsight({ ...input({ pulse: 64, days, mode: 'morning' }), scores: { sleep: { value: 62, norm: 80 } } })!;
@@ -273,6 +300,7 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
     const phrases = [
       ...Object.values(STATE_TEXT).flatMap((byMode) => Object.values(byMode).flat()),
       ...Object.values(CAUSE_TEXT).flat(),
+      ...Object.values(CAUSE_ALT),
       ...Object.values(CAUSE_DETAIL.workout),
       CAUSE_DETAIL.repairAfterWorkout, CAUSE_DETAIL.lateRecoveryAfterMeal, CAUSE_DETAIL.lateRecoveryAfterLoad,
       CAUSE_DETAIL.oxygenLongSleep, CAUSE_DETAIL.snackingYesterday,

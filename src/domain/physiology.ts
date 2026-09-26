@@ -301,6 +301,26 @@ export const NIGHT_CAUSE_WEIGHT: Record<ReportMode, { usual: number; strong: num
   evening: { usual: 0.35, strong: 0.7 },
 };
 /**
+ * Кластеры по часам бодрствования (владелец 26.09: «в 22:45 он говорит, что сон был хорошим из-за
+ * спокойного ужина — такие мнения давать утром, а под вечер про что-нибудь другое»). Всё про прошлую
+ * ночь — оценка сна, пульс покоя и пульс во сне, кислород, отбой, ужин накануне — звучит в полную силу
+ * первые NIGHT_TALK_FULL_H часов после подъёма, дальше гаснет и после NIGHT_TALK_END_H почти не звучит.
+ * Считаем от подъёма, а не по отрезку: окно «Режима сна» бывает поздним, и в 22:45 отрезок ещё «день».
+ */
+export const NIGHT_TALK_FULL_H = 6;
+export const NIGHT_TALK_END_H = 13;
+export const NIGHT_TALK_LATE = 0.08;
+/** Сильная плохая ночь (недосып на полтора порога) вечером всё же может прозвучать, но слабее дня. */
+export const NIGHT_TALK_STRONG_LATE = 0.3;
+/** Сколько весит разговор о прошлой ночи через `hours` после подъёма (подъёма нет — по отрезку). */
+export function nightTalkWeight(hours: number | null, mode: ReportMode): number {
+  if (hours === null) return NIGHT_CAUSE_WEIGHT[mode].usual;
+  if (hours <= NIGHT_TALK_FULL_H) return 1;
+  if (hours >= NIGHT_TALK_END_H) return NIGHT_TALK_LATE;
+  return 1 - ((1 - NIGHT_TALK_LATE) * (hours - NIGHT_TALK_FULL_H)) / (NIGHT_TALK_END_H - NIGHT_TALK_FULL_H);
+}
+
+/**
  * О чём уже говорили на этой неделе — вес связки ×0.25; причина уже звучала в этом цикле — ×0.4.
  * Связка, сказанная в этом цикле, не повторяется вовсе, пока есть другая (`findInsight`).
  */
@@ -389,7 +409,13 @@ export const CAUSES_FOR: Record<BodyState, Weights> = {
 /** Следствия «сейчас» (последний час) — между собой согласованы: «ровно» только без остальных. */
 const NOW_STATES = new Set<BodyState>(['idle', 'tense-still', 'saving', 'exertion', 'still', 'moving', 'fade', 'tense', 'calm-now', 'steady']);
 
-/** Причины из прошлой ночи: вечером они звучат, только если сильные (`NIGHT_CAUSE_WEIGHT`). */
+/** Следствия, которые говорят о прошлой ночи: оценка сна, пульс покоя, ночной минимум пульса и кислород в Организме. */
+const NIGHT_STATES = new Set<BodyState>([
+  'sleep-low', 'sleep-low-short', 'sleep-low-deep', 'sleep-low-pulse', 'sleep-high', 'rest-up', 'rest-down',
+  'org-low-pulse', 'org-high-pulse', 'org-low-oxygen', 'org-high-oxygen',
+]);
+
+/** Причины из прошлой ночи: к вечеру гаснут (`nightTalkWeight`), сильные плохие — не ниже `NIGHT_TALK_STRONG_LATE`. */
 const NIGHT_CAUSES = new Set<RootCause>([
   'restless-night', 'short-nights-row', 'early-wake', 'late-wake', 'early-dinner',
   'short-night', 'long-night', 'deep-debt', 'good-night', 'late-bed', 'early-bed', 'regular-bed', 'night-pulse', 'low-night-pulse',
@@ -1097,13 +1123,15 @@ export interface Ranked {
 export function rankInsights(input: PhysioInput): Ranked[] {
   const states = bodyStates(input);
   const causes = rootCauses(input);
-  const night = NIGHT_CAUSE_WEIGHT[input.mode];
+  const wake = readings(input).wake;
+  const talk = nightTalkWeight(wake === null ? null : (input.now - wake) / 60, input.mode);
   const recent = recentSaid(input);
   const recentFamilies = new Set(recent.map((x) => familyOf(x.cause)));
   const pairs: Ranked[] = [];
   for (const state of states) {
     const weights = CAUSES_FOR[state.key];
-    const modeWeight = (MODE_WEIGHT[state.key]?.[input.mode] ?? 1) * (isScoreState(state.key) ? SCORE_HEADLINE_BOOST : 1);
+    const modeWeight = (MODE_WEIGHT[state.key]?.[input.mode] ?? 1) * (isScoreState(state.key) ? SCORE_HEADLINE_BOOST : 1)
+      * (NIGHT_STATES.has(state.key) ? talk : 1);
     if (!modeWeight) continue;
     const own: typeof pairs = [];
     for (const cause of causes) {
@@ -1111,7 +1139,8 @@ export function rankInsights(input: PhysioInput): Ranked[] {
       if (!w || cause.key === 'no-cause') continue;
       const key = `${state.key}-${cause.key}`;
       let score = state.strength * cause.strength * w * modeWeight;
-      if (NIGHT_CAUSES.has(cause.key)) score *= cause.strength >= 1.5 ? night.strong : night.usual;
+      const badNight = cause.strength >= 1.5 && !NIGHT_GOOD[cause.key] && cause.key !== 'early-dinner' && cause.key !== 'late-wake';
+      if (NIGHT_CAUSES.has(cause.key)) score *= badNight ? Math.max(talk, NIGHT_TALK_STRONG_LATE) : talk;
       const weight = score;
       if (input.said.week.includes(key)) score *= SAID_WEEK_FACTOR;
       if (input.said.today.some((k) => splitKey(k)?.cause === cause.key)) score *= SAID_TODAY_FACTOR;

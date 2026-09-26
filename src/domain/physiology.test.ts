@@ -242,6 +242,18 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
     expect(ranked.length).toBeGreaterThanOrEqual(25);
   });
 
+  it('кластеры по времени: в 22:45 Лис не хвалит сон и ужин накануне, даже если отрезок ещё «день»', () => {
+    // Подъём 07:00, окно сна позднее — в 22:45 отрезок «день». Ночь хорошая, ужин вчера ранний, пульс покоя ниже обычного.
+    const days = week({ restingPulse: 55, nightPulse: 54, stress: 50, sleepMin: 500 }, { 1: { meals: ['09:00', '13:00', '18:30'] } });
+    const late = { ...input({ pulse: 64, days, mode: 'day' }), now: 22 * 60 + 45, scores: { sleep: { value: 92, norm: 80 } } };
+    const evening = findInsight(late)!;
+    expect(evening.state.startsWith('sleep-')).toBe(false);
+    expect(['early-dinner', 'good-night', 'long-night', 'low-night-pulse', 'regular-bed']).not.toContain(evening.cause);
+    // Утром то же самое — как раз про ночь.
+    const morning = findInsight({ ...late, now: 8 * 60, mode: 'morning' })!;
+    expect(morning.state.startsWith('sleep-') || ['early-dinner', 'good-night', 'long-night', 'low-night-pulse'].includes(morning.cause)).toBe(true);
+  });
+
   it('утро: оценка сна ниже нормы — что её тянет и почему (легли поздно, поздний ужин)', () => {
     const days = week({ sleepMin: 380, asleep: '00:50' }, { 1: { meals: ['09:00', '13:30', '23:00'] } });
     const insight = findInsight({ ...input({ pulse: 64, days, mode: 'morning' }), scores: { sleep: { value: 62, norm: 80 } } })!;
@@ -272,7 +284,7 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
   it('вечером ночь звучит, только если была сильной; утром — в полную силу', () => {
     const days = week({ sleepMin: 395 });
     const at = (mode: PhysioInput['mode']) =>
-      rankInsights({ ...input({ pulse: 80, days, mode }), scores: { state: { value: 55, norm: 62 } }, organismParts: { hrv: { today: 40, usual: 60 } } })
+      rankInsights({ ...input({ pulse: 80, days, mode }), now: mode === 'evening' ? 21 * 60 : 15 * 60, scores: { state: { value: 55, norm: 62 } }, organismParts: { hrv: { today: 40, usual: 60 } } })
         .find((p) => p.cause.key === 'short-night')!.score;
     expect(at('evening')).toBeLessThan(at('morning') * 0.5);
   });

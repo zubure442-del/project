@@ -114,6 +114,8 @@ export interface StoredReport {
    */
   focus?: string[];
   action?: string | null;
+  /** Прежние тексты того же отрезка, заменённые кнопкой «Новое мнение Лиса», свежие первыми. */
+  earlier?: string[];
 }
 
 export interface VueloState {

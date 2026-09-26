@@ -41,6 +41,9 @@ export type RootCause =
   | 'long-still'
   | 'active-earlier'
   | 'good-night'
+  | 'calm-days'
+  | 'low-night-pulse'
+  | 'regular-bed'
   | 'usual-night';
 
 export interface PhysioInput {
@@ -57,7 +60,7 @@ export interface PhysioInput {
   /** Верхнее давление и сахар по оценке кольца (записи 0x55 без выбросов); у старых вызовов может не быть. */
   systolic?: readonly MinutePoint[];
   glucose?: readonly MinutePoint[];
-  /** Ключи связок, о которых Лис уже говорил: за этот цикл и за неделю. */
+  /** Ключи связок, о которых Лис уже говорил: за этот цикл и за неделю, свежие первыми. */
   said: { today: readonly string[]; week: readonly string[] };
 }
 
@@ -114,6 +117,14 @@ export const NIGHT_HEART_MIN = 4;
 /** Кислород ночью ниже своей нормы на столько процентов; без нормы — ниже NIGHT_SPO2_LOW (как в «Пике»). */
 export const NIGHT_SPO2_DROP = 1.5;
 export const NIGHT_SPO2_LOW = 95;
+/**
+ * Спокойные причины для ровного дня (чтобы Лис не повторял «ночь прошла как обычно»): стресс двух
+ * дней ниже нормы на столько пунктов, пульс во сне ниже нормы на столько ударов, отбой в пределах
+ * стольких минут от привычного.
+ */
+export const CALM_DAYS_UNDER = 5;
+export const NIGHT_PULSE_UNDER = 3;
+export const REGULAR_BED_MIN = 20;
 /** Тренд вариабельности — на 10 % от недельной нормы. */
 export const HRV_TREND_SHARE = 0.1;
 /** Стресс два дня подряд выше нормы — на столько пунктов. */
@@ -163,11 +174,11 @@ export const CAUSES_FOR: Record<BodyState, readonly RootCause[]> = {
   'tense-still': [...NIGHT_CAUSES, 'stress-days', 'hrv-down', 'sugar-swings'],
   saving: [...NIGHT_CAUSES, 'recent-meal', 'active-earlier', 'heavy-yesterday', 'repair', 'hrv-up', 'good-night', 'usual-night', 'snacking', 'sugar-swings'],
   still: [...NIGHT_CAUSES, 'heavy-yesterday', 'repair', 'hrv-down'],
-  moving: ['good-night', 'hrv-up', 'usual-night'],
+  moving: ['good-night', 'hrv-up', 'calm-days', 'low-night-pulse', 'regular-bed', 'usual-night'],
   fade: [...NIGHT_CAUSES, 'hrv-down', 'heavy-yesterday', 'repair', 'late-meal', 'snacking', 'sugar-swings'],
   tense: [...NIGHT_CAUSES, 'stress-days', 'hrv-down', 'late-meal', 'long-still', 'sugar-swings'],
   'pressure-up': [...NIGHT_CAUSES, 'stress-days', 'long-still'],
-  steady: ['good-night', 'hrv-up', 'usual-night', 'active-earlier'],
+  steady: ['good-night', 'hrv-up', 'calm-days', 'low-night-pulse', 'regular-bed', 'active-earlier', 'usual-night'],
 };
 
 // ── Фразы: [умеренно, сильно]. Простой разговорный язык, без канцелярита и цифр ─────────────────
@@ -241,6 +252,9 @@ export const CAUSE_TEXT: Record<RootCause, Pair> = {
   'long-still': ['Последние часы прошли почти без движения', 'Уже несколько часов подряд почти без движения'],
   'active-earlier': ['Раньше сегодня было много движения', 'Сегодня уже было очень много движения'],
   'good-night': ['Ночь была полноценной, с хорошим глубоким сном', 'Ночь была длинной и глубокой, лучше обычной'],
+  'calm-days': ['Последние два дня стресс ниже вашего обычного', 'Последние два дня стресс заметно ниже вашего обычного'],
+  'low-night-pulse': ['Ночью пульс опускался ниже вашего обычного', 'Ночью пульс опускался заметно ниже обычного, тело хорошо отдохнуло'],
+  'regular-bed': ['Вы легли спать в своё привычное время', 'Вы легли спать точно в своё привычное время'],
   'usual-night': ['Ночь прошла как обычно', 'Ночь прошла как обычно, без отклонений'],
 };
 
@@ -324,8 +338,9 @@ export function bodyStates(input: PhysioInput): Found<BodyState>[] {
   if (systolic !== null && systolicNorm !== null && systolic >= systolicNorm + PRESSURE_OVER) {
     out.push({ key: 'pressure-up', strength: cap((systolic - systolicNorm) / PRESSURE_OVER) });
   }
-  // Ровный фон — запасное состояние, когда за последний час есть хоть какие-то замеры.
-  if (pulse !== null || stress !== null) out.push({ key: 'steady', strength: 0.3 });
+  // «Ровно» — только когда больше ничего не видно: иначе по кнопке Лис говорил «пульс в порядке»
+  // сразу после «пульс выше обычного» (владелец 26.09). Все остальные состояния верны одновременно.
+  if (!out.length && (pulse !== null || stress !== null)) out.push({ key: 'steady', strength: 0.3 });
   return out;
 }
 
@@ -351,6 +366,9 @@ export function rootCauses(input: PhysioInput): Found<RootCause>[] {
   if (stressRecent !== null && stressNorm !== null && stressRecent >= stressNorm + STRESS_DAYS_OVER) {
     push('stress-days', (stressRecent - stressNorm) / (STRESS_DAYS_OVER * 1.5));
   }
+  if (stressRecent !== null && stressNorm !== null && stressRecent <= stressNorm - CALM_DAYS_UNDER) {
+    push('calm-days', 0.5 + (stressNorm - stressRecent) / (CALM_DAYS_UNDER * 4));
+  }
 
   // Ночь: длительность, время отхода, пульс во сне и когда он опустился, кислород.
   const sleepNorm = norm(days, (d) => d.sleepMin, 1, 7);
@@ -361,11 +379,15 @@ export function rootCauses(input: PhysioInput): Found<RootCause>[] {
   if (d0?.nightPulse != null && pulseNorm !== null && d0.nightPulse - pulseNorm >= NIGHT_PULSE_OVER) {
     push('night-pulse', (d0.nightPulse - pulseNorm) / (NIGHT_PULSE_OVER * 1.5));
   }
+  if (d0?.nightPulse != null && pulseNorm !== null && pulseNorm - d0.nightPulse >= NIGHT_PULSE_UNDER) {
+    push('low-night-pulse', 0.5 + (pulseNorm - d0.nightPulse) / (NIGHT_PULSE_UNDER * 4));
+  }
   const bedNorm = norm(days, (d) => (d.asleep ? bedMin(d.asleep) : null), 1, 7);
   const bed = d0?.asleep ? bedMin(d0.asleep) : null;
   if (bed !== null && bedNorm !== null && bed - bedNorm >= LATE_BED_MIN) {
     push('late-bed', (bed - bedNorm) / (LATE_BED_MIN * 1.5));
   }
+  if (bed !== null && bedNorm !== null && Math.abs(bed - bedNorm) <= REGULAR_BED_MIN) push('regular-bed', 0.4);
   const lastMeal = d1?.meals.length ? Math.max(...d1.meals.map(clockMin)) : null;
   const lateMeal = lastMeal !== null && bed !== null && bed - lastMeal >= 0 && bed - lastMeal <= LATE_MEAL_BEFORE_SLEEP_MIN;
   if (lateMeal) push('late-meal', 1);
@@ -478,9 +500,13 @@ export function rankInsights(input: PhysioInput): { state: Found<BodyState>; cau
  * за последний час или нет ни одной подходящей причины): тогда остаётся шаблонный совет.
  */
 export function findInsight(input: PhysioInput): Insight | null {
-  // Ротация: связку, сказанную в этом цикле, не повторяем, пока есть другая актуальная.
+  // Ротация: связку, сказанную в этом цикле, не повторяем, пока есть другая актуальная; все
+  // сказаны — берём ту, что звучала давнее всех (`said.today` — свежие первыми).
   const ranked = rankInsights(input);
-  const best = ranked.find((p) => !input.said.today.includes(`${p.state.key}-${p.cause.key}`)) ?? ranked[0];
+  const keyOf = (p: (typeof ranked)[number]) => `${p.state.key}-${p.cause.key}`;
+  const best =
+    ranked.find((p) => !input.said.today.includes(keyOf(p))) ??
+    [...ranked].sort((a, b) => input.said.today.indexOf(keyOf(b)) - input.said.today.indexOf(keyOf(a)))[0];
   if (!best) return null;
   const strong = (s: number) => (s >= 1.5 ? 1 : 0);
   const { state, cause } = best;

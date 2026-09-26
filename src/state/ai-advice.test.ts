@@ -168,12 +168,34 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
     expect(again.payload.insight.key).not.toBe(request.payload.insight.key);
     expect(again.payload.past_opinions.map((o) => o.text)).toEqual(['Тело сейчас спокойно. Кажется, ночь прошла в обычном ритме.']);
     const other = withAiAdvice(next, { ...again, templateId: AI_TEMPLATE_ID }, 'Другое мнение Лиса о дне.');
-    expect(pastOpinions(other.reports, request.date, null)).toHaveLength(1);
+    // Прежнее мнение того же отрезка не теряется: ключ и текст остаются в памяти.
+    const replaced = other.reports.find((r) => r.date === request.date && r.mode === request.mode)!;
+    expect(replaced.focus).toEqual([again.payload.insight.key, request.payload.insight.key]);
+    expect(pastOpinions(other.reports, request.date, null).map((o) => o.text)).toEqual([
+      'Другое мнение Лиса о дне.',
+      'Тело сейчас спокойно. Кажется, ночь прошла в обычном ритме.',
+    ]);
     // Версия кода функции — чтобы «Сырой лог» мог сказать, что в Yandex Cloud старый код.
     expect(await fetchAiAdvice(request.payload, CONFIG, okFetch({ text: 'Тело сейчас спокойно. Кажется, ночь прошла ровно.', v: 9 }))).toEqual({
       text: 'Тело сейчас спокойно. Кажется, ночь прошла ровно.',
       server: 9,
     });
+  });
+
+  it('кнопка «Новое мнение Лиса» раз за разом: связки не повторяются по кругу, «ровно» не спорит с «пульс выше»', () => {
+    let state = stateWithTemplate();
+    const keys: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const request = aiAdviceRequest(state, NOW, true);
+      if (!request) break;
+      keys.push(request.payload.insight.key);
+      state = withAiAdvice(state, { ...request, templateId: request.templateId }, `Мнение номер ${'раз два три четыре пять'.split(' ')[i]}, про тело и ночь.`);
+    }
+    const distinct = new Set(keys).size;
+    // Пока есть несказанные связки — каждый раз новая; дальше — самая давняя, а не две по кругу.
+    expect(keys.slice(0, distinct)).toEqual([...new Set(keys)]);
+    const states = new Set(keys.map((k) => k.split('-')[0]));
+    expect(states.has('steady') && states.size > 1).toBe(false);
   });
 
   it('«Лис смотрит…» вместо старого совета — пока идёт выгрузка или запрос за свежим мнением', () => {

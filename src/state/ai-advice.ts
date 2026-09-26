@@ -77,6 +77,9 @@ const daysAgo = (date: string, d: string) => Math.round((Date.parse(`${date}T00:
 /** Сколько дней истории мнений учитываем: и для проверки повторов, и для выбора связки. */
 export const AI_ADVICE_HISTORY_DAYS = 7;
 
+/** Сколько прежних ключей и текстов одного отрезка помним после «Нового мнения Лиса». */
+export const AI_ADVICE_MEMORY = 12;
+
 /** Мнения от модели за последние 7 дней, свежие первыми (текущий отрезок не входит). */
 function aiReports(reports: readonly StoredReport[], date: string, except: StoredReport | null): StoredReport[] {
   return [...reports]
@@ -87,8 +90,8 @@ function aiReports(reports: readonly StoredReport[], date: string, except: Store
 /** Тексты прошлых мнений для посредника: ответ, слишком похожий на них, он отклонит. */
 export function pastOpinions(reports: readonly StoredReport[], date: string, except: StoredReport | null): { ago: number; slot: ReportMode; text: string }[] {
   return aiReports(reports, date, except)
-    .slice(0, AI_ADVICE_HISTORY_DAYS * 3)
-    .map((r) => ({ ago: daysAgo(date, r.date), slot: r.mode, text: r.text.slice(0, 400) }));
+    .flatMap((r) => [r.text, ...(r.earlier ?? [])].map((text) => ({ ago: daysAgo(date, r.date), slot: r.mode, text: text.slice(0, 400) })))
+    .slice(0, 30);
 }
 
 /**
@@ -184,14 +187,25 @@ export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: 
   const stored = state.reports.find((r) => r.date === request.date && r.mode === request.mode);
   const same = stored === undefined || stored.templateId === request.templateId || (request.templateId === null && !isAiTemplate(stored.templateId));
   if (!same) return state;
-  const report: StoredReport = { date: request.date, mode: request.mode, templateId: AI_TEMPLATE_ID, text, focus: [request.payload.insight.key] };
+  // Кнопка «Новое мнение Лиса» перезаписывает мнение того же отрезка: прежние ключи и тексты
+  // сохраняем, иначе ротация ходила по кругу между двумя связками, а проверка повторов не видела
+  // ранних текстов (владелец 26.09: «пишет одинаковые тексты слово в слово»).
+  const prev = stored && isAiTemplate(stored.templateId) ? stored : null;
+  const report: StoredReport = {
+    date: request.date,
+    mode: request.mode,
+    templateId: AI_TEMPLATE_ID,
+    text,
+    focus: [request.payload.insight.key, ...(prev?.focus ?? [])].slice(0, AI_ADVICE_MEMORY),
+    ...(prev ? { earlier: [prev.text, ...(prev.earlier ?? [])].slice(0, AI_ADVICE_MEMORY) } : {}),
+  };
   return { ...state, reports: addReport(state.reports, report) };
 }
 
 export type AiAdviceResult = { text: string; server?: number } | { error: string };
 
 /** Версия кода облачной функции, с которой приложение работает (запрос — вывод движка физиологии). */
-export const AI_ADVICE_SERVER_VERSION = 10;
+export const AI_ADVICE_SERVER_VERSION = 11;
 
 /** Запрос к посреднику. Любая неудача — `error` с причиной для отладочного лога, без исключений. */
 export async function fetchAiAdvice(

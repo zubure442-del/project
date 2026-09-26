@@ -129,6 +129,25 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
     expect(rankInsights(input({ pulse: 75, days })).length).toBeGreaterThan(4);
   });
 
+  it('«ровно» не спорит с отклонением: если пульс выше обычного, «пульс в норме» не прозвучит (скриншот 26.09)', () => {
+    const ranked = rankInsights(input({ pulse: 72, days: week({ asleep: '01:00' }) }));
+    expect(ranked.length).toBeGreaterThan(0);
+    expect(ranked.every((p) => p.state.key !== 'steady')).toBe(true);
+    // В ровный день — разные спокойные причины, а не одно «ночь прошла как обычно».
+    const calm = week({ nightPulse: 53, asleep: '23:35' }, { 1: { stress: 25 }, 2: { stress: 25 } });
+    const keys = rankInsights(input({ pulse: 61, stress: 35, stepsPerMin: 20, days: calm })).map((p) => p.cause.key);
+    expect(keys).toEqual(expect.arrayContaining(['low-night-pulse', 'regular-bed', 'calm-days', 'usual-night']));
+  });
+
+  it('все связки уже сказаны — берём самую давнюю, а не две по кругу', () => {
+    const base = input({ pulse: 75, days: week({ sleepMin: 330, asleep: '01:00' }) });
+    const all = rankInsights(base).map((p) => `${p.state.key}-${p.cause.key}`);
+    expect(all.length).toBeGreaterThan(1);
+    // Свежие первыми: самая давняя — последняя в списке.
+    const insight = findInsight({ ...base, said: { today: all, week: all } })!;
+    expect(insight.key).toBe(all[all.length - 1]);
+  });
+
   it('нет замеров за последний час и нет сна — сказать нечего', () => {
     const empty = { ...input({ pulse: 60 }), heart: [], stress: [], steps: [], days: [row(0, { sleepMin: null, asleep: null, awake: null })] };
     expect(findInsight(empty)).toBeNull();

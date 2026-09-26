@@ -28,7 +28,7 @@ const { Buffer } = require('node:buffer');
 
 const API_URL = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion';
 /** Версия кода — в каждом ответе (`v`): по ней приложение видит, что в Yandex Cloud свежий код. */
-const VERSION = 10;
+const VERSION = 11;
 const MAX_BODY_CHARS = 16000;
 /** Длина фразы движка: короткие предложения без цифр. */
 const INSIGHT_MAX_CHARS = 200;
@@ -37,8 +37,8 @@ const LLM_TIMEOUT_MS = 12000;
 const DEADLINE_MS = 13000;
 /** Меньше этого на повтор не остаётся — не пробуем. */
 const RETRY_MIN_MS = 4000;
-/** Пересказ, а не сочинение: чуть живости, но без фантазий. */
-const TEMPERATURE = 0.5;
+/** Пересказ, а не сочинение; 0.7 — чтобы одинаковые связки звучали разными словами, смысл держит проверка. */
+const TEMPERATURE = 0.7;
 
 const MODE_TEXT = { morning: 'утро, после пробуждения', day: 'день', evening: 'вечер, перед сном' };
 
@@ -55,7 +55,7 @@ const SYSTEM_PROMPT = `Ты — Лис, тёплый и внимательный
 
 Ответ — ровно два коротких предложения, вместе не длиннее 125 символов:
 1. Первое — consequence своими словами.
-2. Второе — root_cause своими словами, как дружеская догадка, как это связано.
+2. Второе — root_cause своими словами, как дружеская догадка, как это связано («похоже, это после…», «кажется, сказывается…»).
 
 Как звучать:
 - простыми словами, как в жизни: «пульс держится выше обычного», «вчера на тренировке была большая нагрузка», «частые перекусы», «давление выше вашего обычного», «ночью кислород проседал»;
@@ -66,6 +66,7 @@ const SYSTEM_PROMPT = `Ты — Лис, тёплый и внимательный
 
 Нельзя:
 - ничего добавлять и убирать: не придумывай новых причин и обстоятельств жизни — дел, работы, задач, графика, режима дня, загруженности;
+- менять смысл и силу: «чуть выше обычного» не превращай в «скачет», «в вашей норме» — в «отлично»; что названо (пульс, стресс, давление, сахар, кислород, сон, еда, нагрузка), то и назови;
 - советы, команды и призывы: «сделайте», «иди», «попробуйте», «встаньте», «отдохните», «разомните» и любые другие;
 - цифры, диагнозы и болезни, врачей и лечение, обещания, ярлыки вроде «вы устали»;
 - приветствия, вопросы, списки, эмодзи и кавычки.
@@ -90,7 +91,8 @@ function modelInput(p) {
 
 // ── Проверка ответа ─────────────────────────────────────────────────────────────────────────────
 
-const ANSWER_MIN_CHARS = 30;
+/** Короче — это уже не пересказ связки («Пульс скачет. Вы поздно легли спать.», владелец 26.09). */
+const ANSWER_MIN_CHARS = 70;
 /** Плашка на главном экране маленькая: длиннее текст обрезается на полуслове (владелец 26.09). */
 const ANSWER_MAX_CHARS = 130;
 /** Модель просим короче (125): так ответ почти никогда не упирается в предел проверки. */
@@ -181,7 +183,34 @@ function cleanAnswer(raw) {
 const minuteOf = (clock) => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3, 5));
 
 /** Что не так с ответом: null — годится. `previous` — прежние мнения, `time` — текущее «ЧЧ:ММ». */
-function answerProblem(text, previous = [], time = '15:00') {
+/**
+ * О чём говорит фраза: пересказ должен назвать то же самое (владелец 26.09: вместо «пульс чуть выше
+ * обычного» модель написала «Пульс скачет», а причину урезала до трёх слов).
+ */
+const SUBJECTS = [
+  /пульс/, /стресс/, /давлени/, /сахар/, /кислород/,
+  /(^|[^а-яё])ед[аыуе]([^а-яё]|$)|поел|переварив|перекус|ужин/,
+  /нагрузк|трениров|мышц/, /восстан/, /движ|двига/,
+  /ноч|(^|[^а-яё])(сон|сна|сном|сне)([^а-яё]|$)|спал|легли|уснул/,
+];
+/** Слова, которые усиливают смысл, — можно, только если они есть в самой связке. */
+const DRAMA = /скач|прыга|зашкал|рухн|обвал|бешен|на пределе|истощ|катастроф|отличн|идеальн|прекрасн/;
+
+/** Пересказ потерял то, о чём фраза, или сгустил краски. null — смысл на месте. */
+function meaningProblem(text, insight) {
+  const lower = text.toLowerCase();
+  const source = `${insight.consequence} ${insight.root_cause}`.toLowerCase();
+  if (DRAMA.test(lower) && !DRAMA.test(source)) return 'distorted';
+  // Наблюдение — короткое: всё, что в нём названо, остаётся. У причины — самое конкретное (кислород,
+  // еда, нагрузка важнее общего «ночью»): список SUBJECTS — от конкретного к общему.
+  const observed = SUBJECTS.filter((re) => re.test(insight.consequence.toLowerCase()));
+  if (observed.some((re) => !re.test(lower))) return 'lost';
+  const cause = SUBJECTS.find((re) => re.test(insight.root_cause.toLowerCase()));
+  if (cause && !cause.test(lower)) return 'lost';
+  return null;
+}
+
+function answerProblem(text, previous = [], time = '15:00', insight = null) {
   if (text.length < ANSWER_MIN_CHARS) return 'short';
   if (text.length > ANSWER_MAX_CHARS) return 'long';
   if (/[*#_`<>[\]{}|]/.test(text) || /\n/.test(text)) return 'format';
@@ -204,19 +233,25 @@ function answerProblem(text, previous = [], time = '15:00') {
   if (CLERICAL.test(lower)) return 'clerical';
   if (SLANG.test(lower)) return 'slang';
   if (ACTIVITY.test(first) && ACTIVITY.test(second) && !OTHER_CAUSE.test(second)) return 'tautology';
+  if (insight) {
+    const meaning = meaningProblem(text, insight);
+    if (meaning) return meaning;
+  }
   if (previous.some((a) => similar(text, a))) return 'repeat';
   return null;
 }
 
 /** Причина отказа — словами для повтора. */
 const PROBLEM_TEXT = {
-  short: 'слишком коротко',
+  short: 'слишком коротко — перескажи и следствие, и причину полностью',
   long: 'длиннее 130 символов — сократи',
   horoscope: 'не ярлык настроения, а наблюдение за телом и его причина',
   touchy: 'без прикосновений к себе и советов',
   command: 'никаких советов и команд — только наблюдение за телом и дружеская догадка о причине',
   clerical: 'без канцелярита («в покое», «наблюдается», «Причина —») — скажи простыми словами',
   slang: 'без сленга и фольклора («мотор», «шпарит») — чистый разговорный язык',
+  distorted: 'не сгущай и не меняй смысл: пересказывай consequence и root_cause с той же силой',
+  lost: 'потерялось, о чём речь: назови то же, что в consequence и root_cause',
   hedge: 'без шаблонных вводных «Возможно», «Вероятно», «Скорее всего» в начале предложения',
   format: 'есть разметка или переводы строк',
   sentences: 'нужно ровно два коротких предложения',
@@ -308,7 +343,7 @@ async function handler(event, context) {
     const result = await askModel({ token, folder, model, messages, temperature: TEMPERATURE, timeoutMs: timeLeft() });
     if (result.status) return reply(result.status, { error: result.error });
     const text = cleanAnswer(result.text);
-    problem = answerProblem(text, pastOf(payload), payload.time);
+    problem = answerProblem(text, pastOf(payload), payload.time, payload.insight);
     if (!problem) return reply(200, { text, mode: 'free', v: VERSION });
     // Причина — в лог функции, без текста ответа. Повтор — с объяснением, что не так.
     console.warn('answer rejected', problem);

@@ -271,7 +271,7 @@ export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: 
 export type AiAdviceResult = { text: string; about?: AdviceAbout; server?: number } | { error: string };
 
 /** Версия кода облачной функции, с которой приложение работает полностью (разговор за день, метки). */
-export const AI_ADVICE_SERVER_VERSION = 7;
+export const AI_ADVICE_SERVER_VERSION = 8;
 
 /** Запрос к посреднику. Любая неудача — `error` с причиной для отладочного лога, без исключений. */
 export async function fetchAiAdvice(

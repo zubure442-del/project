@@ -110,21 +110,21 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
   });
 
   it('отрезок сменился между выгрузками: шаблона в истории ещё нет — мнение всё равно просим и записываем', () => {
-    const state = stateWithTemplate();
-    const { when, bed } = rhythm(state);
-    const evening = when(bed - 60);
-    const request = aiAdviceRequest(state, evening)!;
-    expect([request.mode, request.templateId]).toEqual(['evening', null]);
-    const next = withAiAdvice(state, request, 'Похоже, день вышел долгим. Сегодня лягте в окно Vuelo.');
-    const stored = next.reports.find((r) => r.date === request.date && r.mode === 'evening')!;
+    // Шаблон дня ещё не записан (выгрузка была утром), а сейчас уже день.
+    const state = { ...stateWithTemplate(), reports: stateWithTemplate().reports.filter((r) => r.templateId !== 'd-act-mid-1') };
+    const request = aiAdviceRequest(state, NOW)!;
+    expect([request.mode, request.templateId]).toEqual(['day', null]);
+    const text = 'Сон сегодня ниже вашей нормы. Вы легли позже обычного, и отдых получился короче.';
+    const next = withAiAdvice(state, request, text);
+    const stored = next.reports.find((r) => r.date === request.date && r.mode === 'day')!;
     expect(stored.templateId).toBe(AI_TEMPLATE_ID);
-    expect(adviceFor(next, evening)?.text).toBe('Похоже, день вышел долгим. Сегодня лягте в окно Vuelo.');
-    // Пока ждали ответа, выгрузка записала на вечер шаблон — мнение модели всё равно его заменяет.
-    const withTemplate = { ...state, reports: [...state.reports, { date: request.date, mode: 'evening' as const, templateId: 'e-good-1', text: 'Шаблон.' }] };
-    expect(withAiAdvice(withTemplate, request, 'Похоже, день вышел долгим. Сегодня лягте в окно Vuelo.')).not.toBe(withTemplate);
-    // Дневное мнение осталось своим, на вечер больше не просим.
-    expect(next.reports.find((r) => r.date === request.date && r.mode === 'day')?.templateId).toBe('d-act-mid-1');
-    expect(aiAdviceRequest(next, evening)).toBeNull();
+    expect(adviceFor(next, NOW)?.text).toBe(text);
+    // Пока ждали ответа, выгрузка записала на день шаблон — мнение модели всё равно его заменяет.
+    const withTemplate = { ...state, reports: [...state.reports, { date: request.date, mode: 'day' as const, templateId: 'd-act-mid-1', text: 'Шаблон.' }] };
+    expect(withAiAdvice(withTemplate, request, text)).not.toBe(withTemplate);
+    // Вчерашнее вечернее осталось своим, на этот отрезок больше не просим.
+    expect(next.reports.find((r) => r.date === '2026-09-24')?.templateId).toBe('e-good-1');
+    expect(aiAdviceRequest(next, NOW)).toBeNull();
   });
 
   it('выгрузка пишет шаблон своего отрезка: в 18:30 до окна сна ещё далеко — «днём», а не «вечер» по часам', () => {

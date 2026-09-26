@@ -125,6 +125,40 @@ export function organismSamples(
     });
 }
 
+/** Подоценка показателя сегодня и обычная (среднее по прошлым дням), 0–100: что тянет «Организм». */
+export type OrganismParts = Partial<Record<OrganismInput, { today: number; usual: number }>>;
+/** Обычная подоценка — по стольким прошлым дням с замерами, не меньше. */
+export const ORGANISM_PARTS_MIN_DAYS = 2;
+
+/**
+ * Составляющие «Организма» сегодня против обычного — теми же подоценками, что и сама оценка
+ * (для «Мнения Лиса»: «Организм ниже нормы: просела вариабельность пульса»). Прошлые дни — массивы
+ * замеров по дням; показатель без замеров сегодня или без двух прошлых дней не попадает.
+ */
+export function organismParts(
+  today: readonly OrganismSample[],
+  past: readonly (readonly OrganismSample[])[],
+  baseline: Baseline,
+): OrganismParts {
+  const means = (samples: readonly OrganismSample[]) => {
+    const sums: Partial<Record<OrganismInput, number[]>> = {};
+    for (const s of samples) for (const [k, v] of Object.entries(subScores(s, baseline)) as [OrganismInput, number][]) (sums[k] ??= []).push(v);
+    return Object.fromEntries(
+      Object.entries(sums).map(([k, list]) => [k, (list as number[]).reduce((a, b) => a + b, 0) / (list as number[]).length]),
+    ) as Partial<Record<OrganismInput, number>>;
+  };
+  const now = means(today);
+  const days = past.map(means);
+  const out: OrganismParts = {};
+  for (const key of Object.keys(ORGANISM_WEIGHTS) as OrganismInput[]) {
+    const history = days.map((d) => d[key]).filter((v): v is number => v !== undefined);
+    const value = now[key];
+    if (value === undefined || history.length < ORGANISM_PARTS_MIN_DAYS) continue;
+    out[key] = { today: value, usual: history.reduce((a, b) => a + b, 0) / history.length };
+  }
+  return out;
+}
+
 /**
  * Оценка дня: среднее замеров, взвешенное по покрытию (до следующего замера, не больше 30 минут;
  * последний — до конца дня или до текущего момента для сегодня). Меньше 4 часов покрытия — оценки нет.

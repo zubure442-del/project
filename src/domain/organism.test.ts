@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  organismParts,
   DEFAULT_HRV_BASELINE_MS,
   DEFAULT_PULSE_BASELINE_BPM,
   bpSubScore,
@@ -83,5 +84,19 @@ describe('СИНТЕТИЧЕСКИЕ: «Организм» v2 — оценка �
     expect(personalBaseline(four)).toEqual({ hrv: DEFAULT_HRV_BASELINE_MS, pulse: DEFAULT_PULSE_BASELINE_BPM });
     const five = [...four, { hrv: 30, pulse: 60 }];
     expect(personalBaseline(five)).toEqual({ hrv: 70, pulse: 52 });
+  });
+
+  it('составляющие сегодня против обычного — теми же подоценками, что и сама оценка (что тянет Организм)', () => {
+    const sample = (hrv: number | null, oxygen: number | null) =>
+      ({ m: 600, hrv, pulse: null, oxygen, systolic: null, diastolic: null, glucose: null });
+    const baseline = { hrv: 50, pulse: 60 };
+    const parts = organismParts([sample(40, 97)], [[sample(50, 97)], [sample(50, null)], [sample(55, 98)]], baseline);
+    expect(parts.hrv?.today).toBe(10);
+    expect(parts.hrv?.usual).toBeCloseTo((50 + 50 + 70) / 3);
+    // Кислород был только в двух прошлых днях — этого хватает.
+    expect(parts.oxygen).toBeDefined();
+    // Давления сегодня нет — и составляющей нет.
+    expect(parts.bp).toBeUndefined();
+    expect(organismParts([sample(40, null)], [[sample(50, null)]], baseline)).toEqual({});
   });
 });

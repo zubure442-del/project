@@ -1,5 +1,20 @@
-import { adviceDay, findInsight, glucoseLevel, type AdviceDay, type Insight, type MinutePoint, type ReportMode } from '../domain';
+import {
+  adviceDay,
+  findInsight,
+  glucoseLevel,
+  organismParts,
+  organismSamples,
+  personalBaseline,
+  type AdviceDay,
+  type ComponentId,
+  type Insight,
+  type MinutePoint,
+  type OrganismParts,
+  type ReportMode,
+  type ScoreFact,
+} from '../domain';
 import { profileAge, type DaySnapshot, type VueloState } from '../storage';
+import { currentCycle } from './cycle';
 import { findDay, recommendationsFor, todayKey } from './day';
 import { notMealOf } from './food';
 import { sleepModeFor } from './sleep-mode';
@@ -46,6 +61,47 @@ function joined(yesterday: DaySnapshot | null, today: DaySnapshot | null, pick: 
 const series = (d: DaySnapshot, key: 'systolic' | 'glucose'): MinutePoint[] =>
   d.summaryPoints.flatMap((p) => (p[key] === null ? [] : [{ m: p.m, v: p[key] as number }]));
 
+/** Норма оценки — по стольким прошлым циклам недели, не меньше. */
+export const SCORE_NORM_MIN_CYCLES = 2;
+
+/**
+ * Оценка текущего цикла против своей нормы — среднего завершённых циклов за 7 дней до сегодня.
+ * Так же считает шапка вкладки, пока второй недели нет («ниже вашей нормы»).
+ */
+export function scoreFact(state: Pick<VueloState, 'cycles' | 'ringOffSince'>, metric: ComponentId, now = new Date()): ScoreFact | null {
+  const cycle = currentCycle(state);
+  const value = cycle?.scores[metric] ?? null;
+  if (value === null) return null;
+  const from = shiftDate(todayKey(now), -ADVICE_DAYS_BACK);
+  const past = state.cycles
+    .filter((c) => c.end !== null && c.date >= from && c.date < todayKey(now))
+    .map((c) => c.scores[metric])
+    .filter((v): v is number => v !== null);
+  if (past.length < SCORE_NORM_MIN_CYCLES) return null;
+  return { value, norm: past.reduce((a, b) => a + b, 0) / past.length };
+}
+
+/**
+ * Подоценки «Организма» сегодня (до выгрузки) и обычно — за 7 прошлых дней, тем же расчётом, что и
+ * сама оценка: по ним видно, что тянет Организм вниз или вверх.
+ */
+export function organismPartsFor(state: VueloState, upTo: number, now = new Date()): OrganismParts {
+  const today = todayKey(now);
+  const samplesOf = (d: DaySnapshot, until = 1440) =>
+    organismSamples(d.summaryPoints.filter((p) => p.m <= until), d.heart.filter((p) => p.m <= until), d.spo2.filter((p) => p.m <= until));
+  const past = Array.from({ length: ADVICE_DAYS_BACK }, (_, i) => findDay(state.days, shiftDate(today, -(ADVICE_DAYS_BACK - i))))
+    .filter((d): d is DaySnapshot => d !== null);
+  const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
+  const baseline = personalBaseline(
+    past.map((d) => ({
+      hrv: mean(d.summaryPoints.map((p) => p.hrv).filter((v): v is number => v !== null)),
+      pulse: d.heart.length ? Math.min(...d.heart.map((p) => p.v)) : null,
+    })),
+  );
+  const day = findDay(state.days, today);
+  return day ? organismParts(samplesOf(day, upTo), past.map((d) => samplesOf(d)), baseline) : {};
+}
+
 /**
  * Вывод движка физиологии для «Мнения Лиса» (`findInsight`): что с телом сейчас и почему. `said` —
  * о каких связках Лис уже говорил (за цикл и за неделю): движок выберет другую. null — сказать
@@ -76,6 +132,8 @@ export function insightFor(
     glucose: joined(yesterday, today, (d) => series(d, 'glucose'), upTo),
     sleepDebtMin: sleepMode?.debtMin ?? null,
     plan: { bedTo: sleepMode?.to ?? null, dinner },
+    scores: { sleep: scoreFact(state, 'sleep', now), state: scoreFact(state, 'state', now) },
+    organismParts: organismPartsFor(state, upTo, now),
     said,
   });
 }

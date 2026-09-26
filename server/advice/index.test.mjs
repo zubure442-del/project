@@ -284,7 +284,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect([fn.observe(day).id, fn.observe(day).action]).toEqual(['late-meal', 'поужинать по графику Vuelo в 18:45']);
     expect(fn.buildAnalysisText(day)).toContain('- сегодня утром — Похоже, поздний ужин не дал телу отдохнуть ночью. Последнюю чашку кофе — до 14:30. (тема: еда, ночь и сон; совет: [coffee])');
 
-    // Вечером: утром еда, днём снова еда (ужин) — еда дважды за цикл, её больше не берём; ночь тоже.
+    // Вечером: утром еда и ночь, днём снова еда (ужин) — к темам дня вечер не возвращается.
     const daySaid = 'сегодня днём — Утром ночь подвёл поздний ужин — давайте его обгоним. Поужинайте в 18:45.';
     const evening = await week(bad, past, {
       mode: 'evening', time: '21:00', recent: [morningSaid, daySaid],
@@ -296,6 +296,15 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const eve = fn.observe(evening);
     expect(fn.TOPIC_OF[eve.id]).not.toMatch(/food|night/);
     expect(eve.id).toBe('stress-streak');
+
+    // Утро — еда, день — движение: вечером ни еды, ни движения — другая тема.
+    const other = await week(bad, past, {
+      mode: 'evening', time: '21:00', recent: [morningSaid, 'сегодня днём — Кажется, день выходит сидячим. Прогулка после работы закроет норму.'],
+      said: [{ focus: ['late-meal'], action: 'coffee' }, { focus: ['steps-low'], action: 'steps' }],
+    });
+    const oTalk = fn.conversation(other, fn.measure(other));
+    expect([...oTalk.blocked].sort()).toEqual(['food', 'movement']);
+    expect(fn.TOPIC_OF[fn.observe(other).id]).toMatch(/stress|night/);
   });
 
   it('старая сборка без меток: тема и совет угадываются по словам; три раза подряд про одно — нельзя', async () => {

@@ -361,7 +361,7 @@ const actionKey = (key) => SAME_ACTION[key] || key;
 const TOPIC_WORDS = {
   night: /(лечь|лягте|ложит|засып|уснул|режим|отбой|недосып|выспал|ночь|ночью)/,
   food: /(ужин|завтрак|обед|перекус|поесть|приём пищи|приёма пищи|еда|еды)/,
-  stress: /(стресс|напряж|взвод|струн|передышк|выдохн|работ)/,
+  stress: /(стресс|напряж|взвод|струн|передышк|выдохн|с работой|дела\b)/,
   movement: /(шаг|трениров|кардио|интервал|силов|прогул|пробеж|нагрузк)/,
 };
 const ACTION_WORDS = [
@@ -396,6 +396,8 @@ function pastOpinions(p) {
  * Что можно сказать сейчас, чтобы разговор не ходил по кругу:
  * - ночь — главной одна за цикл (обычно утром);
  * - другая тема — не больше TOPIC_MAX_PER_CYCLE раз за цикл и не три мнения подряд (со вчерашними);
+ * - вечер не возвращается к темам, которые уже звучали сегодня: день может развить утреннюю мысль,
+ *   а вечер — итог дня о другом;
  * - действие — одно за цикл; окно сна — только вечером (утром и днём его показывает «Режим сна»).
  * Советовать больше нечего — хотя бы не то же, что в прошлый раз.
  */
@@ -404,6 +406,7 @@ function conversation(p, m) {
   const today = past.filter((o) => o.today);
   const blocked = new Set();
   if (today.some((o) => o.topics.includes('night'))) blocked.add('night');
+  if (p.mode === 'evening') for (const o of today) for (const t of o.topics) blocked.add(t);
   const [a, b] = past.slice(-2);
   for (const topic of ['food', 'stress', 'movement']) {
     if (today.filter((o) => o.topics.includes(topic)).length >= TOPIC_MAX_PER_CYCLE) blocked.add(topic);

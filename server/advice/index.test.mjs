@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнения Лиса»', () => {
-  it('запрос приложения проходит проверку; модели уходит текущее время, сырые ряды и уже данные советы', () => {
+  it('запрос приложения проходит проверку; модели уходит время, ряды и пульс, шаги и стресс сегодня по часам', () => {
     const payload = appPayload();
     expect(fn.validate(payload)).toBeNull();
     const input = fn.modelInput(payload);
@@ -51,23 +51,28 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(input.current_time).toBe('15:00');
     expect(input.person).toEqual({ sex: 'женщина', age: 32, goal: 'поддерживать форму' });
     expect(Object.keys(input.days[0])).toEqual([
-      'ago', 'asleep', 'awake', 'sleep_min', 'deep_min', 'night_pulse', 'hrv_ms', 'day_stress', 'steps', 'step_norm', 'workout', 'meal_times',
+      'ago', 'asleep', 'awake', 'sleep_min', 'deep_min', 'night_pulse', 'resting_pulse', 'hrv_ms', 'day_stress', 'steps', 'step_norm', 'workout', 'meal_times',
     ]);
     expect(input.days.map((d) => d.ago)).toEqual([...input.days.map((d) => d.ago)].sort((a, b) => b - a));
-    expect(input.today_by_hour.stress).toHaveLength(input.today_by_hour.steps.length);
+    const h = input.today_by_hour;
+    expect(Object.keys(h)).toEqual(['from_hour', 'steps', 'stress', 'pulse']);
+    expect(h.pulse).toHaveLength(h.steps.length);
+    expect(h.pulse.some((v) => v !== null)).toBe(true);
     expect(JSON.stringify(input)).not.toMatch(/Анна|давлен|glucose|systolic/);
+    expect(fn.validate({ ...payload, hours: { ...payload.hours, pulse: [500] } })).toBe('hours');
   });
 
-  it('системный запрос: короткий ответ, «офисная нормальность», время суток, стоп-лист', () => {
+  it('системный запрос: без готовых действий, первое предложение — тренд датчиков, стоп-лист, до 130 символов', () => {
     const prompt = fn.SYSTEM_PROMPT;
     expect(prompt).toContain('current_time');
-    expect(prompt).toContain('не длиннее 130 символов (до 20 слов), ровно два коротких предложения');
-    expect(prompt).toContain('простое действие на 30 секунд, которое можно сделать сидя за столом, в транспорте или на ходу');
-    expect(prompt).toContain('до 12:00 — мягкий разгон дня');
-    expect(prompt).toContain('с 12:00 до 20:00 — удержать фокус, разгрузить шею и глаза, снять фоновый зажим. Ночной сон и прошлую ночь не упоминай');
-    expect(prompt).toContain('с 20:00 и ночью — подготовка к отдыху: приглушить свет, убрать яркие экраны');
-    expect(prompt).toContain('дыхательные упражнения любого вида');
-    expect(prompt).toContain('previously_suggested_actions');
+    expect(prompt).toContain('pulse — средний пульс');
+    expect(prompt).toContain('Первое предложение — этот тренд словами о теле: какой датчик что показывает и за какое время');
+    expect(prompt).toContain('эргономика позы и рабочего места, микроразминка кистей, шеи или плечевого пояса, смена зрительной дистанции, терморегуляция и свежий воздух, темп движения');
+    expect(prompt).toContain('«вы устали», «вы напряжены», «вы сосредоточены»');
+    expect(prompt).toContain('погладить, обнять себя, массировать лицо или щёки');
+    expect(prompt).toContain('не длиннее 130 символов, ровно два предложения');
+    // Готовых действий в повелительном наклонении, которые модель могла бы скопировать, нет.
+    expect(prompt).not.toMatch(/опустите|посмотрите|выпейте|выпрямите|проветрите|сбавьте|например|Пример/i);
   });
 
   it('прежние советы — из недели приложения или, у старых сборок, из recent', async () => {
@@ -88,19 +93,19 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(fn.validate({ ...sample, past_opinions: [{ ago: 1, slot: 'night', text: 'x' }] })).toBe('past_opinions');
   });
 
-  it('ответ: до 140 символов, два предложения, без дыхания, эзотерики, зауми, ночи днём и повторов', () => {
-    const good = 'После обеда вы почти не вставали, шея устала. Опустите плечи вниз и посмотрите вдаль в окно.';
-    expect(good.length).toBeLessThanOrEqual(140);
+  it('ответ: до 130 символов, два предложения, тренд датчиков, без гороскопа, прикосновений, дыхания, ночи днём и повторов', () => {
+    const good = 'Уже пару часов почти нет шагов, а пульс держится выше покоя. Встаньте и прокрутите плечами назад, пока закипает чайник.';
+    expect(good.length).toBeLessThanOrEqual(130);
     expect(fn.answerProblem(good)).toBeNull();
-    expect(fn.answerProblem('Шея устала. ' + 'Опустите плечи вниз и посмотрите вдаль в окно, а потом ещё раз медленно и спокойно поверните голову в обе стороны до самого конца и обратно, не торопясь.')).toBe('long');
-    expect(fn.answerProblem('Кажется, фокус уплывает. Сделайте пять глубоких вдохов.')).toBe('breathing');
-    expect(fn.answerProblem('Кажется, фокус уплывает. Помассируйте акупунктурные точки на стопах.')).toBe('esoteric');
-    expect(fn.answerProblem('Похоже на нестабильность режима. Опустите плечи вниз.')).toBe('jargon');
-    expect(fn.answerProblem('Ночью сон был коротким. Опустите плечи вниз.', [], '17:00')).toBe('time');
-    expect(fn.answerProblem('Ночью сон был коротким. Опустите плечи вниз.', [], '08:30')).toBeNull();
-    expect(fn.answerProblem('Шея устала за 3 часа. Опустите плечи вниз.')).toBe('numbers');
-    expect(fn.answerProblem('Шея устала. Опустите плечи. Посмотрите в окно.')).toBe('sentences');
-    expect(fn.answerProblem(good, ['Опустите плечи вниз и посмотрите в окно вдаль.'])).toBe('repeat');
+    expect(fn.answerProblem('Шагов с обеда почти нет. ' + 'Поставьте монитор на уровень глаз, отодвиньте его на вытянутую руку и проверьте, что стопы стоят на полу ровно.')).toBe('long');
+    expect(fn.answerProblem('Вы устали и перегружены. Поставьте ноги ровно на пол.')).toBe('ring');
+    expect(fn.answerProblem('Фон напряжения растёт — вы устали. Поставьте ноги ровно на пол.')).toBe('horoscope');
+    expect(fn.answerProblem('Пульс держится выше покоя. Погладьте себя по голове.')).toBe('touchy');
+    expect(fn.answerProblem('Пульс держится выше покоя. Сделайте пять глубоких вдохов.')).toBe('breathing');
+    expect(fn.answerProblem('Пульс выше, чем после плохой ночи. Разомните кисти.', [], '17:00')).toBe('time');
+    expect(fn.answerProblem('Пульс вырос на 12 ударов. Разомните кисти.')).toBe('numbers');
+    expect(fn.answerProblem('Шагов нет. Встаньте. Прокрутите плечами.')).toBe('sentences');
+    expect(fn.answerProblem(good, ['Встаньте и прокрутите плечами назад несколько раз.'])).toBe('repeat');
     expect(fn.cleanAnswer('Лис: «' + good + '»')).toBe(good);
   });
 
@@ -123,7 +128,7 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     vi.stubEnv('APP_KEY', 'secret');
     vi.stubEnv('FOLDER_ID', 'b1gfolder');
     const calls = [];
-    const text = 'После обеда вы почти не вставали, шея устала. Опустите плечи вниз и посмотрите вдаль в окно.';
+    const text = 'Уже пару часов почти нет шагов, а пульс держится выше покоя. Встаньте и прокрутите плечами назад, пока закипает чайник.';
     vi.stubGlobal('fetch', async (url, init) => {
       calls.push({ url, init });
       return modelAnswer(text);
@@ -146,9 +151,9 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     vi.stubEnv('APP_KEY', 'secret');
     vi.stubEnv('FOLDER_ID', 'b1gfolder');
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const good = 'После обеда вы почти не вставали, шея устала. Опустите плечи вниз и посмотрите вдаль в окно.';
+    const good = 'Уже пару часов почти нет шагов, а пульс держится выше покоя. Встаньте и прокрутите плечами назад, пока закипает чайник.';
     const bodies = [];
-    let answers = ['Кажется, фокус уплывает. Сделайте пять глубоких вдохов.', good];
+    let answers = ['Пульс держится выше покоя. Сделайте пять глубоких вдохов.', good];
     vi.stubGlobal('fetch', async (url, init) => {
       bodies.push(JSON.parse(init.body));
       return modelAnswer(answers.shift());
@@ -156,8 +161,8 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const res = await fn.handler(event(await readSample()), context);
     expect(JSON.parse(res.body).text).toBe(good);
     expect(bodies[1].messages.slice(-2)).toEqual([
-      { role: 'assistant', text: 'Кажется, фокус уплывает. Сделайте пять глубоких вдохов.' },
-      { role: 'user', text: 'Ответ не подходит: дыхательные упражнения запрещены — предложи другое простое действие. Напиши заново по правилам — два коротких предложения, до 130 символов.' },
+      { role: 'assistant', text: 'Пульс держится выше покоя. Сделайте пять глубоких вдохов.' },
+      { role: 'user', text: 'Ответ не подходит: дыхательные упражнения запрещены — предложи другое простое действие. Напиши заново по правилам — ровно два предложения, до 130 символов.' },
     ]);
 
     answers = ['Отдохните.', 'Подышите.'];

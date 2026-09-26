@@ -18,6 +18,8 @@ export interface AdviceHours {
   from: number;
   steps: number[];
   stress: (number | null)[];
+  /** Средний пульс часа; null — замеров не было. Датчик кольца, по которому Лис видит «здесь и сейчас». */
+  pulse: (number | null)[];
 }
 
 /**
@@ -49,11 +51,12 @@ export function adviceDaysFor(state: VueloState, now = new Date()): { days: Advi
     const from = Math.floor(Math.max(wake, 7 * 60) / 60);
     const to = Math.floor(upTo / 60);
     if (to >= from) {
-      const stress = Array.from({ length: to - from + 1 }, (_, i) => {
-        const inHour = todayDay.stress.filter((p) => Math.floor(p.m / 60) === from + i).map((p) => p.v);
-        return inHour.length ? Math.round(inHour.reduce((a, b) => a + b, 0) / inHour.length) : null;
-      });
-      hours = { from, steps: todayDay.stepsByHour.slice(from, to + 1), stress };
+      const byHour = (points: readonly { m: number; v: number }[]) =>
+        Array.from({ length: to - from + 1 }, (_, i) => {
+          const inHour = points.filter((p) => Math.floor(p.m / 60) === from + i).map((p) => p.v);
+          return inHour.length ? Math.round(inHour.reduce((a, b) => a + b, 0) / inHour.length) : null;
+        });
+      hours = { from, steps: todayDay.stepsByHour.slice(from, to + 1), stress: byHour(todayDay.stress), pulse: byHour(todayDay.heart) };
     }
   }
   return { days, hours };

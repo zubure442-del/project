@@ -36,7 +36,7 @@ export interface AdvicePayload {
    */
   days: AdviceDay[];
   /** Шаги и средний стресс сегодня по часам с часа `from` (стресс null — замеров не было); нет данных — null. */
-  hours: { from: number; steps: number[]; stress?: (number | null)[] } | null;
+  hours: { from: number; steps: number[]; stress?: (number | null)[]; pulse?: (number | null)[] } | null;
   /** План Vuelo на сегодня из карточек карусели: человек его видит, на него можно сослаться. */
   plan: {
     workout: { title: string; effort: string; minutes: number; from: string; to: string } | null;

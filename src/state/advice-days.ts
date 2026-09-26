@@ -2,6 +2,7 @@ import { adviceDay, findInsight, glucoseLevel, type AdviceDay, type Insight, typ
 import { profileAge, type DaySnapshot, type VueloState } from '../storage';
 import { findDay, todayKey } from './day';
 import { notMealOf } from './food';
+import { sleepModeFor } from './sleep-mode';
 
 const shiftDate = (date: string, days: number) =>
   new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
@@ -69,6 +70,7 @@ export function insightFor(
     stress: joined(yesterday, today, (d) => d.stress, upTo),
     systolic: joined(yesterday, today, (d) => series(d, 'systolic'), upTo),
     glucose: joined(yesterday, today, (d) => series(d, 'glucose'), upTo),
+    sleepDebtMin: sleepModeFor(state, now)?.debtMin ?? null,
     said,
   });
 }

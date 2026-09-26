@@ -109,7 +109,8 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
   it('нагрузка вчера и вариабельность сегодня: тело восстанавливает мышцы', () => {
     const days = week({ hrv: 40, steps: 2000 }, { 1: { workout: 'strength', load: 120 } });
     const insight = findInsight(input({ pulse: 60, stress: 20, stepsBefore: 5, days }))!;
-    expect([insight.state, insight.cause]).toEqual(['saving', 'repair']);
+    // Владелец 26.09: «низкая вариабельность сегодня — прямое следствие вчерашней физической работы».
+    expect([insight.state, insight.cause]).toEqual(['hrv-low', 'repair']);
     expect(insight.rootCause).toBe(`${CAUSE_DETAIL.repairAfterWorkout}.`);
     // Нагрузку видно и по шагам, без тренировки.
     expect(causesOf(input({ pulse: 60, days: week({ hrv: 40 }, { 1: { steps: 16000 } }) }))).toContain('repair');
@@ -123,8 +124,14 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
   });
 
   it('тавтологий нет: статику не объясняем статикой, движение — движением', () => {
-    for (const s of ['still', 'idle', 'tense-still', 'fade'] as BodyState[]) expect(CAUSES_FOR[s]).not.toContain('long-still');
-    expect(CAUSES_FOR.moving).not.toContain('active-earlier');
+    const allowed = (s: BodyState) => Object.entries(CAUSES_FOR[s]).filter(([, w]) => w).map(([c]) => c);
+    for (const s of ['still', 'idle', 'tense-still', 'fade'] as BodyState[]) expect(allowed(s)).not.toContain('long-still');
+    expect(allowed('moving')).not.toContain('active-earlier');
+    // Одна система не объясняет саму себя.
+    expect(allowed('hrv-low')).not.toContain('hrv-down');
+    expect(allowed('rest-up')).not.toContain('night-pulse');
+    expect(allowed('sugar-swing')).not.toContain('sugar-swings');
+    expect(allowed('steps-behind')).not.toContain('long-still');
   });
 
   it('ротация: повторные запросы подсвечивают другие связи, пока они есть', () => {
@@ -160,6 +167,15 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
     expect(insight.key).toBe(all[all.length - 1]);
   });
 
+  it('про сон — одна сторона: «долг сна» и «ночь была полноценной» не звучат по очереди', () => {
+    // Прошлая ночь хорошая, но позапрошлая с малым глубоким сном — сильнее долг, «хорошая ночь» уходит.
+    const days = week({ sleepMin: 470, deepMin: 92 }, { 1: { deepMin: 20 } });
+    const causes = rootCauses(input({ pulse: 64, days })).map((c) => c.key);
+    expect(causes).toContain('deep-debt');
+    expect(causes).not.toContain('good-night');
+    expect(causes).not.toContain('usual-night');
+  });
+
   it('нет замеров за последний час и нет сна — сказать нечего', () => {
     const empty = { ...input({ pulse: 60 }), heart: [], stress: [], steps: [], days: [row(0, { sleepMin: null, asleep: null, awake: null })] };
     expect(findInsight(empty)).toBeNull();
@@ -180,7 +196,8 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
       const words = text.toLowerCase().split(/[^a-zа-яё]+/);
       expect(AI_ADVICE_FORBIDDEN.some((stem) => words.some((w) => w.startsWith(stem))), text).toBe(false);
     }
-    const pairs = (Object.keys(CAUSES_FOR) as BodyState[]).flatMap((s) => CAUSES_FOR[s].map((c: RootCause) => [s, c] as const));
+    const pairs = (Object.keys(CAUSES_FOR) as BodyState[]).flatMap((s) =>
+      (Object.entries(CAUSES_FOR[s]) as [RootCause, number][]).filter(([, w]) => w).map(([c]) => [s, c] as const));
     const texts = new Set(pairs.flatMap(([s, c]) => (['morning', 'day', 'evening'] as const).flatMap((m) =>
       STATE_TEXT[s][m].flatMap((a) => CAUSE_TEXT[c].map((b) => `${a} ${b}`)))));
     expect(texts.size).toBeGreaterThan(600);

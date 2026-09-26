@@ -194,8 +194,10 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
     const distinct = new Set(keys).size;
     // Пока есть несказанные связки — каждый раз новая; дальше — самая давняя, а не две по кругу.
     expect(keys.slice(0, distinct)).toEqual([...new Set(keys)]);
-    const states = new Set(keys.map((k) => k.split('-')[0]));
-    expect(states.has('steady') && states.size > 1).toBe(false);
+    // «Ровно» спорит только с другими состояниями «сейчас» (пульс выше, стресс, нагрузка…), не с фактами дня.
+    const nowStates = ['idle', 'tense-still', 'saving', 'exertion', 'still', 'moving', 'fade', 'tense', 'calm-now'];
+    const said = keys.map((k) => nowStates.find((s) => k.startsWith(`${s}-`)) ?? (k.startsWith('steady-') ? 'steady' : null)).filter(Boolean);
+    expect(said.includes('steady') && said.some((s) => s !== 'steady')).toBe(false);
   });
 
   it('«Лис смотрит…» вместо старого совета — пока идёт выгрузка или запрос за свежим мнением', () => {

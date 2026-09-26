@@ -10,7 +10,12 @@
  * и колба пустеет. Ниже G_mid — время идёт: первый слой наполняется за N часов, второй за
  * следующие десять (тем быстрее, чем ниже держится сахар), третий — асимптотически, с учётом
  * дневной активности, и до краёв не доходит никогда.
+ *
+ * Подъём во сне (часто перед пробуждением) и на интенсивной нагрузке — не еда (`markNotMeal`,
+ * glucose.ts; решение владельца 26.09): такой замер отсчёт не сбрасывает, и по нему не судим о том,
+ * сколько сахар обычно возвращается после еды.
  */
+import { markNotMeal, type NotMealContext } from './glucose';
 
 /** Значения для нового пользователя, пока своих данных мало. */
 export const FLASK_DEFAULT_G_MID = 5.5;
@@ -63,7 +68,10 @@ const mean = (values: readonly number[]) => values.reduce((a, b) => a + b, 0) / 
  * Личные константы по дням недели. День — массив замеров глюкозы (минуты суток и значения).
  * Дней без замеров в расчёте нет; совсем нет данных — значения по умолчанию.
  */
-export function flaskStats(days: readonly (readonly GlucosePoint[])[]): FlaskStats {
+export function flaskStats(
+  days: readonly (readonly GlucosePoint[])[],
+  notMeal: readonly (NotMealContext | null)[] = [],
+): FlaskStats {
   const withData = days.filter((d) => d.length > 0);
   const dailyMeans = withData.map((d) => mean(d.map((p) => p.v)));
   const dailyLows = withData.map((d) =>
@@ -73,7 +81,19 @@ export function flaskStats(days: readonly (readonly GlucosePoint[])[]): FlaskSta
   const gMinRaw = dailyLows.length ? mean(dailyLows) : FLASK_DEFAULT_G_MIN;
   // Разброс не должен схлопываться: на него делится коэффициент эффективности.
   const gMin = Math.min(gMinRaw, gMid - FLASK_MIN_SPREAD);
-  return { gMid, gMin, nHours: returnHours(withData, gMid) };
+  // Подъёмы во сне и на нагрузке — не еда: из них не судим, как долго сахар возвращается после еды.
+  const meals = days
+    .map((d, i) => mealPoints(d, notMeal[i] ?? null, gMid))
+    .filter((d) => d.length > 0);
+  return { gMid, gMin, nHours: returnHours(meals, gMid) };
+}
+
+/** Замеры без высоких «не от еды» (`markNotMeal`): только они могут значить «поел». */
+export function mealPoints(points: readonly GlucosePoint[], ctx: NotMealContext | null, gMid: number): GlucosePoint[] {
+  if (!ctx) return [...points];
+  return markNotMeal(points, ctx, (v) => v >= gMid, gMid)
+    .filter((p) => p.notMeal === null)
+    .map(({ m, v }) => ({ m, v }));
 }
 
 /**
@@ -124,6 +144,8 @@ export interface FlaskInput {
   stats: FlaskStats;
   /** Активные калории за сегодня; null — без надбавки за активность. */
   calories: number | null;
+  /** Сон и интенсивная нагрузка на той же оси: подъём там — не еда. Нет — любой подъём считается едой. */
+  notMeal?: NotMealContext;
 }
 
 /**
@@ -131,9 +153,12 @@ export interface FlaskInput {
  * Слои: 0–33 «Переработка», 33–66 «Жиросжигание», 66–95 «Аутофагия».
  */
 export function flaskState(input: FlaskInput): FlaskView | null {
-  const points = [...input.points].filter((p) => p.m <= input.nowMinute).sort((a, b) => a.m - b.m);
-  if (!points.length) return null;
   const { stats } = input;
+  const known = input.points.filter((p) => p.m <= input.nowMinute);
+  // Высокий замер во сне или на нагрузке пропускаем целиком: он не сбрасывает отсчёт и не задаёт
+  // «текущий сахар» для скорости наполнения — им остаётся последний замер, который мог быть едой.
+  const points = mealPoints(known, input.notMeal ?? null, stats.gMid).sort((a, b) => a.m - b.m);
+  if (!points.length) return null;
   const last = points[points.length - 1];
 
   // Глюкоза выше среднего — человек поел: отсчёт с нуля, колба пустая.

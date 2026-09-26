@@ -3,12 +3,14 @@ import {
   FOOD_BASELINE_MIN_READINGS,
   flaskState,
   flaskStats,
+  intenseSpans,
   median,
   nightGlucose,
   type FoodInput,
   type GlucosePoint,
+  type NotMealContext,
 } from '../domain';
-import type { DaySnapshot, VueloState } from '../storage';
+import { profileAge, type DaySnapshot, type VueloState } from '../storage';
 import { cycleClock } from './cycle';
 import { findDay } from './day';
 
@@ -26,6 +28,24 @@ const glucoseOf = (day: DaySnapshot | null, shift = 0): GlucosePoint[] =>
     .map((p) => ({ m: p.m + shift, v: p.glucose as number }));
 
 /**
+ * Где подъём глюкозы дня — не еда: отрезки сна и интенсивной нагрузки (`markNotMeal`). Минуты
+ * сдвигаются так же, как замеры глюкозы, чтобы лечь на ось сегодняшнего дня.
+ */
+export function notMealOf(day: DaySnapshot | null, age: number | null, shift = 0): NotMealContext {
+  if (!day) return { sleep: [], exercise: [] };
+  const move = (s: { from: number; to: number }) => ({ from: s.from + shift, to: s.to + shift });
+  return {
+    sleep: day.sleepSegments.map(move),
+    exercise: intenseSpans(day.heart, day.stepsByMinute, age, day.restingHr).map(move),
+  };
+}
+
+const joinContexts = (list: readonly NotMealContext[]): NotMealContext => ({
+  sleep: list.flatMap((c) => c.sleep),
+  exercise: list.flatMap((c) => c.exercise),
+});
+
+/**
  * Данные для «Цикла питания» — по сну текущего цикла бодрствования, как у «Кофейного окна»:
  * без цикла со сном и оценкой сна карточки нет вовсе. Минуты — от полуночи даты начала цикла
  * (после полуночи цикл продолжается, минут больше 1440). Глюкоза необязательна: без неё режим
@@ -36,6 +56,7 @@ export function foodInput(state: VueloState, now = new Date()): FoodInput | null
   if (!clock) return null;
   const { cycle, date, nowMinute, sleepScore } = clock;
   const day = findDay(state.days, date);
+  const age = profileAge(state.profile, now) ?? state.age;
 
   // Личная норма «натощак»: медиана ночной глюкозы за последние семь дней.
   const readings = Array.from({ length: FOOD_BASELINE_DAYS }, (_, i) =>
@@ -47,15 +68,18 @@ export function foodInput(state: VueloState, now = new Date()): FoodInput | null
   const week = Array.from({ length: FOOD_BASELINE_DAYS }, (_, i) =>
     findDay(state.days, shiftDate(date, -(FOOD_BASELINE_DAYS - 1 - i))),
   );
+  // Подъёмы глюкозы во сне и на интенсивной нагрузке — не еда (владелец 26.09): колба их пропускает.
+  const before = findDay(state.days, shiftDate(date, -1));
+  const after = findDay(state.days, shiftDate(date, 1));
   const flask = flaskState({
-    points: [
-      ...glucoseOf(findDay(state.days, shiftDate(date, -1)), -1440),
-      ...glucoseOf(day),
-      ...glucoseOf(findDay(state.days, shiftDate(date, 1)), 1440),
-    ],
+    points: [...glucoseOf(before, -1440), ...glucoseOf(day), ...glucoseOf(after, 1440)],
     nowMinute,
-    stats: flaskStats(week.map((d) => glucoseOf(d))),
+    stats: flaskStats(
+      week.map((d) => glucoseOf(d)),
+      week.map((d) => notMealOf(d, age)),
+    ),
     calories: day?.calories ?? null,
+    notMeal: joinContexts([notMealOf(before, age, -1440), notMealOf(day, age), notMealOf(after, age, 1440)]),
   });
 
   return {

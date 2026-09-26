@@ -1,6 +1,7 @@
 import { adviceDay, glucoseLevel, type AdviceDay } from '../domain';
-import type { VueloState } from '../storage';
+import { profileAge, type VueloState } from '../storage';
 import { findDay, todayKey } from './day';
+import { notMealOf } from './food';
 
 const shiftDate = (date: string, days: number) =>
   new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
@@ -32,7 +33,9 @@ export function adviceDaysFor(state: VueloState, now = new Date()): { days: Advi
   const level = glucoseLevel(
     dated.flatMap(({ day }) => day.summaryPoints.map((p) => p.glucose).filter((v): v is number => v !== null)),
   );
-  const days = dated.map(({ ago, day }) => adviceDay(ago, day, level, ago === 0 ? upTo : null));
+  // Подъёмы во сне и на интенсивной нагрузке — не еда: Лис не примет рассветный подъём за ночной перекус.
+  const age = profileAge(state.profile, now) ?? state.age;
+  const days = dated.map(({ ago, day }) => adviceDay(ago, day, level, ago === 0 ? upTo : null, notMealOf(day, age)));
 
   const todayDay = dated.find((d) => d.ago === 0)?.day ?? null;
   let hours: AdviceHours | null = null;

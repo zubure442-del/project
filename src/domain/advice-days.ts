@@ -1,4 +1,5 @@
 import { coffeeClock } from './coffee';
+import { markNotMeal, type NotMealContext } from './glucose';
 
 /**
  * Числа последних дней для «Мнения Лиса» (решение владельца 26.09): модель получает не фразы
@@ -66,24 +67,38 @@ export const DAY_STRESS_TO = 21 * 60;
 const mean = (values: readonly number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
 const round = (v: number | null | undefined) => (v === null || v === undefined ? null : Math.round(v));
 
-/** Начала подъёмов глюкозы за день (минуты): замер выше порога после замера ниже него. */
-export function glucoseRises(points: readonly MinutePoint[], level: number): number[] {
+/**
+ * Начала подъёмов глюкозы за день (минуты): замер выше порога после замера ниже него.
+ * Подъём во сне и на интенсивной нагрузке — не еда (`markNotMeal`, владелец 26.09): его нет
+ * в списке, и продолжение такого подъёма после пробуждения завтраком тоже не считается.
+ */
+export function glucoseRises(points: readonly MinutePoint[], level: number, notMeal: NotMealContext | null = null): number[] {
   const threshold = level * (1 + MEAL_RISE_SHARE);
-  const sorted = [...points].sort((a, b) => a.m - b.m);
+  const high = (v: number) => v >= threshold;
+  const sorted = notMeal
+    ? markNotMeal(points, notMeal, high, level)
+    : [...points].sort((a, b) => a.m - b.m).map((p) => ({ ...p, notMeal: null }));
   return sorted
     .filter((p, i) => {
-      if (p.v < threshold) return false;
+      if (!high(p.v) || p.notMeal !== null) return false;
       const prev = sorted[i - 1];
-      return !prev || p.m - prev.m > MEAL_RISE_GAP_MIN || prev.v < threshold;
+      return !prev || p.m - prev.m > MEAL_RISE_GAP_MIN || !high(prev.v);
     })
     .map((p) => p.m);
 }
 
 /**
  * Строка таблицы по сводке дня. `upTo` — для сегодняшнего дня: до какой минуты есть данные
- * (стресс и подъёмы считаем только до неё); `glucoseLevel` — обычный уровень глюкозы человека.
+ * (стресс и подъёмы считаем только до неё); `glucoseLevel` — обычный уровень глюкозы человека;
+ * `notMeal` — сон и интенсивная нагрузка дня: подъёмы там приёмами пищи не считаются.
  */
-export function adviceDay(ago: number, day: AdviceDayInput, glucoseLevel: number, upTo: number | null = null): AdviceDay {
+export function adviceDay(
+  ago: number,
+  day: AdviceDayInput,
+  glucoseLevel: number,
+  upTo: number | null = null,
+  notMeal: NotMealContext | null = null,
+): AdviceDay {
   const until = upTo ?? 1440;
   const segments = day.sleepSegments;
   const glucose = day.summaryPoints
@@ -105,6 +120,6 @@ export function adviceDay(ago: number, day: AdviceDayInput, glucoseLevel: number
     calories: day.calories ?? null,
     load: round(day.load?.trimp),
     workout: day.load?.session ?? null,
-    meals: glucoseRises(glucose, glucoseLevel).map(coffeeClock),
+    meals: glucoseRises(glucose, glucoseLevel, notMeal).map(coffeeClock),
   };
 }

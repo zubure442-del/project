@@ -1,5 +1,7 @@
 import { dateKey } from '../codec';
+import { loadIntervals } from './charts';
 import { median } from './food';
+import { HR_ZONE_BOUNDS, SESSION_MIN_ZONE, pulseAtShare } from './training';
 
 /**
  * Защита от случайных выбросов глюкозы ВВЕРХ (решение владельца 26.09, вторая версия).
@@ -92,4 +94,97 @@ export function dropGlucoseSpikes<T extends { ts: number; glucose: number | null
   });
   if (!spikes.size) return [...records];
   return records.map((r) => (r.glucose !== null && spikes.has(r.ts) ? { ...r, glucose: null } : r));
+}
+
+/**
+ * Подъём глюкозы не от еды (решение владельца 26.09): «Цикл питания» (колба) и время еды для
+ * «Мнения Лиса» ищут приёмы пищи по подъёмам глюкозы, но глюкоза поднимается и без еды:
+ * - во сне — часто перед пробуждением: человек спит и не ест;
+ * - на интенсивной нагрузке — вместе с пульсом.
+ * Такой подъём не сбрасывает отсчёт колбы и не считается приёмом пищи. Замер остаётся на графике
+ * и в остальных расчётах: это не выброс кольца, а настоящий уровень.
+ *
+ * Интенсивная нагрузка — пульс не ниже третьей пульсовой зоны: с неё эпизод нагрузки считается
+ * тренировкой (training.ts, `SESSION_MIN_ZONE`). Время подъёма сравнивается со временем нагрузки:
+ * замер между началом эпизода (с запасом на пару замеров одного автозамера) и концом эпизода
+ * плюс один период автозамера — глюкоза от нагрузки не падает мгновенно.
+ */
+export type NotMealReason = 'sleep' | 'exercise';
+
+/**
+ * Пульс и глюкоза одного автозамера приходят не в одну минуту: пару ищем в ±15 минут, как
+ * кислород к записи 0x55 в «Организме» (`OXYGEN_MATCH_MIN`).
+ */
+export const GLUCOSE_EXERCISE_BEFORE_MIN = 15;
+/** После конца нагрузки подъём ещё относим к ней — один период автозамера кольца (30 минут). */
+export const GLUCOSE_EXERCISE_AFTER_MIN = 30;
+
+export interface Span {
+  from: number;
+  to: number;
+}
+
+/**
+ * Интенсивная нагрузка: эпизоды нагрузки (`loadIntervals`) с пульсом от третьей зоны и одиночные
+ * замеры пульса в этой зоне (силовая без шагов может попасть всего в один замер). Минуты — на той
+ * же оси, что пульс и шаги. Возраст неизвестен — зон нет, нагрузку не ищем.
+ */
+export function intenseSpans(
+  heart: readonly { m: number; v: number }[],
+  steps: readonly { m: number; v: number }[],
+  age: number | null,
+  restingHr: number | null,
+): Span[] {
+  if (age === null) return [];
+  const pulse = pulseAtShare(HR_ZONE_BOUNDS[SESSION_MIN_ZONE - 1], age, restingHr);
+  const episodes = loadIntervals([...heart], age, [...steps], restingHr)
+    .filter((e) => e.peak !== null && e.peak >= pulse)
+    .map((e) => ({ from: e.from, to: e.to }));
+  const hot = heart.filter((p) => p.v >= pulse).map((p) => ({ from: p.m, to: p.m }));
+  return [...episodes, ...hot];
+}
+
+/** Где подъём глюкозы — не еда: отрезки сна и интенсивной нагрузки на одной оси минут. */
+export interface NotMealContext {
+  sleep: readonly Span[];
+  exercise: readonly Span[];
+}
+
+/** Почему высокий замер в минуту `m` не еда; null — мог быть едой. */
+export function notMealAt(m: number, ctx: NotMealContext): NotMealReason | null {
+  if (ctx.sleep.some((s) => m >= s.from && m <= s.to)) return 'sleep';
+  if (ctx.exercise.some((e) => m >= e.from - GLUCOSE_EXERCISE_BEFORE_MIN && m <= e.to + GLUCOSE_EXERCISE_AFTER_MIN)) {
+    return 'exercise';
+  }
+  return null;
+}
+
+/**
+ * Помечает высокие замеры, которые не еда. `high` — что считать высоким (у колбы — от личного
+ * среднего G_mid, у времени еды — от порога подъёма). Подъём, начавшийся во сне или на нагрузке,
+ * остаётся «не едой», пока глюкоза держится высокой (соседние замеры не дальше
+ * GLUCOSE_NEIGHBOR_GAP_MIN): проснулся в 6:30, а глюкоза ещё не опустилась — это не завтрак.
+ * Подскочила по ходу ещё на скачок (`glucoseJump`) — это уже еда поверх подъёма.
+ */
+export function markNotMeal<T extends { m: number; v: number }>(
+  points: readonly T[],
+  ctx: NotMealContext,
+  high: (v: number) => boolean,
+  level: number,
+): (T & { notMeal: NotMealReason | null })[] {
+  const sorted = [...points].sort((a, b) => a.m - b.m);
+  let carried: NotMealReason | null = null;
+  return sorted.map((p, i) => {
+    const prev = sorted[i - 1];
+    if (!high(p.v)) {
+      carried = null;
+      return { ...p, notMeal: null };
+    }
+    const own = notMealAt(p.m, ctx);
+    const continues =
+      carried !== null && prev !== undefined && p.m - prev.m <= GLUCOSE_NEIGHBOR_GAP_MIN && p.v - prev.v < glucoseJump(level);
+    const notMeal = own ?? (continues ? carried : null);
+    carried = notMeal;
+    return { ...p, notMeal };
+  });
 }

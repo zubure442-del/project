@@ -58,6 +58,11 @@ export interface AdvicePayload {
    * не повторяет одну и ту же зацепку день за днём (владелец 26.09: «каждый день про шаги — скучно»).
    */
   history?: { ago: number; focus: string[] }[];
+  /**
+   * Мнения от модели за последние 7 дней (сколько дней назад, отрезок, текст): из них посредник берёт
+   * `previously_suggested_actions` — модель не повторяет уже предложенные микро-действия.
+   */
+  past_opinions?: { ago: number; slot: ReportMode; text: string }[];
 }
 
 /** Метки мнения от посредника: что было главным (`late-meal`, `stress-days`…) и какой совет (`dinner`…). */

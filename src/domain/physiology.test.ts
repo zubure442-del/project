@@ -176,6 +176,40 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
     expect(causes).not.toContain('usual-night');
   });
 
+  it('день владельца 26.09: мало шагов, долг сна — кнопка ходит по разным темам, а не «мало движения» трижды', () => {
+    // Его цифры: шаги 2387 (обычно 6642), ккал 145 (399), пульс покоя 57 (60), во сне 63 (66), долг сна 285 мин.
+    const usual = { steps: 6642, calories: 399, restingPulse: 60, nightPulse: 66, sleepMin: 349, deepMin: 108, hrv: 82, quietPulse: 76 };
+    const days = [7, 6, 5, 4, 3, 2, 1, 0].map((ago) =>
+      row(ago, ago === 0
+        ? { ...usual, steps: 2387, calories: 145, restingPulse: 57, nightPulse: 63, sleepMin: 360, deepMin: 105, meals: ['13:00'] }
+        : usual));
+    const base = { ...input({ pulse: 72, stress: 33, days }), sleepDebtMin: 285, mode: 'evening' as const, now: 21 * 60 };
+    const said: string[] = [];
+    const lines: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const insight = findInsight({ ...base, said: { today: [...said].reverse(), week: [...said] } })!;
+      said.push(insight.key);
+      lines.push(`${insight.consequence} ${insight.rootCause}`);
+    }
+    // Шесть нажатий — шесть разных текстов, и «мало движения» (шаги, калории, статика) — не больше двух раз.
+    expect(new Set(lines).size).toBe(6);
+    const move = said.filter((k) => /^(still|steps-|burn-|moving)/.test(k)).length;
+    expect(move).toBeLessThanOrEqual(2);
+    // Хороший пульс во сне и покоя — тоже сказано.
+    expect(said.some((k) => k.startsWith('rest-') || k.endsWith('low-night-pulse'))).toBe(true);
+  });
+
+  it('план Vuelo как причина — изредка: легли позже окна сна, но не два раза за цикл', () => {
+    const days = week({ asleep: '00:40' });
+    const plan = { bedTo: 23 * 60 + 15, dinner: 19 * 60 };
+    const causes = rootCauses({ ...input({ pulse: 64, days }), plan }).map((c) => c.key);
+    expect(causes).toContain('past-bed-window');
+    const first = rankInsights({ ...input({ pulse: 64, days }), plan }).find((p) => p.cause.key === 'past-bed-window')!;
+    const key = `${first.state.key}-past-bed-window`;
+    const again = rankInsights({ ...input({ pulse: 64, days }), plan, said: { today: [key], week: [key] } });
+    expect(again.some((p) => p.cause.key === 'past-bed-window')).toBe(false);
+  });
+
   it('нет замеров за последний час и нет сна — сказать нечего', () => {
     const empty = { ...input({ pulse: 60 }), heart: [], stress: [], steps: [], days: [row(0, { sleepMin: null, asleep: null, awake: null })] };
     expect(findInsight(empty)).toBeNull();

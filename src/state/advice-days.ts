@@ -1,6 +1,6 @@
 import { adviceDay, findInsight, glucoseLevel, type AdviceDay, type Insight, type MinutePoint, type ReportMode } from '../domain';
 import { profileAge, type DaySnapshot, type VueloState } from '../storage';
-import { findDay, todayKey } from './day';
+import { findDay, recommendationsFor, todayKey } from './day';
 import { notMealOf } from './food';
 import { sleepModeFor } from './sleep-mode';
 
@@ -61,6 +61,10 @@ export function insightFor(
   if (upTo === null) return null;
   const today = findDay(state.days, todayKey(now));
   const yesterday = findDay(state.days, shiftDate(todayKey(now), -1));
+  // План Vuelo на сегодня — ориентир и для прошлой ночи: окно сна и ужин от дня к дню почти не меняются.
+  const sleepMode = sleepModeFor(state, now);
+  const meals = recommendationsFor(state, todayKey(now), now)?.food?.meals ?? [];
+  const dinner = meals.length ? Math.max(...meals.map((m) => m.minute)) : null;
   return findInsight({
     mode,
     now: upTo,
@@ -70,7 +74,8 @@ export function insightFor(
     stress: joined(yesterday, today, (d) => d.stress, upTo),
     systolic: joined(yesterday, today, (d) => series(d, 'systolic'), upTo),
     glucose: joined(yesterday, today, (d) => series(d, 'glucose'), upTo),
-    sleepDebtMin: sleepModeFor(state, now)?.debtMin ?? null,
+    sleepDebtMin: sleepMode?.debtMin ?? null,
+    plan: { bedTo: sleepMode?.to ?? null, dinner },
     said,
   });
 }

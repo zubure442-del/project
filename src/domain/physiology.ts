@@ -79,6 +79,8 @@ export type RootCause =
   | 'active-earlier'
   | 'sleep-debt'
   | 'oxygen-ok'
+  | 'past-bed-window'
+  | 'past-dinner-plan'
   | 'usual-night';
 
 export interface PhysioInput {
@@ -97,6 +99,11 @@ export interface PhysioInput {
   glucose?: readonly MinutePoint[];
   /** Долг сна за последние ночи из «Режима сна», минуты; нет — null. */
   sleepDebtMin?: number | null;
+  /**
+   * План Vuelo из карточек: конец окна «Лечь спать» и время ужина (минуты от полуночи, ночь — больше 1440).
+   * Изредка — причина («вчера легли позже окна, которое советует Vuelo»), никогда — призыв.
+   */
+  plan?: { bedTo: number | null; dinner: number | null };
   /** Ключи связок, о которых Лис уже говорил: за этот цикл и за неделю, свежие первыми. */
   said: { today: readonly string[]; week: readonly string[] };
 }
@@ -197,6 +204,8 @@ export const SNACKING_MIN = 4;
 export const HEAVY_LOAD_RATIO = 1.5;
 export const HEAVY_STEPS_RATIO = 1.4;
 export const LIGHT_DAY_RATIO = 0.5;
+/** Отбой или ужин позже плана Vuelo — на столько минут. */
+export const PLAN_LATE_MIN = 30;
 /** Долг сна из «Режима сна» — от стольких минут. */
 export const SLEEP_DEBT_MIN = 60;
 /** Своей нормы нет, пока дней с данными меньше этого. */
@@ -211,7 +220,10 @@ const SAID_TODAY_FACTOR = 0.4;
 // ── Причинно-следственная таблица: какая причина объясняет какое следствие и насколько ─────────
 
 type Weights = Partial<Record<RootCause, number>>;
-const NIGHT_BAD: Weights = { 'short-night': 1, 'deep-debt': 0.9, 'late-bed': 0.8, 'night-pulse': 0.8, 'late-recovery': 0.9, 'night-oxygen': 0.8, 'sleep-debt': 0.9 };
+const NIGHT_BAD: Weights = {
+  'short-night': 1, 'deep-debt': 0.9, 'late-bed': 0.8, 'night-pulse': 0.8, 'late-recovery': 0.9, 'night-oxygen': 0.8, 'sleep-debt': 0.9,
+  'past-bed-window': 0.8,
+};
 const NIGHT_GOOD: Weights = { 'good-night': 0.9, 'long-night': 0.7, 'low-night-pulse': 0.7, 'regular-bed': 0.6, 'early-bed': 0.6, 'oxygen-ok': 0.5 };
 /**
  * «В норме» — тоже факт (владелец 26.09: «почему только пульс?»): в спокойный день Лис проходит по всем
@@ -219,7 +231,7 @@ const NIGHT_GOOD: Weights = { 'good-night': 0.9, 'long-night': 0.7, 'low-night-p
  */
 const OK_CAUSES: Weights = {
   ...NIGHT_GOOD, 'usual-night': 0.5, 'calm-days': 0.7, 'hrv-up': 0.6, 'active-earlier': 0.5,
-  'short-night': 0.4, 'deep-debt': 0.4, 'sleep-debt': 0.4, 'late-bed': 0.4, 'heavy-yesterday': 0.4,
+  'short-night': 0.4, 'deep-debt': 0.4, 'sleep-debt': 0.4, 'late-bed': 0.4, 'past-bed-window': 0.4, 'heavy-yesterday': 0.4,
 };
 
 /**
@@ -233,16 +245,16 @@ export const CAUSES_FOR: Record<BodyState, Weights> = {
   exertion: { ...NIGHT_GOOD, 'hrv-up': 0.7, 'heavy-yesterday': 0.6, 'short-night': 0.6, 'deep-debt': 0.6, 'calm-days': 0.5 },
   still: { ...NIGHT_BAD, 'heavy-yesterday': 0.8, repair: 0.9, 'hrv-down': 0.7 },
   moving: { ...NIGHT_GOOD, 'hrv-up': 0.8, 'calm-days': 0.6, 'light-yesterday': 0.6 },
-  fade: { ...NIGHT_BAD, 'hrv-down': 0.9, 'heavy-yesterday': 0.8, repair: 0.9, 'late-meal': 0.7, snacking: 0.8, 'sugar-swings': 0.8 },
+  fade: { ...NIGHT_BAD, 'hrv-down': 0.9, 'heavy-yesterday': 0.8, repair: 0.9, 'late-meal': 0.7, 'past-dinner-plan': 0.6, snacking: 0.8, 'sugar-swings': 0.8 },
   tense: { ...NIGHT_BAD, 'stress-days': 1, 'hrv-down': 0.9, 'late-meal': 0.6, 'long-still': 0.8, 'sugar-swings': 0.8 },
   'calm-now': { ...NIGHT_GOOD, 'hrv-up': 0.9, 'calm-days': 0.8, 'active-earlier': 0.8 },
   'pressure-up': { ...NIGHT_BAD, 'stress-days': 0.9, 'long-still': 0.7, snacking: 0.5, 'late-meal': 0.5 },
   'pressure-down': { ...NIGHT_GOOD, 'calm-days': 0.6, 'active-earlier': 0.6, 'hrv-up': 0.6 },
-  'hrv-low': { ...NIGHT_BAD, 'heavy-yesterday': 1, repair: 1.1, 'late-meal': 0.9, 'stress-days': 0.8 },
+  'hrv-low': { ...NIGHT_BAD, 'heavy-yesterday': 1, repair: 1.1, 'late-meal': 0.9, 'past-dinner-plan': 0.7, 'stress-days': 0.8 },
   'hrv-high': { ...NIGHT_GOOD, 'calm-days': 0.8, 'light-yesterday': 0.7 },
   // Пульс покоя берётся из той же ночи, что и пульс во сне, — ночным пульсом его не объясняем.
-  'rest-up': { ...NIGHT_BAD, 'night-pulse': 0, 'late-recovery': 0, 'heavy-yesterday': 0.9, 'late-meal': 0.9, 'stress-days': 0.8, 'hrv-down': 0.7 },
-  'rest-down': { ...NIGHT_GOOD, 'low-night-pulse': 0, 'calm-days': 0.7, 'hrv-up': 0.7, 'light-yesterday': 0.6 },
+  'rest-up': { ...NIGHT_BAD, 'night-pulse': 0, 'late-recovery': 0, 'heavy-yesterday': 0.9, 'late-meal': 0.9, 'past-dinner-plan': 0.7, 'stress-days': 0.8, 'hrv-down': 0.7 },
+  'rest-down': { ...NIGHT_GOOD, 'low-night-pulse': 0, 'usual-night': 0.4, 'calm-days': 0.7, 'hrv-up': 0.7, 'light-yesterday': 0.6 },
   'sugar-swing': { snacking: 1, 'late-meal': 0.6, 'short-night': 0.8, 'deep-debt': 0.7, 'sleep-debt': 0.7, 'long-still': 0.7, 'stress-days': 0.6 },
   'sugar-calm': { ...NIGHT_GOOD, 'active-earlier': 0.8, 'calm-days': 0.5 },
   'steps-ahead': { ...NIGHT_GOOD, 'hrv-up': 0.8, 'calm-days': 0.6, 'light-yesterday': 0.6 },
@@ -256,7 +268,7 @@ export const CAUSES_FOR: Record<BodyState, Weights> = {
   // Ровный день после плохой ночи — тоже связка: тело держится, несмотря на недосып (вес ниже).
   steady: {
     ...NIGHT_GOOD, 'hrv-up': 0.8, 'calm-days': 0.8, 'active-earlier': 0.6, 'usual-night': 0.5,
-    'short-night': 0.4, 'deep-debt': 0.4, 'sleep-debt': 0.4, 'late-bed': 0.4, 'heavy-yesterday': 0.4,
+    'short-night': 0.4, 'deep-debt': 0.4, 'sleep-debt': 0.4, 'late-bed': 0.4, 'past-bed-window': 0.4, 'heavy-yesterday': 0.4,
   },
 };
 
@@ -380,6 +392,8 @@ export const CAUSE_TEXT: Record<RootCause, Pair> = {
   'active-earlier': ['Раньше сегодня было много движения', 'Сегодня уже было очень много движения'],
   'sleep-debt': ['За последние ночи накопился долг сна', 'За последние ночи накопился заметный долг сна'],
   'oxygen-ok': ['Ночью кислород в крови держался ровно', 'Ночью кислород в крови держался ровно, как обычно'],
+  'past-bed-window': ['Прошлой ночью вы легли позже окна, которое советует Vuelo', 'Прошлой ночью вы легли намного позже окна, которое советует Vuelo'],
+  'past-dinner-plan': ['Вчера ужин был позже, чем советует Vuelo', 'Вчера ужин был намного позже, чем советует Vuelo'],
   'usual-night': ['Ночь прошла как обычно', 'Ночь прошла как обычно, без отклонений'],
 };
 
@@ -594,7 +608,16 @@ export function rootCauses(input: PhysioInput): Found<RootCause>[] {
     }
   }
   if (d0?.nightSpo2 != null && norms.nightSpo2 !== null && Math.abs(d0.nightSpo2 - norms.nightSpo2) < 1) push('oxygen-ok', 0.4);
-  if (input.sleepDebtMin != null && input.sleepDebtMin >= SLEEP_DEBT_MIN) push('sleep-debt', input.sleepDebtMin / 90);
+  // Долг сна копится неделями и у многих держится постоянно (спит человек шесть часов, а нужно
+  // семь с половиной): не даём ему перебивать всё. Прошлая ночь не короче обычной — он ещё слабее.
+  if (input.sleepDebtMin != null && input.sleepDebtMin >= SLEEP_DEBT_MIN) {
+    const lastNightShort = d0?.sleepMin != null && norms.sleep !== null && d0.sleepMin < norms.sleep - SHORT_NIGHT_MIN / 2;
+    push('sleep-debt', Math.min(lastNightShort ? 0.9 : 0.5, input.sleepDebtMin / 240));
+  }
+  // План Vuelo — изредка как причина: легли позже окна «Режима сна», ужин позже «Цикла питания».
+  const plan = input.plan;
+  if (plan?.bedTo != null && bed !== null && bed - plan.bedTo >= PLAN_LATE_MIN) push('past-bed-window', 0.6 + (bed - plan.bedTo) / 180);
+  if (plan?.dinner != null && lastMeal !== null && lastMeal - plan.dinner >= PLAN_LATE_MIN) push('past-dinner-plan', 0.6 + (lastMeal - plan.dinner) / 180);
   if (d0?.sleepMin != null) push('usual-night', 0.2);
 
   // Последние дни: стресс и вариабельность двух дней против недели до них.
@@ -658,7 +681,8 @@ export function rootCauses(input: PhysioInput): Found<RootCause>[] {
  */
 const SIDES: readonly [readonly RootCause[], readonly RootCause[]][] = [
   [
-    ['short-night', 'deep-debt', 'sleep-debt', 'late-bed', 'night-pulse', 'late-recovery', 'night-oxygen'],
+    // Долга сна (копится неделями) здесь нет: он не спорит с тем, что прошлая ночь была обычной.
+    ['short-night', 'deep-debt', 'late-bed', 'past-bed-window', 'night-pulse', 'late-recovery', 'night-oxygen'],
     ['good-night', 'long-night', 'early-bed', 'regular-bed', 'low-night-pulse', 'oxygen-ok', 'usual-night'],
   ],
   [['stress-days'], ['calm-days']],
@@ -702,6 +726,41 @@ function debugLine(input: PhysioInput): string {
   ].join('; ');
 }
 
+/**
+ * Темы: «мало шагов», «мало калорий» и «давно без движения» — одна мысль (владелец 26.09: «повторяет всё
+ * из раза в раз»). Ротация идёт по темам следствий и причин, а не по ключам.
+ */
+const STATE_TOPIC: Record<BodyState, string> = {
+  still: 'move', moving: 'move', exertion: 'move', 'steps-ahead': 'move', 'steps-behind': 'move', 'burn-ahead': 'move', 'burn-behind': 'move',
+  idle: 'pulse', saving: 'pulse', steady: 'pulse', 'rest-up': 'rest', 'rest-down': 'rest', 'rest-ok': 'rest',
+  'tense-still': 'stress', tense: 'stress', 'calm-now': 'stress', fade: 'stress',
+  'pressure-up': 'pressure', 'pressure-down': 'pressure', 'pressure-ok': 'pressure',
+  'hrv-low': 'hrv', 'hrv-high': 'hrv', 'hrv-ok': 'hrv',
+  'sugar-swing': 'sugar', 'sugar-calm': 'sugar', 'sugar-ok': 'sugar',
+};
+const CAUSE_TOPIC: Record<RootCause, string> = {
+  'short-night': 'sleep', 'long-night': 'sleep', 'deep-debt': 'sleep', 'good-night': 'sleep', 'usual-night': 'sleep', 'sleep-debt': 'debt',
+  'late-bed': 'bedtime', 'early-bed': 'bedtime', 'regular-bed': 'bedtime', 'past-bed-window': 'bedtime',
+  'night-pulse': 'night-heart', 'low-night-pulse': 'night-heart', 'late-recovery': 'night-heart',
+  'night-oxygen': 'oxygen', 'oxygen-ok': 'oxygen',
+  'hrv-down': 'recovery', 'hrv-up': 'recovery', repair: 'recovery',
+  'stress-days': 'stress', 'calm-days': 'stress',
+  'heavy-yesterday': 'load', 'light-yesterday': 'load',
+  'late-meal': 'food', 'recent-meal': 'food', snacking: 'food', 'sugar-swings': 'food', 'past-dinner-plan': 'food',
+  'long-still': 'move', 'active-earlier': 'move',
+};
+/** План Vuelo как причина — не чаще раза за цикл (владелец 26.09: «не часто, но можно»). */
+const PLAN_CAUSES = new Set<RootCause>(['past-bed-window', 'past-dinner-plan']);
+
+/** Ключ связки → следствие и причина (в названиях есть дефисы — ищем известное следствие в начале). */
+const STATES_BY_LENGTH = (Object.keys(STATE_TOPIC) as BodyState[]).sort((a, b) => b.length - a.length);
+function splitKey(key: string): { state: BodyState; cause: RootCause } | null {
+  const state = STATES_BY_LENGTH.find((s) => key.startsWith(`${s}-`));
+  if (!state) return null;
+  const cause = key.slice(state.length + 1) as RootCause;
+  return cause in CAUSE_TOPIC ? { state, cause } : null;
+}
+
 /** Все допустимые связки по весу, самая яркая первой (с учётом того, о чём Лис уже говорил). */
 export function rankInsights(input: PhysioInput): { state: Found<BodyState>; cause: Found<RootCause>; score: number }[] {
   const states = bodyStates(input);
@@ -716,7 +775,8 @@ export function rankInsights(input: PhysioInput): { state: Found<BodyState>; cau
       const key = `${state.key}-${cause.key}`;
       let score = state.strength * cause.strength * w * modeWeight;
       if (input.said.week.includes(key)) score *= SAID_WEEK_FACTOR;
-      if (input.said.today.some((k) => k.endsWith(`-${cause.key}`))) score *= SAID_TODAY_FACTOR;
+      if (input.said.today.some((k) => splitKey(k)?.cause === cause.key)) score *= SAID_TODAY_FACTOR;
+      if (PLAN_CAUSES.has(cause.key) && input.said.today.some((k) => PLAN_CAUSES.has(splitKey(k)?.cause as RootCause))) continue;
       pairs.push({ state, cause, score });
     }
   }
@@ -728,14 +788,20 @@ export function rankInsights(input: PhysioInput): { state: Found<BodyState>; cau
  * тогда остаётся шаблонный совет.
  */
 export function findInsight(input: PhysioInput): Insight | null {
-  // Ротация: сначала связка с причиной, которую в этом цикле ещё не называли; потом любая несказанная;
-  // все сказаны — самая давняя. Иначе при двух причинах за день «долг сна» звучал через раз.
+  // Ротация по темам: сначала связка, где и следствие, и причина из тем, о которых в этом цикле
+  // ещё не говорили; потом — где новая хотя бы одна; потом любая несказанная; потом самая давняя.
   const ranked = rankInsights(input);
   const keyOf = (p: (typeof ranked)[number]) => `${p.state.key}-${p.cause.key}`;
-  const causeSaid = (p: (typeof ranked)[number]) => input.said.today.some((k) => k.endsWith(`-${p.cause.key}`));
+  const said = input.said.today.map(splitKey).filter((x): x is { state: BodyState; cause: RootCause } => x !== null);
+  const saidStates = new Set(said.map((x) => STATE_TOPIC[x.state]));
+  const saidCauses = new Set(said.map((x) => CAUSE_TOPIC[x.cause]));
+  const fresh = (p: (typeof ranked)[number]) => !input.said.today.includes(keyOf(p));
+  const newState = (p: (typeof ranked)[number]) => !saidStates.has(STATE_TOPIC[p.state.key]);
+  const newCause = (p: (typeof ranked)[number]) => !saidCauses.has(CAUSE_TOPIC[p.cause.key]);
   const best =
-    ranked.find((p) => !input.said.today.includes(keyOf(p)) && !causeSaid(p)) ??
-    ranked.find((p) => !input.said.today.includes(keyOf(p))) ??
+    ranked.find((p) => fresh(p) && newState(p) && newCause(p)) ??
+    ranked.find((p) => fresh(p) && (newState(p) || newCause(p))) ??
+    ranked.find(fresh) ??
     [...ranked].sort((a, b) => input.said.today.indexOf(keyOf(b)) - input.said.today.indexOf(keyOf(a)))[0];
   if (!best) return null;
   const strong = (s: number) => (s >= 1.5 ? 1 : 0);

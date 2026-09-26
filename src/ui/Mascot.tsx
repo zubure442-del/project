@@ -1,5 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
-import { Image, StyleSheet, View, type ImageSourcePropType } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { AppState, Image, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -11,41 +11,56 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { Defs, Ellipse, RadialGradient, Stop } from 'react-native-svg';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import { useIsFocused } from 'expo-router';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { colors } from './theme';
 
 /**
- * Скины маскота. Сейчас один — лиса (вырезана из `reference/design/mascot_fox_reference.jpeg`).
- * Новый скин — новая запись здесь: картинка фигуры в полный рост на прозрачном фоне
- * и цвет подсветки платформы. Магазина скинов пока нет.
+ * Скины маскота. Сейчас один — лиса: зацикленное видео (владелец 26.09: «вместо статичной фотки —
+ * чтобы он красиво зацикленно стоял»), собранное скриптом `reference/design/make-mascot-video.py`
+ * из ролика дизайнера: серый фон снят, лиса стоит на фоне приложения, свечение за фигурой
+ * и «дышащая» платформа под лапами уже в кадре. Новый скин — новая запись здесь и новый ролик.
+ * Магазина скинов пока нет.
  */
 export type MascotSkinId = 'fox';
 
 export interface MascotSkin {
-  image: ImageSourcePropType;
-  /** Ширина к высоте картинки фигуры. */
-  aspect: number;
-  /** Где у картинки ступни: доля высоты от верха. На эту линию ставится платформа. */
-  feet: number;
-  /** Цвет свечения платформы и частиц. */
+  /** Видео по кругу, без звука. */
+  video: number;
+  /** Первый кадр видео: виден, пока видео грузится, и при «Уменьшении движения». */
+  poster: ImageSourcePropType;
+  /** Размер кадра, пиксели. */
+  frame: { width: number; height: number };
+  /** Высота фигуры в кадре (от ушей до лап), пиксели: по ней кадр масштабируется. */
+  figure: number;
+  /** Цвет частиц вокруг фигуры. */
   glow: string;
 }
 
 export const MASCOT_SKINS: Record<MascotSkinId, MascotSkin> = {
-  fox: { image: require('../../assets/mascot/fox.png'), aspect: 510 / 820, feet: 0.985, glow: colors.accent },
+  fox: {
+    video: require('../../assets/mascot/fox-idle.mp4'),
+    poster: require('../../assets/mascot/fox-idle.png'),
+    frame: { width: 540, height: 790 },
+    figure: 684,
+    glow: colors.accent,
+  },
 };
 
 export const DEFAULT_MASCOT_SKIN: MascotSkinId = 'fox';
 
-/** Платформа шире фигуры и ниже ступней на половину своей высоты. */
-const PLATFORM_WIDTH = 1.35;
-const PLATFORM_HEIGHT = 0.16;
-
-/** Высота фигуры, при которой рамка маскота (с платформой) занимает не больше `maxWidth`. */
+/** Высота фигуры, при которой кадр маскота занимает не больше `maxWidth`. */
 export const mascotHeightFor = (maxWidth: number, skin: MascotSkinId = DEFAULT_MASCOT_SKIN) =>
-  maxWidth / (MASCOT_SKINS[skin].aspect * PLATFORM_WIDTH);
-/** Свечение платформы «дышит»: один цикл, мс. */
-const GLOW_BREATH_MS = 2600;
+  (maxWidth * MASCOT_SKINS[skin].figure) / MASCOT_SKINS[skin].frame.width;
+
+/**
+ * Края кадра растворяются в фоне экрана: цвет фона в видео и на экране может разойтись на единицу-две
+ * после сжатия, а мягкий край такую разницу прячет. Доли ширины и высоты кадра — там фигуры нет.
+ */
+const FEATHER_X = 0.05;
+const FEATHER_Y = 0.03;
+
 /** Частицы: доли ширины и высоты рамки, задержка и длительность подъёма. Фиксированы — без случайности при отрисовке. */
 const PARTICLES = [
   { x: 0.1, y: 0.82, r: 1.6, delay: 0, duration: 5200 },
@@ -91,11 +106,46 @@ function Particle({ x, y, r, delay, duration, box, color, still }: (typeof PARTI
   );
 }
 
+/** Мягкие края кадра цветом фона экрана. */
+function Feather({ width, height }: { width: number; height: number }) {
+  const x = width * FEATHER_X;
+  const y = height * FEATHER_Y;
+  return (
+    <Svg style={StyleSheet.absoluteFill} width={width} height={height}>
+      <Defs>
+        <LinearGradient id="mascotFeatherL" x1="0" y1="0" x2="1" y2="0">
+          <Stop offset="0" stopColor={colors.bg} stopOpacity={1} />
+          <Stop offset="1" stopColor={colors.bg} stopOpacity={0} />
+        </LinearGradient>
+        <LinearGradient id="mascotFeatherR" x1="1" y1="0" x2="0" y2="0">
+          <Stop offset="0" stopColor={colors.bg} stopOpacity={1} />
+          <Stop offset="1" stopColor={colors.bg} stopOpacity={0} />
+        </LinearGradient>
+        <LinearGradient id="mascotFeatherT" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={colors.bg} stopOpacity={1} />
+          <Stop offset="1" stopColor={colors.bg} stopOpacity={0} />
+        </LinearGradient>
+        <LinearGradient id="mascotFeatherB" x1="0" y1="1" x2="0" y2="0">
+          <Stop offset="0" stopColor={colors.bg} stopOpacity={1} />
+          <Stop offset="1" stopColor={colors.bg} stopOpacity={0} />
+        </LinearGradient>
+      </Defs>
+      <Rect x={0} y={0} width={x} height={height} fill="url(#mascotFeatherL)" />
+      <Rect x={width - x} y={0} width={x} height={height} fill="url(#mascotFeatherR)" />
+      <Rect x={0} y={0} width={width} height={y} fill="url(#mascotFeatherT)" />
+      <Rect x={0} y={height - y} width={width} height={y} fill="url(#mascotFeatherB)" />
+    </Svg>
+  );
+}
+
 /**
- * Маскот «Сегодня»: фигура в полный рост лицом к пользователю, как коллекционная фигурка,
- * на светящейся платформе, с лёгкими частицами вокруг. Число дня рисуется рядом, не поверх.
+ * Маскот «Сегодня»: фигура в полный рост лицом к пользователю, как коллекционная фигурка, — живая:
+ * зацикленное видео, где она дышит, моргает и помахивает хвостом, на светящейся платформе,
+ * с лёгкими частицами вокруг. Число дня рисуется рядом, не поверх.
  * `skin` — какой скин надет; `overlay` — слой поверх фигуры в той же рамке (под предметы скинов).
- * При системном «Уменьшении движения» свечение и частицы стоят на месте.
+ * Видео без звука и не трогает музыку в других приложениях, не держит экран включённым, стоит на паузе,
+ * когда вкладка не видна или приложение свёрнуто. При системном «Уменьшении движения» — первый кадр
+ * и неподвижные частицы.
  */
 export function Mascot({
   height,
@@ -109,84 +159,62 @@ export function Mascot({
 }) {
   const look = MASCOT_SKINS[skin];
   const still = useReducedMotion();
-  const figure = { width: height * look.aspect, height };
-  const platform = { width: figure.width * PLATFORM_WIDTH, height: height * PLATFORM_HEIGHT };
-  const box = { width: platform.width, height: height * look.feet + platform.height / 2 };
+  const focused = useIsFocused();
+  const [active, setActive] = useState(AppState.currentState === 'active');
+  const [shown, setShown] = useState(false);
+  const scale = height / look.figure;
+  const box = { width: look.frame.width * scale, height: look.frame.height * scale };
 
-  const breath = useSharedValue(1);
+  const player = useVideoPlayer(look.video, (p) => {
+    p.loop = true;
+    p.muted = true;
+    p.audioMixingMode = 'mixWithOthers';
+    p.keepScreenOnWhilePlaying = false;
+    p.showNowPlayingNotification = false;
+    p.staysActiveInBackground = false;
+  });
+
   useEffect(() => {
-    if (still) {
-      cancelAnimation(breath);
-      breath.value = 1;
-      return;
+    const sub = AppState.addEventListener('change', (next) => setActive(next === 'active'));
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!still && focused && active) {
+      player.play();
+    } else {
+      // При «Уменьшении движения» видео не показываем вовсе: виден первый кадр-картинка.
+      player.pause();
     }
-    breath.value = withRepeat(withTiming(0.7, { duration: GLOW_BREATH_MS, easing: Easing.inOut(Easing.sin) }), -1, true);
-  }, [breath, still]);
-  const glowStyle = useAnimatedStyle(() => ({ opacity: breath.value }));
+  }, [player, still, focused, active]);
 
   return (
     <View style={[styles.root, box]} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      {/* Мягкое свечение за фигурой. */}
-      <Svg style={StyleSheet.absoluteFill} width={box.width} height={box.height}>
-        <Defs>
-          <RadialGradient id="mascotBack" cx="50%" cy="55%" rx="50%" ry="45%">
-            <Stop offset="0" stopColor={look.glow} stopOpacity={0.14} />
-            <Stop offset="1" stopColor={look.glow} stopOpacity={0} />
-          </RadialGradient>
-        </Defs>
-        <Ellipse cx={box.width / 2} cy={box.height * 0.55} rx={box.width / 2} ry={box.height * 0.45} fill="url(#mascotBack)" />
-      </Svg>
-
-      {/* Платформа-подсветка под ногами. */}
-      <Animated.View style={[styles.platform, { width: platform.width, height: platform.height }, glowStyle]}>
-        <Svg width={platform.width} height={platform.height}>
-          <Defs>
-            <RadialGradient id="mascotPlatform" cx="50%" cy="50%" rx="50%" ry="50%">
-              <Stop offset="0" stopColor={look.glow} stopOpacity={0.75} />
-              <Stop offset="0.45" stopColor={look.glow} stopOpacity={0.28} />
-              <Stop offset="1" stopColor={look.glow} stopOpacity={0} />
-            </RadialGradient>
-          </Defs>
-          <Ellipse cx={platform.width / 2} cy={platform.height / 2} rx={platform.width / 2} ry={platform.height / 2} fill="url(#mascotPlatform)" />
-          <Ellipse
-            cx={platform.width / 2}
-            cy={platform.height / 2}
-            rx={platform.width * 0.36}
-            ry={platform.height * 0.3}
-            stroke={look.glow}
-            strokeOpacity={0.55}
-            strokeWidth={1.2}
-            fill="none"
-          />
-          <Ellipse
-            cx={platform.width / 2}
-            cy={platform.height / 2}
-            rx={platform.width * 0.46}
-            ry={platform.height * 0.4}
-            stroke={look.glow}
-            strokeOpacity={0.25}
-            strokeWidth={1}
-            fill="none"
-          />
-        </Svg>
-      </Animated.View>
+      <Image source={look.poster} style={StyleSheet.absoluteFill} resizeMode="stretch" />
+      {still ? null : (
+        <VideoView
+          player={player}
+          style={[StyleSheet.absoluteFill, !shown && styles.hidden]}
+          contentFit="fill"
+          nativeControls={false}
+          allowsPictureInPicture={false}
+          allowsVideoFrameAnalysis={false}
+          onFirstFrameRender={() => setShown(true)}
+        />
+      )}
+      <Feather width={box.width} height={box.height} />
 
       {PARTICLES.map((p, i) => (
         <Particle key={i} {...p} box={box} color={look.glow} still={still} />
       ))}
 
-      <View style={[styles.figure, figure]}>
-        <Image source={look.image} style={styles.image} resizeMode="contain" />
-        {overlay ? <View style={StyleSheet.absoluteFill}>{overlay}</View> : null}
-      </View>
+      {overlay ? <View style={StyleSheet.absoluteFill}>{overlay}</View> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { alignItems: 'center' },
-  platform: { position: 'absolute', bottom: 0 },
-  figure: { position: 'absolute', top: 0 },
-  image: { width: '100%', height: '100%' },
+  root: { overflow: 'hidden' },
+  hidden: { opacity: 0 },
   particle: { position: 'absolute' },
 });

@@ -2,13 +2,19 @@ import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { DAY_PROGRESS_LABEL, formatCount, type RelayView } from '../domain';
-import { Mascot, mascotHeightFor } from './Mascot';
+import { MASCOT_SKINS, Mascot, mascotHeightFor } from './Mascot';
 import { RELAY_TITLE, RelaySheet, StreakBadge } from './Relay';
 import { colors, radius, spacing } from './theme';
 
-/** Высота фигуры: не больше этого и не шире доли экрана, чтобы рядом поместилось число. */
-const MASCOT_MAX_HEIGHT = 230;
+/**
+ * Кадр маскота (с полями и платформой) не выше этого, pt: столько занимала прежняя картинка, и блок
+ * «AI Ассистент» под ним помещается на «Сегодня» без прокрутки. И не шире доли экрана, чтобы рядом
+ * поместилось число.
+ */
+const MASCOT_MAX_BOX_HEIGHT = 245;
 const MASCOT_WIDTH_SHARE = 0.55;
+const { frame, figure } = MASCOT_SKINS.fox;
+const MASCOT_MAX_HEIGHT = (MASCOT_MAX_BOX_HEIGHT * figure) / frame.height;
 
 /**
  * Блок маскота на «Сегодня»: фигура и прогресс дня рядом (не поверх). Сравнения с неделей

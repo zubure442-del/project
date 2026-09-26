@@ -27,6 +27,13 @@ export interface AdviceDay {
   hrv: number | null;
   restingPulse: number | null;
   spo2: number | null;
+  /** Средний кислород внутри сна дня: просадка ночью объясняет разбитость днём. */
+  nightSpo2: number | null;
+  /** Давление по оценке кольца — среднее за день (до выгрузки у сегодняшнего). */
+  systolic: number | null;
+  diastolic: number | null;
+  /** Размах сахара за день (максимум − минимум, ммоль/л, до 0.1): насколько он «скакал». От трёх замеров. */
+  glucoseRange: number | null;
   /** Средний стресс днём (9:00–21:00), шкала 0–100. */
   stress: number | null;
   /** Шаги после шумоподавления — как на экране — и норма дня. */
@@ -53,7 +60,7 @@ export interface AdviceDayInput {
   stepNorm?: { value: number };
   calories?: number | null;
   load?: { trimp: number; session: 'cardio' | 'strength' | null } | null;
-  summaryPoints: readonly { m: number; glucose: number | null }[];
+  summaryPoints: readonly { m: number; glucose: number | null; systolic?: number | null; diastolic?: number | null }[];
 }
 
 /** Подъём глюкозы — замер выше обычного уровня на столько (при уровне 6.0 — от 6.9). */
@@ -104,6 +111,11 @@ export function adviceDay(
   const glucose = day.summaryPoints
     .filter((p) => p.glucose !== null && p.m <= until)
     .map((p) => ({ m: p.m, v: p.glucose as number }));
+  const pressure = day.summaryPoints.filter((p) => p.m <= until);
+  const values = (pick: (p: (typeof pressure)[number]) => number | null | undefined) =>
+    pressure.map(pick).filter((v): v is number => typeof v === 'number');
+  const inSleep = (m: number) => segments.some((s) => m >= s.from && m <= s.to);
+  const g = glucose.map((p) => p.v);
   return {
     ago,
     asleep: segments.length ? coffeeClock(Math.min(...segments.map((s) => s.from))) : null,
@@ -114,6 +126,10 @@ export function adviceDay(
     hrv: round(day.estimates.hrv),
     restingPulse: round(day.restingHr),
     spo2: round(mean(day.spo2.map((p) => p.v))),
+    nightSpo2: round(mean(day.spo2.filter((p) => inSleep(p.m)).map((p) => p.v))),
+    systolic: round(mean(values((p) => p.systolic))),
+    diastolic: round(mean(values((p) => p.diastolic))),
+    glucoseRange: g.length >= 3 ? Math.round((Math.max(...g) - Math.min(...g)) * 10) / 10 : null,
     stress: round(mean(day.stress.filter((p) => p.m >= DAY_STRESS_FROM && p.m <= Math.min(DAY_STRESS_TO, until)).map((p) => p.v))),
     steps: day.steps,
     stepNorm: day.stepNorm?.value ?? null,

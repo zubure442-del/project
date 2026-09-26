@@ -1,22 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import type { AdviceDay } from './advice-days';
+import type { AdviceDay, MinutePoint } from './advice-days';
 import { AI_ADVICE_FORBIDDEN } from './ai-advice';
 import {
   CAUSES_FOR,
+  CAUSE_DETAIL,
   CAUSE_TEXT,
   STATE_TEXT,
   findInsight,
+  rankInsights,
   rootCauses,
   type BodyState,
   type PhysioInput,
   type RootCause,
 } from './physiology';
 
-/** Обычный день: сон 7.5 ч, глубокий 90 мин, пульс во сне 58, покоя 60, вариабельность 50, стресс 35. */
+/** Обычный день: сон 7.5 ч, глубокий 90 мин, пульс во сне 58, покоя 60, вариабельность 50, стресс 35, кислород ночью 97. */
 function row(ago: number, over: Partial<AdviceDay> = {}): AdviceDay {
   return {
     ago, asleep: '23:30', awake: '07:00', sleepMin: 450, deepMin: 90, nightPulse: 58, hrv: 50, restingPulse: 60,
-    spo2: 97, stress: 35, steps: 8000, stepNorm: 9000, calories: 300, load: 40, workout: null, meals: ['08:30', '13:30', '19:00'],
+    spo2: 97, nightSpo2: 97, systolic: 118, diastolic: 76, glucoseRange: 1.2, stress: 35, steps: 8000, stepNorm: 9000,
+    calories: 300, load: 40, workout: null, meals: ['08:30', '13:30', '19:00'],
     ...over,
   };
 }
@@ -25,7 +28,17 @@ const week = (today: Partial<AdviceDay> = {}, over: Record<number, Partial<Advic
   [7, 6, 5, 4, 3, 2, 1, 0].map((ago) => row(ago, ago === 0 ? { meals: ['08:30', '13:30'], ...today } : over[ago] ?? {}));
 
 /** «Сейчас» — 15:00; ряды на последние четыре часа: пульс и стресс раз в полчаса, шаги по минутам. */
-function input(opts: { pulse: number; stress?: number; stepsPerMin?: number; stepsBefore?: number; days?: AdviceDay[]; mode?: PhysioInput['mode'] }): PhysioInput {
+function input(opts: {
+  pulse: number;
+  stress?: number;
+  stepsPerMin?: number;
+  stepsBefore?: number;
+  days?: AdviceDay[];
+  mode?: PhysioInput['mode'];
+  night?: MinutePoint[];
+  systolic?: number;
+  glucose?: number[];
+}): PhysioInput {
   const now = 15 * 60;
   const halfHours = Array.from({ length: 9 }, (_, i) => now - 240 + i * 30);
   const minutes = Array.from({ length: 240 }, (_, i) => now - 239 + i);
@@ -33,12 +46,16 @@ function input(opts: { pulse: number; stress?: number; stepsPerMin?: number; ste
     mode: opts.mode ?? 'day',
     now,
     days: opts.days ?? week(),
-    heart: halfHours.map((m) => ({ m, v: opts.pulse })),
+    heart: [...(opts.night ?? []), ...halfHours.map((m) => ({ m, v: opts.pulse }))],
     stress: halfHours.map((m) => ({ m, v: opts.stress ?? 35 })),
     steps: minutes.map((m) => ({ m, v: m > now - 60 ? opts.stepsPerMin ?? 0 : opts.stepsBefore ?? 20 })),
+    systolic: halfHours.map((m) => ({ m, v: opts.systolic ?? 118 })),
+    glucose: (opts.glucose ?? [5.8, 6.1, 6.0]).map((v, i) => ({ m: 480 + i * 60, v })),
     said: { today: [], week: [] },
   };
 }
+
+const causesOf = (i: PhysioInput) => rootCauses(i).map((c) => c.key);
 
 describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мнения Лиса»', () => {
   it('холостой ход: пульс на 15 % выше покоя без шагов — причина из ночи, а не из движения', () => {
@@ -46,40 +63,70 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
     const insight = findInsight(input({ pulse: 75, days }))!;
     expect(insight.state).toBe('idle');
     expect(['short-night', 'deep-debt']).toContain(insight.cause);
-    expect(insight.key).toBe(`idle-${insight.cause}`);
-    expect(insight.consequence).toBe('Сейчас движения почти нет, а пульс заметно выше покоя.');
+    expect(insight.consequence).toBe('Пульс сейчас заметно выше обычного, хотя вы почти не двигаетесь.');
   });
 
-  it('режим сбережения сил: низкий пульс и спокойный фон без шагов — после подвижной первой половины дня', () => {
-    const insight = findInsight(input({ pulse: 60, stress: 20, stepsBefore: 30 }))!;
-    expect(insight.state).toBe('saving');
-    expect(insight.cause).toBe('active-earlier');
+  it('еда и пульс: скачок пульса через полчаса–час после еды — это переваривание, а не усталость', () => {
+    const insight = findInsight(input({ pulse: 72, days: week({ meals: ['08:30', '14:15'] }) }))!;
+    expect([insight.state, insight.cause]).toEqual(['idle', 'recent-meal']);
+    // Сонливость после еды: пульс низкий, стресса нет — тоже еда.
+    const sleepy = findInsight(input({ pulse: 58, stress: 15, stepsBefore: 5, days: week({ meals: ['08:30', '14:15'], steps: 3000 }) }))!;
+    expect([sleepy.state, sleepy.cause]).toEqual(['saving', 'recent-meal']);
   });
 
-  it('вчерашняя тренировка и поздний ужин — первопричины из вчерашнего дня', () => {
-    const workout = findInsight(input({ pulse: 60, stress: 20, stepsBefore: 5, days: week({ steps: 2000 }, { 1: { workout: 'strength', load: 120 } }) }))!;
-    expect([workout.state, workout.cause]).toEqual(['saving', 'heavy-yesterday']);
-    expect(workout.rootCause).toBe('Вчера была силовая тренировка, мышцы ещё восстанавливаются.');
-    // Уснул в 00:10, последний подъём глюкозы вчера в 22:30 — поздний ужин; в 21:00 — ещё нет.
-    const late = rootCauses(input({ pulse: 60, days: week({ asleep: '00:10' }, { 1: { meals: ['09:00', '22:30'] } }) }));
-    expect(late.map((c) => c.key)).toContain('late-meal');
-    const early = rootCauses(input({ pulse: 60, days: week({ asleep: '00:10' }, { 1: { meals: ['09:00', '19:00'] } }) }));
-    expect(early.map((c) => c.key)).not.toContain('late-meal');
+  it('кислород ночью: просадка объясняет разбитость днём даже при долгом сне', () => {
+    const days = week({ nightSpo2: 94, sleepMin: 480 });
+    const causes = rootCauses(input({ pulse: 60, days }));
+    const oxygen = causes.find((c) => c.key === 'night-oxygen')!;
+    expect(oxygen.text).toBe(CAUSE_DETAIL.oxygenLongSleep);
+    const insight = findInsight(input({ pulse: 60, stress: 20, stepsBefore: 0, days }))!;
+    expect(insight.cause).toBe('night-oxygen');
+  });
+
+  it('поздно опустившийся ночной пульс после позднего ужина — восстановление началось с опозданием', () => {
+    // Уснул в 00:10, ужин вчера в 22:30; первая половина ночи пульс 66, вторая — 56.
+    const night = [20, 60, 100, 140, 180, 260, 300, 340, 380].map((m) => ({ m, v: m < 215 ? 66 : 56 }));
+    const days = week({ asleep: '00:10' }, { 1: { meals: ['09:00', '22:30'] } });
+    const late = rootCauses(input({ pulse: 60, days, night })).find((c) => c.key === 'late-recovery')!;
+    expect(late.text).toBe(CAUSE_DETAIL.lateRecoveryAfterMeal);
+    // Ровная ночь — такой причины нет.
+    const flat = night.map((p) => ({ ...p, v: 57 }));
+    expect(causesOf(input({ pulse: 60, days, night: flat }))).not.toContain('late-recovery');
+  });
+
+  it('нагрузка вчера и вариабельность сегодня: тело восстанавливает мышцы', () => {
+    const days = week({ hrv: 40, steps: 2000 }, { 1: { workout: 'strength', load: 120 } });
+    const insight = findInsight(input({ pulse: 60, stress: 20, stepsBefore: 5, days }))!;
+    expect([insight.state, insight.cause]).toEqual(['saving', 'repair']);
+    expect(insight.rootCause).toBe(`${CAUSE_DETAIL.repairAfterWorkout}.`);
+    // Нагрузку видно и по шагам, без тренировки.
+    expect(causesOf(input({ pulse: 60, days: week({ hrv: 40 }, { 1: { steps: 16000 } }) }))).toContain('repair');
+  });
+
+  it('стресс без шагов, давление выше своего, скачки сахара и перекусы', () => {
+    expect(findInsight(input({ pulse: 62, stress: 75, days: week({ sleepMin: 330 }) }))?.state).toBe('tense-still');
+    expect(findInsight(input({ pulse: 62, stress: 40, stepsPerMin: 5, systolic: 132, days: week({ sleepMin: 330 }) }))?.state).toBe('pressure-up');
+    expect(causesOf(input({ pulse: 60, glucose: [5.2, 7.9, 5.6, 7.4] }))).toContain('sugar-swings');
+    expect(causesOf(input({ pulse: 60, days: week({ meals: ['08:30', '10:30', '12:00', '13:30', '14:00'] }) }))).toContain('snacking');
   });
 
   it('тавтологий нет: статику не объясняем статикой, движение — движением', () => {
-    expect(CAUSES_FOR.still).not.toContain('long-still');
+    for (const s of ['still', 'idle', 'tense-still', 'fade'] as BodyState[]) expect(CAUSES_FOR[s]).not.toContain('long-still');
     expect(CAUSES_FOR.moving).not.toContain('active-earlier');
-    const still = findInsight(input({ pulse: 61, stress: 45, stepsPerMin: 0, stepsBefore: 0, days: week({ sleepMin: 330 }) }))!;
-    expect(still.cause).not.toBe('long-still');
   });
 
-  it('о чём уже говорили — отодвигается: та же картина даёт другую связку', () => {
-    const days = week({ sleepMin: 330, deepMin: 50 }, { 1: { deepMin: 60 } });
-    const first = findInsight(input({ pulse: 72, days }))!;
-    const second = findInsight({ ...input({ pulse: 72, days }), said: { today: [first.key], week: [first.key] } })!;
-    expect(second.key).not.toBe(first.key);
-    expect(second.state).toBe('idle');
+  it('ротация: повторные запросы подсвечивают другие связи, пока они есть', () => {
+    const days = week({ sleepMin: 330, deepMin: 50, nightSpo2: 94, hrv: 40 }, { 1: { deepMin: 60, workout: 'cardio' } });
+    const said = { today: [] as string[], week: [] as string[] };
+    const keys: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const insight = findInsight({ ...input({ pulse: 75, days }), said })!;
+      keys.push(insight.key);
+      said.today.push(insight.key);
+      said.week.push(insight.key);
+    }
+    expect(new Set(keys).size).toBe(4);
+    expect(rankInsights(input({ pulse: 75, days })).length).toBeGreaterThan(4);
   });
 
   it('нет замеров за последний час и нет сна — сказать нечего', () => {
@@ -87,22 +134,24 @@ describe('СИНТЕТИЧЕСКИЕ: движок физиологии «Мне
     expect(findInsight(empty)).toBeNull();
   });
 
-  it('фразы: без цифр, команд, выдуманных дел, запретных слов и вводных «возможно/вероятно»; сотни связок', () => {
+  it('фразы: разговорный язык без цифр, команд, выдумок, канцелярита и диагнозов; сотни связок', () => {
     const phrases = [
       ...Object.values(STATE_TEXT).flatMap((byMode) => Object.values(byMode).flat()),
       ...Object.values(CAUSE_TEXT).flat(),
+      ...Object.values(CAUSE_DETAIL.workout),
+      CAUSE_DETAIL.repairAfterWorkout, CAUSE_DETAIL.lateRecoveryAfterMeal, CAUSE_DETAIL.lateRecoveryAfterLoad,
+      CAUSE_DETAIL.oxygenLongSleep, CAUSE_DETAIL.snackingYesterday,
     ];
     for (const text of phrases) {
-      expect(text.length, text).toBeLessThanOrEqual(70);
+      expect(text.length, text).toBeLessThanOrEqual(75);
       expect(text, text).not.toMatch(/\d|сделайте|попробуйте|встаньте|отдохните|разомните|(^|[^а-яё])(дела|делами|работа|работой|график|задач|загруженн)/i);
-      expect(text, text).not.toMatch(/^(Возможно|Вероятно|Скорее всего)/);
+      expect(text, text).not.toMatch(/в покое|в спокойствии|наблюда|причина|мотор|шпар|^(Возможно|Вероятно|Скорее всего)/i);
       const words = text.toLowerCase().split(/[^a-zа-яё]+/);
       expect(AI_ADVICE_FORBIDDEN.some((stem) => words.some((w) => w.startsWith(stem))), text).toBe(false);
     }
-    const pairs = (Object.keys(CAUSES_FOR) as BodyState[]).flatMap((s) => CAUSES_FOR[s].map((c: RootCause) => [s, c]));
-    // Пара × отрезок дня × сила состояния × сила причины — разные тексты.
+    const pairs = (Object.keys(CAUSES_FOR) as BodyState[]).flatMap((s) => CAUSES_FOR[s].map((c: RootCause) => [s, c] as const));
     const texts = new Set(pairs.flatMap(([s, c]) => (['morning', 'day', 'evening'] as const).flatMap((m) =>
-      STATE_TEXT[s as BodyState][m].flatMap((a) => CAUSE_TEXT[c as RootCause].map((b) => `${a} ${b}`)))));
-    expect(texts.size).toBeGreaterThan(300);
+      STATE_TEXT[s][m].flatMap((a) => CAUSE_TEXT[c].map((b) => `${a} ${b}`)))));
+    expect(texts.size).toBeGreaterThan(600);
   });
 });

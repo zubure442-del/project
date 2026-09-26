@@ -191,7 +191,7 @@ export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: 
 export type AiAdviceResult = { text: string; server?: number } | { error: string };
 
 /** Версия кода облачной функции, с которой приложение работает (запрос — вывод движка физиологии). */
-export const AI_ADVICE_SERVER_VERSION = 9;
+export const AI_ADVICE_SERVER_VERSION = 10;
 
 /** Запрос к посреднику. Любая неудача — `error` с причиной для отладочного лога, без исключений. */
 export async function fetchAiAdvice(

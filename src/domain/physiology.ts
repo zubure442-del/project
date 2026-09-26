@@ -2,36 +2,42 @@ import type { AdviceDay, MinutePoint } from './advice-days';
 import type { ReportMode } from './report';
 
 /**
- * Движок физиологии для «Мнения Лиса» (владелец 26.09, новая архитектура): модель не умеет считать
- * ряды — выходили тавтологии («мало двигались, потому что не ходили») и выдумки («загруженность
- * делами»). Теперь физиологию считает код, а YandexGPT только пересказывает готовый вывод голосом Лиса.
+ * Движок физиологии для «Мнения Лиса» (владелец 26.09): модель не умеет считать ряды — выходили
+ * тавтологии и выдумки. Физиологию считает код, а YandexGPT только пересказывает готовый вывод.
  *
- * Движок сопоставляет четыре временных слоя с личными нормами (свои средние за неделю):
- * - глубокий горизонт (48–72 ч): долг глубокого сна за две ночи, тренд вариабельности к недельной норме,
- *   фон напряжения два дня подряд;
- * - вчера и ночь (12–24 ч): длительность и время отхода ко сну, пульс во сне, нагрузка и тренировка
- *   вчера, поздний ужин перед сном;
- * - средний горизонт (2–4 ч): шаги по часам — затяжная статика или много движения, недавний приём пищи;
- * - оперативный срез (последние 60–90 мин): пульс против пульса покоя, шаги, фон напряжения.
- * Из оперативного среза получается состояние тела сейчас (`consequence`), из остальных слоёв —
- * кандидаты в первопричину (`root_cause`). Каждая пара «состояние × причина» получает вес (сила
- * состояния × сила причины), пары одной природы (статика ← статика) запрещены, о чём Лис уже говорил —
- * отодвигается. Побеждает одна доминантная связка; её фразы зависят от отрезка дня и силы отклонения.
- * Цифр в фразах нет. Значений глюкозы нет — только то, что недавно был приём пищи.
+ * Движок видит все показатели кольца и сравнивает их со своими нормами (средние за неделю):
+ * - глубокий горизонт (48–72 ч): долг глубокого сна за две ночи, тренд вариабельности, стресс два дня;
+ * - ночь (12–24 ч): длительность и время отхода ко сну, пульс во сне и когда он опустился
+ *   (поздно — восстановление началось с опозданием), кислород ночью;
+ * - вчерашний день: нагрузка по пульсу (TRIMP), тренировка, шаги, поздний ужин, перекусы;
+ * - средний горизонт (2–4 ч): статика или много движения, недавняя еда, скачки сахара, давление;
+ * - оперативный срез (последние 60–90 мин): пульс против покоя, шаги, стресс.
+ * Из оперативного среза и давления получается состояние сейчас (`consequence`), из остальных слоёв —
+ * кандидаты в первопричину (`root_cause`). Сочетания разных систем дают свои причины: низкая
+ * вариабельность после тяжёлого вчера — тело восстанавливает мышцы; поздно опустившийся ночной пульс
+ * после позднего ужина или вечерней нагрузки. Каждая пара «состояние × причина» получает вес (сила
+ * состояния × сила причины), пары одной природы запрещены, о чём Лис уже говорил — отодвигается:
+ * повторный запрос подсвечивает другую связь. Фразы — простым разговорным языком, без цифр
+ * и диагнозов. Значения давления и сахара не называются — только «выше обычного», «скачет».
  */
 
-export type BodyState = 'idle' | 'saving' | 'still' | 'moving' | 'fade' | 'tense' | 'steady';
+export type BodyState = 'idle' | 'tense-still' | 'saving' | 'still' | 'moving' | 'fade' | 'tense' | 'pressure-up' | 'steady';
 export type RootCause =
   | 'deep-debt'
   | 'short-night'
   | 'night-pulse'
+  | 'late-recovery'
+  | 'night-oxygen'
   | 'hrv-down'
   | 'hrv-up'
+  | 'repair'
   | 'stress-days'
   | 'late-bed'
   | 'late-meal'
   | 'heavy-yesterday'
   | 'recent-meal'
+  | 'snacking'
+  | 'sugar-swings'
   | 'long-still'
   | 'active-earlier'
   | 'good-night'
@@ -48,6 +54,9 @@ export interface PhysioInput {
   heart: readonly MinutePoint[];
   steps: readonly MinutePoint[];
   stress: readonly MinutePoint[];
+  /** Верхнее давление и сахар по оценке кольца (записи 0x55 без выбросов); у старых вызовов может не быть. */
+  systolic?: readonly MinutePoint[];
+  glucose?: readonly MinutePoint[];
   /** Ключи связок, о которых Лис уже говорил: за этот цикл и за неделю. */
   said: { today: readonly string[]; week: readonly string[] };
 }
@@ -57,7 +66,7 @@ export interface Insight {
   key: string;
   state: BodyState;
   cause: RootCause;
-  /** Что с телом сейчас — объективно и без цифр. */
+  /** Что с телом сейчас — простыми словами и без цифр. */
   consequence: string;
   /** Первопричина из истории кольца — без цифр. */
   rootCause: string;
@@ -69,22 +78,25 @@ export interface Insight {
 export const IDLE_PULSE_RATIO = 1.15;
 /** «Почти без шагов» за час. */
 export const STILL_STEPS_PER_HOUR = 100;
-/** «Режим сбережения сил»: пульс не выше покоя больше чем на 5 %, фон напряжения в зоне «Низкий» (до 30). */
+/** Экономный режим: пульс не выше покоя больше чем на 5 %, стресс в зоне «Низкий» (до 30). */
 export const SAVING_PULSE_RATIO = 1.05;
 export const SAVING_STRESS_MAX = 30;
-/** Фон напряжения «Повышенный» — от 61 (зоны стресса продукта): без шагов это тоже холостой ход. */
-export const IDLE_STRESS_MIN = 61;
+/** Стресс «Повышенный» — от 61 (зоны стресса продукта): без шагов это высокий тонус в статике. */
+export const HIGH_STRESS_MIN = 61;
 /** Движение сейчас — от стольких шагов за последний час (≈ четверть часа ходьбы). */
 export const MOVING_STEPS_PER_HOUR = 1500;
 /** Затяжная статика — не меньше двух часов и меньше стольких шагов за них. */
 export const STILL_MIN_HOURS = 2;
 export const STILL_MAX_STEPS = 300;
-/** Фон напряжения «выше обычного» — на столько пунктов выше своей нормы (или утра, для вечернего спада). */
+/** Стресс «выше обычного» — на столько пунктов выше своей нормы (или утра, для вечернего спада). */
 export const STRESS_OVER = 15;
 /** Вечерний спад ищем не раньше этого часа. */
 export const FADE_FROM_MIN = 17 * 60;
 /** Много движения раньше в цикле — от стольких шагов за средний горизонт. */
 export const ACTIVE_EARLIER_STEPS = 4000;
+/** Давление «выше обычного» — верхнее за последние 2 ч выше своей нормы на столько мм рт. ст. */
+export const PRESSURE_OVER = 8;
+export const PRESSURE_WINDOW_MIN = 120;
 
 /** Короткая ночь — на столько минут короче своей нормы. */
 export const SHORT_NIGHT_MIN = 45;
@@ -93,104 +105,157 @@ export const DEEP_DEBT_MIN = 20;
 export const DEEP_DEBT_STRONG_MIN = 40;
 /** Пульс во сне выше нормы — на столько ударов (как значимое отклонение в «Пульсе во сне»). */
 export const NIGHT_PULSE_OVER = 4;
+/**
+ * Позднее восстановление: средний пульс первой половины сна выше второй на столько ударов и выше
+ * своего пульса покоя — пульс опустился только к утру. Нужно не меньше NIGHT_HEART_MIN замеров.
+ */
+export const LATE_RECOVERY_DROP = 5;
+export const NIGHT_HEART_MIN = 4;
+/** Кислород ночью ниже своей нормы на столько процентов; без нормы — ниже NIGHT_SPO2_LOW (как в «Пике»). */
+export const NIGHT_SPO2_DROP = 1.5;
+export const NIGHT_SPO2_LOW = 95;
 /** Тренд вариабельности — на 10 % от недельной нормы. */
 export const HRV_TREND_SHARE = 0.1;
-/** Фон напряжения два дня подряд выше нормы — на столько пунктов. */
+/** Стресс два дня подряд выше нормы — на столько пунктов. */
 export const STRESS_DAYS_OVER = 10;
-/** Поздно уснул — на столько минут позже привычного. */
+/** Поздно лёг — на столько минут позже привычного. */
 export const LATE_BED_MIN = 60;
 /** Поздний ужин — последний приём пищи не раньше чем за столько минут до сна. */
 export const LATE_MEAL_BEFORE_SLEEP_MIN = 150;
-/** Недавний приём пищи — начался не раньше чем столько минут назад, но не только что. */
-export const RECENT_MEAL_MIN = 150;
-export const RECENT_MEAL_SKIP_MIN = 15;
-/** Тяжёлый вчерашний день — нагрузка в полтора раза выше обычной. */
+/** Вечерняя нагрузка вчера — от стольких шагов с 19:00 до сна. */
+export const EVENING_LOAD_STEPS = 3000;
+/**
+ * Недавний приём пищи: начался от RECENT_MEAL_SKIP_MIN до RECENT_MEAL_MIN назад. Сильнее всего
+ * отклик через 30–60 минут после еды (владелец 26.09: скачок пульса и сонливость — это еда, а не усталость).
+ */
+export const RECENT_MEAL_MIN = 120;
+export const RECENT_MEAL_SKIP_MIN = 20;
+export const MEAL_PEAK_FROM_MIN = 30;
+export const MEAL_PEAK_TO_MIN = 60;
+/** Перекусов больше обычного — на столько приёмов больше своей нормы и не меньше SNACKING_MIN за день. */
+export const SNACKING_OVER = 1;
+export const SNACKING_MIN = 4;
+/** Сахар скачет — размах за день в полтора раза больше своего и не меньше SUGAR_SWING_MIN ммоль/л. */
+export const SUGAR_SWING_RATIO = 1.5;
+export const SUGAR_SWING_MIN = 1.5;
+/** Тяжёлый вчерашний день — нагрузка по пульсу в полтора раза или шаги в 1.4 раза выше обычного. */
 export const HEAVY_LOAD_RATIO = 1.5;
+export const HEAVY_STEPS_RATIO = 1.4;
 /** Своей нормы нет, пока дней с данными меньше этого. */
 export const BASELINE_MIN_DAYS = 3;
-/** О чём уже говорили на этой неделе — вес связки ×0.25; причина уже звучала в этом цикле — ×0.4. */
+/**
+ * О чём уже говорили на этой неделе — вес связки ×0.25; причина уже звучала в этом цикле — ×0.4.
+ * Связка, сказанная в этом цикле, не повторяется вовсе, пока есть другая (`findInsight`).
+ */
 const SAID_WEEK_FACTOR = 0.25;
 const SAID_TODAY_FACTOR = 0.4;
 
 // ── Совместимость: какие причины объясняют какое состояние ─────────────────────────────────────
 
+const NIGHT_CAUSES: readonly RootCause[] = ['short-night', 'deep-debt', 'late-bed', 'night-pulse', 'late-recovery', 'night-oxygen'];
+
 /**
  * Только причины другой природы, чем само состояние: статику не объясняем статикой, движение — движением.
+ * Состояния, в тексте которых уже есть «почти не двигаетесь», не объясняются статикой.
  */
 export const CAUSES_FOR: Record<BodyState, readonly RootCause[]> = {
-  idle: ['recent-meal', 'short-night', 'deep-debt', 'night-pulse', 'hrv-down', 'late-bed', 'stress-days', 'long-still', 'heavy-yesterday'],
-  saving: ['active-earlier', 'heavy-yesterday', 'hrv-up', 'good-night', 'deep-debt', 'short-night', 'usual-night'],
-  still: ['short-night', 'deep-debt', 'heavy-yesterday', 'hrv-down', 'late-bed'],
+  idle: [...NIGHT_CAUSES, 'recent-meal', 'hrv-down', 'stress-days', 'heavy-yesterday', 'snacking', 'sugar-swings'],
+  'tense-still': [...NIGHT_CAUSES, 'stress-days', 'hrv-down', 'sugar-swings'],
+  saving: [...NIGHT_CAUSES, 'recent-meal', 'active-earlier', 'heavy-yesterday', 'repair', 'hrv-up', 'good-night', 'usual-night', 'snacking', 'sugar-swings'],
+  still: [...NIGHT_CAUSES, 'heavy-yesterday', 'repair', 'hrv-down'],
   moving: ['good-night', 'hrv-up', 'usual-night'],
-  fade: ['deep-debt', 'short-night', 'hrv-down', 'late-bed', 'night-pulse', 'heavy-yesterday', 'long-still', 'late-meal'],
-  tense: ['stress-days', 'short-night', 'deep-debt', 'hrv-down', 'night-pulse', 'late-meal', 'late-bed'],
+  fade: [...NIGHT_CAUSES, 'hrv-down', 'heavy-yesterday', 'repair', 'late-meal', 'snacking', 'sugar-swings'],
+  tense: [...NIGHT_CAUSES, 'stress-days', 'hrv-down', 'late-meal', 'long-still', 'sugar-swings'],
+  'pressure-up': [...NIGHT_CAUSES, 'stress-days', 'long-still'],
   steady: ['good-night', 'hrv-up', 'usual-night', 'active-earlier'],
 };
 
-// ── Фразы: [умеренно, сильно] ───────────────────────────────────────────────────────────────────
+// ── Фразы: [умеренно, сильно]. Простой разговорный язык, без канцелярита и цифр ─────────────────
 
 type Pair = readonly [string, string];
 
 export const STATE_TEXT: Record<BodyState, Record<ReportMode, Pair>> = {
   idle: {
-    morning: ['С утра тело спокойно, а внутри держится лёгкий разгон', 'С утра тело почти неподвижно, а пульс заметно выше покоя'],
-    day: ['Сейчас тело в покое, а внутри держится лёгкий разгон', 'Сейчас движения почти нет, а пульс заметно выше покоя'],
-    evening: ['Вечером тело отдыхает, а внутри ещё держится разгон', 'Вечером движения почти нет, а пульс заметно выше покоя'],
+    morning: ['С утра пульс чуть выше обычного, хотя вы почти не двигаетесь', 'С утра пульс заметно выше обычного, хотя вы почти не двигаетесь'],
+    day: ['Пульс сейчас чуть выше обычного, хотя вы почти не двигаетесь', 'Пульс сейчас заметно выше обычного, хотя вы почти не двигаетесь'],
+    evening: ['Вечером пульс не опускается, хотя вы почти не двигаетесь', 'Вечером пульс заметно выше обычного, хотя движения почти нет'],
+  },
+  'tense-still': {
+    morning: ['С утра стресс высокий, а вы почти не двигаетесь', 'С утра стресс очень высокий, а движения почти нет'],
+    day: ['Стресс сейчас высокий, а вы почти не двигаетесь', 'Стресс сейчас очень высокий, а движения почти нет'],
+    evening: ['Вечером стресс высокий, а вы почти не двигаетесь', 'Вечером стресс очень высокий, а движения почти нет'],
   },
   saving: {
-    morning: ['Утро идёт в режиме сбережения сил: пульс низкий, фон спокойный', 'Утро идёт в глубоком режиме сбережения сил, тело спокойно'],
-    day: ['Сейчас тело в режиме сбережения сил: пульс низкий, фон спокойный', 'Сейчас тело глубоко экономит силы, пульс и фон на минимуме'],
-    evening: ['Вечером тело бережёт силы: пульс низкий, фон спокойный', 'Вечером тело глубоко экономит силы, пульс и фон на минимуме'],
+    morning: ['Утро идёт в экономном режиме: пульс низкий, стресса почти нет', 'Утро идёт в очень экономном режиме, тело бережёт силы'],
+    day: ['Тело сейчас экономит силы: пульс низкий, стресса почти нет', 'Тело сейчас сильно экономит силы, пульс и стресс на минимуме'],
+    evening: ['Вечером тело экономит силы: пульс низкий, стресса почти нет', 'Вечером тело сильно экономит силы, пульс и стресс на минимуме'],
   },
   still: {
-    morning: ['С пробуждения тело почти не двигалось', 'С пробуждения прошло уже несколько часов почти без движения'],
-    day: ['Последние часы тело почти не двигается', 'Уже несколько часов тело почти без движения'],
-    evening: ['Вечер проходит почти без движения', 'Весь вечер тело почти без движения'],
+    morning: ['С утра вы почти не двигались', 'С утра прошло уже несколько часов почти без движения'],
+    day: ['Последние часы вы почти не двигаетесь', 'Уже несколько часов почти без движения'],
+    evening: ['Вечер проходит почти без движения', 'Весь вечер почти без движения'],
   },
   moving: {
-    morning: ['Утро началось с хорошего движения', 'Утро идёт в бодром темпе, тело много двигается'],
-    day: ['Сейчас тело в движении, пульс спокойно идёт следом', 'Сейчас тело активно движется, и пульс легко подстраивается'],
-    evening: ['Вечером тело ещё в движении', 'Вечер идёт в бодром темпе, движения много'],
+    morning: ['Утро началось с хорошего движения', 'Утро идёт бодро, вы много двигаетесь'],
+    day: ['Вы сейчас в движении, и пульс легко подстраивается', 'Вы сейчас много двигаетесь, и пульс легко успевает'],
+    evening: ['Вечером вы ещё в движении', 'Вечер идёт бодро, движения много'],
   },
   fade: {
-    morning: ['Фон напряжения растёт, а движения становится меньше', 'Фон напряжения заметно растёт, а движения почти нет'],
-    day: ['Ближе к вечеру фон напряжения растёт, а движения мало', 'Ближе к вечеру фон напряжения заметно вырос, силы тают'],
-    evening: ['К вечеру фон напряжения растёт, а силы понемногу тают', 'К вечеру фон напряжения заметно вырос, а силы тают'],
+    morning: ['Стресс растёт, а движения становится меньше', 'Стресс заметно растёт, а движения почти нет'],
+    day: ['Ближе к вечеру стресс растёт, а движения мало', 'Ближе к вечеру стресс заметно вырос, а сил меньше'],
+    evening: ['К вечеру стресс растёт, а сил становится меньше', 'К вечеру стресс заметно вырос, а сил заметно меньше'],
   },
   tense: {
-    morning: ['С утра фон напряжения выше вашего обычного', 'С утра фон напряжения заметно выше вашего обычного'],
-    day: ['Сейчас фон напряжения выше вашего обычного', 'Сейчас фон напряжения заметно выше вашего обычного'],
-    evening: ['Вечером фон напряжения выше вашего обычного', 'Вечером фон напряжения заметно выше вашего обычного'],
+    morning: ['С утра стресс выше вашего обычного', 'С утра стресс заметно выше вашего обычного'],
+    day: ['Стресс сейчас выше вашего обычного', 'Стресс сейчас заметно выше вашего обычного'],
+    evening: ['Вечером стресс выше вашего обычного', 'Вечером стресс заметно выше вашего обычного'],
+  },
+  'pressure-up': {
+    morning: ['С утра давление держится выше вашего обычного', 'С утра давление заметно выше вашего обычного'],
+    day: ['Давление сейчас держится выше вашего обычного', 'Давление сейчас заметно выше вашего обычного'],
+    evening: ['Вечером давление держится выше вашего обычного', 'Вечером давление заметно выше вашего обычного'],
   },
   steady: {
-    morning: ['Утро идёт ровно: пульс и фон напряжения спокойные', 'Утро идёт ровно и спокойно, тело в хорошем тонусе'],
-    day: ['День идёт ровно: пульс и фон напряжения в вашем коридоре', 'День идёт ровно, тело держит хороший тонус'],
-    evening: ['Вечер проходит ровно, тело спокойно', 'Вечер проходит ровно, тело спокойно и в тонусе'],
+    morning: ['Утро идёт ровно: пульс и стресс в вашей норме', 'Утро идёт ровно, тело в хорошей форме'],
+    day: ['День идёт ровно: пульс и стресс в вашей норме', 'День идёт ровно, тело держит хорошую форму'],
+    evening: ['Вечер проходит ровно, пульс и стресс в норме', 'Вечер проходит ровно, тело в хорошей форме'],
   },
 };
 
 export const CAUSE_TEXT: Record<RootCause, Pair> = {
-  'deep-debt': ['Глубокого сна за две последние ночи было меньше обычного', 'Две ночи подряд глубокого сна заметно меньше вашей нормы'],
-  'short-night': ['Прошлая ночь была короче вашей обычной', 'Прошлая ночь вышла заметно короче вашей обычной'],
-  'night-pulse': ['Ночью пульс во сне был выше вашей нормы', 'Ночью пульс во сне заметно не опускался до вашей нормы'],
-  'hrv-down': ['Последние два дня тело восстанавливается хуже, чем обычно', 'Последние два дня восстановление заметно ниже недельной нормы'],
-  'hrv-up': ['Последние два дня тело восстанавливается лучше обычного', 'Последние два дня восстановление заметно выше недельной нормы'],
-  'stress-days': ['Фон напряжения держится выше обычного уже второй день', 'Два дня подряд фон напряжения заметно выше вашего обычного'],
-  'late-bed': ['Прошлой ночью вы уснули позже привычного', 'Прошлой ночью вы уснули намного позже привычного'],
-  'late-meal': ['Вчера последний приём пищи был незадолго до сна', 'Вчера последний приём пищи был совсем незадолго до сна'],
-  'heavy-yesterday': ['Вчера нагрузка на тело была выше обычной', 'Вчера нагрузка на тело была заметно выше вашей обычной'],
-  'recent-meal': ['Недавно был приём пищи, и тело занято перевариванием', 'Недавно был плотный приём пищи, тело занято перевариванием'],
+  'deep-debt': ['Две последние ночи глубокого сна было меньше обычного', 'Две ночи подряд глубокого сна заметно меньше вашей нормы'],
+  'short-night': ['Прошлой ночью вы спали меньше обычного', 'Прошлой ночью вы спали заметно меньше обычного'],
+  'night-pulse': ['Ночью пульс был выше вашего обычного', 'Ночью пульс был заметно выше вашего обычного'],
+  'late-recovery': ['Ночью пульс опустился до обычного только под утро', 'Ночью пульс долго не опускался и успокоился только под утро'],
+  'night-oxygen': ['Ночью кислород в крови был ниже вашего обычного', 'Ночью кислород в крови заметно проседал'],
+  'hrv-down': ['Последние два дня тело восстанавливается хуже обычного', 'Последние два дня тело восстанавливается заметно хуже обычного'],
+  'hrv-up': ['Последние два дня тело восстанавливается лучше обычного', 'Последние два дня тело восстанавливается заметно лучше обычного'],
+  repair: ['После вчерашней нагрузки тело сегодня восстанавливает мышцы', 'Вчерашняя нагрузка была большой, и тело сегодня чинит мышцы'],
+  'stress-days': ['Стресс держится выше обычного уже второй день', 'Два дня подряд стресс заметно выше вашего обычного'],
+  'late-bed': ['Прошлой ночью вы легли позже обычного', 'Прошлой ночью вы легли намного позже обычного'],
+  'late-meal': ['Вчера вы поели незадолго до сна', 'Вчера вы поели совсем незадолго до сна'],
+  'heavy-yesterday': ['Вчера нагрузка была больше обычной', 'Вчера нагрузка была заметно больше обычной'],
+  'recent-meal': ['Недавно была еда, и тело занято перевариванием', 'Совсем недавно была еда, и тело занято перевариванием'],
+  snacking: ['Сегодня перекусов больше, чем обычно', 'Сегодня перекусов заметно больше, чем обычно'],
+  'sugar-swings': ['Сахар сегодня скачет сильнее обычного', 'Сахар сегодня скачет заметно сильнее обычного'],
   'long-still': ['Последние часы прошли почти без движения', 'Уже несколько часов подряд почти без движения'],
-  'active-earlier': ['Раньше в этот день было много движения', 'Сегодня уже было очень много движения'],
-  'good-night': ['Ночь была полноценной, с хорошей долей глубокого сна', 'Ночь была длинной и глубокой, лучше вашей обычной'],
-  'usual-night': ['Ночь прошла в вашем обычном ритме', 'Ночь прошла в вашем обычном ритме, без отклонений'],
+  'active-earlier': ['Раньше сегодня было много движения', 'Сегодня уже было очень много движения'],
+  'good-night': ['Ночь была полноценной, с хорошим глубоким сном', 'Ночь была длинной и глубокой, лучше обычной'],
+  'usual-night': ['Ночь прошла как обычно', 'Ночь прошла как обычно, без отклонений'],
 };
 
-/** Вчерашняя тренировка — точнее, чем «нагрузка выше обычной». */
-const WORKOUT_CAUSE: Record<'cardio' | 'strength', string> = {
-  cardio: 'Вчера была кардиотренировка, тело ещё восстанавливается',
-  strength: 'Вчера была силовая тренировка, мышцы ещё восстанавливаются',
-};
+/** Уточнённые фразы, когда данные позволяют сказать точнее. */
+export const CAUSE_DETAIL = {
+  workout: {
+    cardio: 'Вчера была кардиотренировка, тело ещё восстанавливается',
+    strength: 'Вчера была силовая тренировка, мышцы ещё восстанавливаются',
+  },
+  repairAfterWorkout: 'Вчерашняя тренировка была тяжёлой, и тело сегодня восстанавливает мышцы',
+  lateRecoveryAfterMeal: 'После позднего ужина пульс ночью опустился только под утро',
+  lateRecoveryAfterLoad: 'После вечерней нагрузки пульс ночью опустился только под утро',
+  oxygenLongSleep: 'Сон был долгим, но кислород в крови ночью проседал',
+  snackingYesterday: 'Вчера перекусов было больше, чем обычно',
+} as const;
 
 // ── Расчёт ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -202,6 +267,7 @@ const bedMin = (clock: string) => {
   const m = clockMin(clock);
   return m < 12 * 60 ? m + 1440 : m;
 };
+const cap = (v: number) => Math.min(2, v);
 
 type Found<K> = { key: K; strength: number; text?: string };
 
@@ -212,135 +278,188 @@ function norm(days: readonly AdviceDay[], pick: (d: AdviceDay) => number | null,
 }
 
 const inWindow = (points: readonly MinutePoint[], from: number, to: number) => points.filter((p) => p.m > from && p.m <= to);
+const sum = (points: readonly MinutePoint[]) => points.reduce((a, p) => a + p.v, 0);
+const restingOf = (days: readonly AdviceDay[]) => norm(days, (d) => d.restingPulse, 1, 7, 1) ?? days.find((d) => d.ago === 0)?.restingPulse ?? null;
 
-/** Состояние тела сейчас по оперативному срезу и среднему горизонту. */
+/** Состояние тела сейчас по оперативному срезу, среднему горизонту и давлению. */
 export function bodyStates(input: PhysioInput): Found<BodyState>[] {
   const { now, days } = input;
   const today = days.find((d) => d.ago === 0);
-  const rest = norm(days, (d) => d.restingPulse, 1, 7, 1) ?? today?.restingPulse ?? null;
+  const rest = restingOf(days);
   const pulse = mean(inWindow(input.heart, now - 90, now).map((p) => p.v));
   const stress = mean(inWindow(input.stress, now - 90, now).map((p) => p.v));
-  const stepsNow = inWindow(input.steps, now - 60, now).reduce((a, p) => a + p.v, 0);
+  const stepsNow = sum(inWindow(input.steps, now - 60, now));
   const wake = today?.awake ? clockMin(today.awake) : null;
   const midFrom = Math.max(now - 240, wake ?? now - 240);
   const midHours = (now - midFrom) / 60;
-  const stepsMid = inWindow(input.steps, midFrom, now).reduce((a, p) => a + p.v, 0);
+  const stepsMid = sum(inWindow(input.steps, midFrom, now));
   const out: Found<BodyState>[] = [];
 
   const quiet = stepsNow < STILL_STEPS_PER_HOUR;
   if (quiet && rest !== null && pulse !== null && pulse >= rest * IDLE_PULSE_RATIO) {
-    out.push({ key: 'idle', strength: Math.min(2, (pulse / rest - 1) / (IDLE_PULSE_RATIO - 1)) });
-  } else if (quiet && stress !== null && stress >= IDLE_STRESS_MIN) {
-    out.push({ key: 'idle', strength: Math.min(2, stress / IDLE_STRESS_MIN) });
+    out.push({ key: 'idle', strength: cap((pulse / rest - 1) / (IDLE_PULSE_RATIO - 1)) });
+  }
+  if (quiet && stress !== null && stress >= HIGH_STRESS_MIN) {
+    out.push({ key: 'tense-still', strength: cap(1 + (stress - HIGH_STRESS_MIN) / 20) });
   }
   if (quiet && rest !== null && pulse !== null && pulse <= rest * SAVING_PULSE_RATIO && (stress === null || stress <= SAVING_STRESS_MAX)) {
     out.push({ key: 'saving', strength: 1 });
   }
   if (midHours >= STILL_MIN_HOURS && stepsMid < STILL_MAX_STEPS) {
-    out.push({ key: 'still', strength: Math.min(2, midHours / STILL_MIN_HOURS) });
+    out.push({ key: 'still', strength: cap(midHours / STILL_MIN_HOURS) });
   }
-  if (stepsNow >= MOVING_STEPS_PER_HOUR) out.push({ key: 'moving', strength: Math.min(2, stepsNow / MOVING_STEPS_PER_HOUR) });
+  if (stepsNow >= MOVING_STEPS_PER_HOUR) out.push({ key: 'moving', strength: cap(stepsNow / MOVING_STEPS_PER_HOUR) });
   if (now >= FADE_FROM_MIN && wake !== null && stress !== null && stepsNow < MOVING_STEPS_PER_HOUR / 3) {
     const morning = mean(inWindow(input.stress, wake, wake + 240).map((p) => p.v));
     if (morning !== null && now - wake >= 360 && stress >= morning + STRESS_OVER) {
-      out.push({ key: 'fade', strength: Math.min(2, (stress - morning) / STRESS_OVER) });
+      out.push({ key: 'fade', strength: cap((stress - morning) / STRESS_OVER) });
     }
   }
   const stressNorm = norm(days, (d) => d.stress, 1, 7);
   if (!quiet && stress !== null && stressNorm !== null && stress >= stressNorm + STRESS_OVER) {
-    out.push({ key: 'tense', strength: Math.min(2, (stress - stressNorm) / STRESS_OVER) });
+    out.push({ key: 'tense', strength: cap((stress - stressNorm) / STRESS_OVER) });
+  }
+  const systolic = mean(inWindow(input.systolic ?? [], now - PRESSURE_WINDOW_MIN, now).map((p) => p.v));
+  const systolicNorm = norm(days, (d) => d.systolic, 1, 7);
+  if (systolic !== null && systolicNorm !== null && systolic >= systolicNorm + PRESSURE_OVER) {
+    out.push({ key: 'pressure-up', strength: cap((systolic - systolicNorm) / PRESSURE_OVER) });
   }
   // Ровный фон — запасное состояние, когда за последний час есть хоть какие-то замеры.
   if (pulse !== null || stress !== null) out.push({ key: 'steady', strength: 0.3 });
   return out;
 }
 
-/** Кандидаты в первопричину — из ночи, вчерашнего дня и глубокого горизонта. */
+/** Кандидаты в первопричину — из ночи, вчерашнего дня, глубокого и среднего горизонта. */
 export function rootCauses(input: PhysioInput): Found<RootCause>[] {
   const { now, days } = input;
   const day = (ago: number) => days.find((d) => d.ago === ago) ?? null;
   const d0 = day(0);
   const d1 = day(1);
   const out: Found<RootCause>[] = [];
+  const push = (key: RootCause, strength: number, text?: string) => out.push({ key, strength: cap(strength), ...(text ? { text } : {}) });
 
   // Глубокий горизонт: долг глубокого сна за две ночи против нормы за неделю до них.
   const deepNorm = norm(days, (d) => d.deepMin, 2, 7);
   const deepNights = nums([d0?.deepMin ?? null, d1?.deepMin ?? null]);
   if (deepNorm !== null && deepNights.length) {
     const debt = deepNights.reduce((a, v) => a + Math.max(0, deepNorm - v), 0);
-    if (debt >= DEEP_DEBT_MIN) out.push({ key: 'deep-debt', strength: Math.min(2, debt / DEEP_DEBT_STRONG_MIN) });
+    if (debt >= DEEP_DEBT_MIN) push('deep-debt', debt / DEEP_DEBT_STRONG_MIN);
   }
-  // Тренд вариабельности: два последних дня против недели до них.
-  const hrvNow = norm(days, (d) => d.hrv, 0, 1, 1);
-  const hrvNorm = norm(days, (d) => d.hrv, 2, 7);
-  if (hrvNow !== null && hrvNorm !== null && hrvNorm > 0) {
-    const change = hrvNow / hrvNorm - 1;
-    if (change <= -HRV_TREND_SHARE) out.push({ key: 'hrv-down', strength: Math.min(2, -change / (HRV_TREND_SHARE * 1.5)) });
-    if (change >= HRV_TREND_SHARE) out.push({ key: 'hrv-up', strength: Math.min(2, change / (HRV_TREND_SHARE * 1.5)) });
-  }
-  // Фон напряжения два дня подряд выше нормы.
+  // Стресс два дня подряд выше нормы.
   const stressRecent = norm(days, (d) => d.stress, 1, 2, 2);
   const stressNorm = norm(days, (d) => d.stress, 3, 7);
   if (stressRecent !== null && stressNorm !== null && stressRecent >= stressNorm + STRESS_DAYS_OVER) {
-    out.push({ key: 'stress-days', strength: Math.min(2, (stressRecent - stressNorm) / (STRESS_DAYS_OVER * 1.5)) });
+    push('stress-days', (stressRecent - stressNorm) / (STRESS_DAYS_OVER * 1.5));
   }
 
-  // Ночь: длительность, пульс во сне, время отхода ко сну.
+  // Ночь: длительность, время отхода, пульс во сне и когда он опустился, кислород.
   const sleepNorm = norm(days, (d) => d.sleepMin, 1, 7);
   if (d0?.sleepMin != null && sleepNorm !== null && d0.sleepMin <= sleepNorm - SHORT_NIGHT_MIN) {
-    out.push({ key: 'short-night', strength: Math.min(2, (sleepNorm - d0.sleepMin) / 60) });
+    push('short-night', (sleepNorm - d0.sleepMin) / 60);
   }
   const pulseNorm = norm(days, (d) => d.nightPulse, 1, 7);
   if (d0?.nightPulse != null && pulseNorm !== null && d0.nightPulse - pulseNorm >= NIGHT_PULSE_OVER) {
-    out.push({ key: 'night-pulse', strength: Math.min(2, (d0.nightPulse - pulseNorm) / (NIGHT_PULSE_OVER * 1.5)) });
+    push('night-pulse', (d0.nightPulse - pulseNorm) / (NIGHT_PULSE_OVER * 1.5));
   }
   const bedNorm = norm(days, (d) => (d.asleep ? bedMin(d.asleep) : null), 1, 7);
   const bed = d0?.asleep ? bedMin(d0.asleep) : null;
   if (bed !== null && bedNorm !== null && bed - bedNorm >= LATE_BED_MIN) {
-    out.push({ key: 'late-bed', strength: Math.min(2, (bed - bedNorm) / (LATE_BED_MIN * 1.5)) });
-  }
-  const deepGood = deepNorm === null || (d0?.deepMin != null && d0.deepMin >= deepNorm);
-  if (d0?.sleepMin != null && sleepNorm !== null && d0.sleepMin >= sleepNorm && deepGood) {
-    out.push({ key: 'good-night', strength: 0.8 });
-  }
-  if (d0?.sleepMin != null) out.push({ key: 'usual-night', strength: 0.2 });
-
-  // Вчерашний день: нагрузка и тренировка, поздний ужин.
-  const loadNorm = norm(days, (d) => d.load, 2, 7);
-  if (d1?.workout) {
-    out.push({ key: 'heavy-yesterday', strength: 1, text: WORKOUT_CAUSE[d1.workout] });
-  } else if (d1?.load != null && loadNorm !== null && loadNorm > 0 && d1.load >= loadNorm * HEAVY_LOAD_RATIO) {
-    out.push({ key: 'heavy-yesterday', strength: Math.min(2, d1.load / (loadNorm * HEAVY_LOAD_RATIO)) });
+    push('late-bed', (bed - bedNorm) / (LATE_BED_MIN * 1.5));
   }
   const lastMeal = d1?.meals.length ? Math.max(...d1.meals.map(clockMin)) : null;
-  if (lastMeal !== null && bed !== null && bed - lastMeal >= 0 && bed - lastMeal <= LATE_MEAL_BEFORE_SLEEP_MIN) {
-    out.push({ key: 'late-meal', strength: 1 });
+  const lateMeal = lastMeal !== null && bed !== null && bed - lastMeal >= 0 && bed - lastMeal <= LATE_MEAL_BEFORE_SLEEP_MIN;
+  if (lateMeal) push('late-meal', 1);
+  // Когда ночью опустился пульс: первая половина сна против второй, на оси сегодняшнего дня.
+  const wake = d0?.awake ? clockMin(d0.awake) : null;
+  if (bed !== null && wake !== null) {
+    const from = bed - 1440;
+    const night = input.heart.filter((p) => p.m >= from && p.m <= wake);
+    const mid = (from + wake) / 2;
+    const first = mean(night.filter((p) => p.m < mid).map((p) => p.v));
+    const second = mean(night.filter((p) => p.m >= mid).map((p) => p.v));
+    const rest = restingOf(days);
+    if (night.length >= NIGHT_HEART_MIN && first !== null && second !== null && first - second >= LATE_RECOVERY_DROP && (rest === null || first >= rest)) {
+      const eveningSteps = sum(inWindow(input.steps, 19 * 60 - 1440, from));
+      const text = lateMeal
+        ? CAUSE_DETAIL.lateRecoveryAfterMeal
+        : eveningSteps >= EVENING_LOAD_STEPS || d1?.workout
+          ? CAUSE_DETAIL.lateRecoveryAfterLoad
+          : undefined;
+      push('late-recovery', (first - second) / (LATE_RECOVERY_DROP * 1.2) + (text ? 0.3 : 0), text);
+    }
+  }
+  const spo2Norm = norm(days, (d) => d.nightSpo2, 1, 7);
+  if (d0?.nightSpo2 != null) {
+    const drop = spo2Norm !== null ? spo2Norm - d0.nightSpo2 : null;
+    const low = drop !== null ? drop >= NIGHT_SPO2_DROP : d0.nightSpo2 < NIGHT_SPO2_LOW;
+    if (low) {
+      const longSleep = d0.sleepMin != null && sleepNorm !== null && d0.sleepMin >= sleepNorm;
+      const strength = drop !== null ? drop / (NIGHT_SPO2_DROP * 1.5) : 1;
+      push('night-oxygen', longSleep ? strength * 1.2 : strength, longSleep ? CAUSE_DETAIL.oxygenLongSleep : undefined);
+    }
+  }
+  const deepGood = deepNorm === null || (d0?.deepMin != null && d0.deepMin >= deepNorm);
+  if (d0?.sleepMin != null && sleepNorm !== null && d0.sleepMin >= sleepNorm && deepGood) push('good-night', 0.8);
+  if (d0?.sleepMin != null) push('usual-night', 0.2);
+
+  // Вчерашний день: нагрузка по пульсу, тренировка, шаги. Вместе с просевшей вариабельностью — восстановление мышц.
+  const loadNorm = norm(days, (d) => d.load, 2, 7);
+  const stepsNorm = norm(days, (d) => d.steps, 2, 7);
+  let heavy = 0;
+  if (d1?.workout) heavy = 1;
+  if (d1?.load != null && loadNorm !== null && loadNorm > 0 && d1.load >= loadNorm * HEAVY_LOAD_RATIO) heavy = Math.max(heavy, d1.load / (loadNorm * HEAVY_LOAD_RATIO));
+  if (d1?.steps != null && stepsNorm !== null && stepsNorm > 0 && d1.steps >= stepsNorm * HEAVY_STEPS_RATIO) heavy = Math.max(heavy, d1.steps / (stepsNorm * HEAVY_STEPS_RATIO));
+  if (heavy > 0) push('heavy-yesterday', heavy, d1?.workout ? CAUSE_DETAIL.workout[d1.workout] : undefined);
+  // Вариабельность: сегодня и тренд двух дней против недели до них.
+  const hrvNorm = norm(days, (d) => d.hrv, 2, 7);
+  const hrvNow = norm(days, (d) => d.hrv, 0, 1, 1);
+  if (hrvNow !== null && hrvNorm !== null && hrvNorm > 0) {
+    const change = hrvNow / hrvNorm - 1;
+    if (change <= -HRV_TREND_SHARE) push('hrv-down', -change / (HRV_TREND_SHARE * 1.5));
+    if (change >= HRV_TREND_SHARE) push('hrv-up', change / (HRV_TREND_SHARE * 1.5));
+  }
+  const hrvToday = d0?.hrv ?? null;
+  if (heavy > 0 && hrvToday !== null && hrvNorm !== null && hrvNorm > 0 && hrvToday <= hrvNorm * (1 - HRV_TREND_SHARE)) {
+    const drop = 1 - hrvToday / hrvNorm;
+    push('repair', heavy * 0.6 + drop / (HRV_TREND_SHARE * 1.5), d1?.workout ? CAUSE_DETAIL.repairAfterWorkout : undefined);
+    // Связка двух систем говорит больше, чем каждая по отдельности: одиночные причины отходят на второй план.
+    for (const c of out) if (c.key === 'heavy-yesterday' || c.key === 'hrv-down') c.strength *= 0.5;
   }
 
-  // Средний горизонт сегодня: недавний приём пищи, статика или много движения.
-  const meals = (d0?.meals ?? []).map(clockMin).filter((m) => m <= now - RECENT_MEAL_SKIP_MIN && m >= now - RECENT_MEAL_MIN);
-  if (meals.length) out.push({ key: 'recent-meal', strength: 1 });
-  const wake = d0?.awake ? clockMin(d0.awake) : null;
+  // Еда и сахар: недавний приём (сильнее всего через 30–60 минут), перекусы, скачки сахара.
+  const ago = (d0?.meals ?? []).map((m) => now - clockMin(m)).filter((a) => a >= RECENT_MEAL_SKIP_MIN && a <= RECENT_MEAL_MIN);
+  if (ago.length) push('recent-meal', ago.some((a) => a >= MEAL_PEAK_FROM_MIN && a <= MEAL_PEAK_TO_MIN) ? 1.5 : 1);
+  const mealsNorm = norm(days, (d) => (d.meals.length ? d.meals.length : null), 1, 7);
+  if (mealsNorm !== null) {
+    if (d0 && d0.meals.length >= Math.max(SNACKING_MIN, mealsNorm + SNACKING_OVER)) {
+      push('snacking', (d0.meals.length - mealsNorm) / 2);
+    } else if (d1 && d1.meals.length >= Math.max(SNACKING_MIN, mealsNorm + SNACKING_OVER + 1)) {
+      push('snacking', (d1.meals.length - mealsNorm) / 3, CAUSE_DETAIL.snackingYesterday);
+    }
+  }
+  const sugar = (input.glucose ?? []).filter((p) => p.m >= 0 && p.m <= now).map((p) => p.v);
+  const rangeNorm = norm(days, (d) => d.glucoseRange, 1, 7);
+  if (sugar.length >= 3 && rangeNorm !== null) {
+    const range = Math.max(...sugar) - Math.min(...sugar);
+    if (range >= Math.max(SUGAR_SWING_MIN, rangeNorm * SUGAR_SWING_RATIO)) push('sugar-swings', range / (rangeNorm * SUGAR_SWING_RATIO * 1.2));
+  }
+
+  // Средний горизонт сегодня: статика или много движения.
   const midFrom = Math.max(now - 240, wake ?? now - 240);
   const midTo = now - 60;
-  if (midTo - midFrom >= STILL_MIN_HOURS * 60) {
-    const steps = inWindow(input.steps, midFrom, midTo).reduce((a, p) => a + p.v, 0);
-    if (steps < STILL_MAX_STEPS) out.push({ key: 'long-still', strength: Math.min(2, (midTo - midFrom) / (STILL_MIN_HOURS * 60)) });
+  if (midTo - midFrom >= STILL_MIN_HOURS * 60 && sum(inWindow(input.steps, midFrom, midTo)) < STILL_MAX_STEPS) {
+    push('long-still', (midTo - midFrom) / (STILL_MIN_HOURS * 60));
   }
-  const stepsEarlier = inWindow(input.steps, midFrom, now).reduce((a, p) => a + p.v, 0);
   const normMet = d0?.steps != null && d0.stepNorm != null && d0.steps >= d0.stepNorm;
-  if (stepsEarlier >= ACTIVE_EARLIER_STEPS || normMet) out.push({ key: 'active-earlier', strength: normMet ? 1.2 : 1 });
+  if (sum(inWindow(input.steps, midFrom, now)) >= ACTIVE_EARLIER_STEPS || normMet) push('active-earlier', normMet ? 1.2 : 1);
   return out;
 }
 
-/**
- * Доминантная связка «состояние сейчас ← первопричина». null — сказать нечего (нет замеров
- * за последний час или нет ни одной подходящей причины): тогда остаётся шаблонный совет.
- */
-export function findInsight(input: PhysioInput): Insight | null {
+/** Все допустимые связки по весу, самая яркая первой (с учётом того, о чём Лис уже говорил). */
+export function rankInsights(input: PhysioInput): { state: Found<BodyState>; cause: Found<RootCause>; score: number }[] {
   const states = bodyStates(input);
   const causes = rootCauses(input);
-  let best: { state: Found<BodyState>; cause: Found<RootCause>; score: number } | null = null;
+  const pairs: { state: Found<BodyState>; cause: Found<RootCause>; score: number }[] = [];
   for (const state of states) {
     for (const cause of causes) {
       if (!CAUSES_FOR[state.key].includes(cause.key)) continue;
@@ -348,9 +467,20 @@ export function findInsight(input: PhysioInput): Insight | null {
       let score = state.strength * cause.strength;
       if (input.said.week.includes(key)) score *= SAID_WEEK_FACTOR;
       if (input.said.today.some((k) => k.endsWith(`-${cause.key}`))) score *= SAID_TODAY_FACTOR;
-      if (!best || score > best.score) best = { state, cause, score };
+      pairs.push({ state, cause, score });
     }
   }
+  return pairs.sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Доминантная связка «состояние сейчас ← первопричина». null — сказать нечего (нет замеров
+ * за последний час или нет ни одной подходящей причины): тогда остаётся шаблонный совет.
+ */
+export function findInsight(input: PhysioInput): Insight | null {
+  // Ротация: связку, сказанную в этом цикле, не повторяем, пока есть другая актуальная.
+  const ranked = rankInsights(input);
+  const best = ranked.find((p) => !input.said.today.includes(`${p.state.key}-${p.cause.key}`)) ?? ranked[0];
   if (!best) return null;
   const strong = (s: number) => (s >= 1.5 ? 1 : 0);
   const { state, cause } = best;

@@ -41,6 +41,10 @@ function joined(yesterday: DaySnapshot | null, today: DaySnapshot | null, pick: 
   ];
 }
 
+/** Ряд из записей 0x55 (выбросы глюкозы уже убраны при сборке дня). */
+const series = (d: DaySnapshot, key: 'systolic' | 'glucose'): MinutePoint[] =>
+  d.summaryPoints.flatMap((p) => (p[key] === null ? [] : [{ m: p.m, v: p[key] as number }]));
+
 /**
  * Вывод движка физиологии для «Мнения Лиса» (`findInsight`): что с телом сейчас и почему. `said` —
  * о каких связках Лис уже говорил (за цикл и за неделю): движок выберет другую. null — сказать
@@ -63,6 +67,8 @@ export function insightFor(
     heart: joined(yesterday, today, (d) => d.heart, upTo),
     steps: joined(yesterday, today, (d) => d.stepsByMinute, upTo),
     stress: joined(yesterday, today, (d) => d.stress, upTo),
+    systolic: joined(yesterday, today, (d) => series(d, 'systolic'), upTo),
+    glucose: joined(yesterday, today, (d) => series(d, 'glucose'), upTo),
     said,
   });
 }

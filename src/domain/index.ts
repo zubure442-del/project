@@ -23,3 +23,4 @@ export * from './training';
 export * from './glucose';
 export * from './ai-advice';
 export * from './advice-days';
+export * from './physiology';

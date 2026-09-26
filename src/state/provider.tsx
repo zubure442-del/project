@@ -198,7 +198,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
     if (latest.current.demo) return 'В демо-режиме к модели не ходим';
     if (adviceBusy.current) return 'Лис уже думает';
     const request = aiAdviceRequest(latest.current, new Date(), force);
-    if (!request) return force ? 'Нет цикла с итогом — совет не для чего' : 'Мнение на этот отрезок уже есть';
+    if (!request) return force ? 'Нет цикла с итогом или свежих замеров — Лису не из чего сделать вывод' : 'Мнение на этот отрезок уже есть или сказать нечего';
     const key = aiAdviceKey(request);
     if (!force && !aiAdviceDue(adviceTried.current.get(key))) return 'Недавно пробовали';
     const triedAt = Date.now();
@@ -213,7 +213,7 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         logNote(`мнение Лиса (${slot}) от модели: ${result.error}, остаётся шаблонное`);
         return `Не вышло: ${result.error}`;
       }
-      const next = withAiAdvice(latest.current, request, result.text, result.about ?? null);
+      const next = withAiAdvice(latest.current, request, result.text);
       if (next === latest.current) {
         logNote(`мнение Лиса (${slot}) от модели получено, но пока ждали, совет сменился — не применяем`);
         return 'Пока ждали, совет сменился — не применили';

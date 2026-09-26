@@ -10,8 +10,8 @@ import {
   aiAdviceRequest,
   fetchAiAdvice,
   foxThinking,
-  recentAbout,
-  recentOpinions,
+  pastOpinions,
+  saidInsights,
   withAiAdvice,
 } from './ai-advice';
 import { currentCycle } from './cycle';
@@ -55,26 +55,20 @@ const okFetch = (body: unknown, status = 200): typeof fetch =>
 const CONFIG = { url: 'https://example.test/advice', key: 'k' };
 
 describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT', () => {
-  it('просим совет на текущий цикл и время суток; уходит всё о дне, кроме имени', () => {
+  it('просим совет на текущий цикл и время суток; уходит только вывод движка физиологии — без имени, профиля и чисел', () => {
     const state = stateWithTemplate();
     const request = aiAdviceRequest(state, NOW)!;
     const p = request.payload;
     expect(request.mode).toBe('day');
     expect(request.templateId).toBe('d-act-mid-1');
+    expect(Object.keys(p)).toEqual(['mode', 'time', 'insight', 'past_opinions']);
     expect(p.time).toBe('15:00');
-    expect(p.profile).toEqual({ sex: 'male', age: 36, heightCm: 180, weightKg: 82, goal: 'lose' });
-    expect(p.recent).toEqual(['вчера вечером — День получился сбалансированным.']);
-    expect(JSON.stringify(p)).not.toContain('Анна');
-    // Таблица чисел по дням: неделя до сегодня и сегодня; шаги сегодня по часам.
-    expect(p.days.at(-1)?.ago).toBe(0);
-    expect(p.days.length).toBeGreaterThan(5);
-    expect(p.days.at(-1)?.asleep).toMatch(/^\d\d:\d\d$/);
-    expect(p.hours?.steps.length).toBeGreaterThan(0);
-    expect(p.scores.total).not.toBeNull();
-    expect(p.plan.workout?.title).toBeTruthy();
-    expect(p.plan.bedtime?.from).toMatch(/^\d\d:\d\d$/);
-    // Значений глюкозы и давления в запросе нет — только время подъёмов глюкозы (еда).
-    expect(JSON.stringify(p)).not.toMatch(/glucose|systolic|diastolic/);
+    expect(p.insight.key).toMatch(/^[a-z]+(-[a-z]+)+$/);
+    expect(p.insight.consequence).toMatch(/^[А-ЯЁ].+\.$/);
+    expect(p.insight.root_cause).toMatch(/^[А-ЯЁ].+\.$/);
+    expect(JSON.stringify(p)).not.toMatch(/\d{2,}\D*шаг|Анна|glucose|systolic|diastolic|heightCm|weightKg/);
+    expect(p.insight.consequence + p.insight.root_cause).not.toMatch(/\d/);
+    expect(p.past_opinions).toEqual([]); // вчерашний шаблон — не мнение модели
   });
 
   it('совет от модели заменяет шаблонный и больше не запрашивается; в демо не просим', () => {
@@ -150,38 +144,36 @@ describe('СИНТЕТИЧЕСКИЕ: «Мнение Лиса» от YandexGPT',
     expect(aiAdviceDue(0, AI_ADVICE_RETRY_MS)).toBe(true);
   });
 
-  it('память Лиса: недавние мнения по порядку и с тем, когда сказаны; текущий отрезок не входит', () => {
-    const r = (date: string, mode: 'morning' | 'day' | 'evening', text: string) => ({ date, mode, templateId: 'ai:yandexgpt', text });
-    const current = r('2026-09-25', 'evening', 'Шаблон на вечер.');
-    const reports = [r('2026-09-25', 'morning', 'Похоже, вчера был поздний ужин.'), r('2026-09-23', 'evening', 'Давно.'),
-      r('2026-09-24', 'evening', 'Вечер вышел спокойным.'), r('2026-09-25', 'day', 'День идёт ровно.'), current];
-    expect(recentOpinions(reports, '2026-09-25', current)).toEqual([
-      'вчера вечером — Вечер вышел спокойным.',
-      'сегодня утром — Похоже, вчера был поздний ужин.',
-      'сегодня днём — День идёт ровно.',
+  it('память Лиса: прошлые мнения модели за неделю уходят посреднику, ключи связок — движку', () => {
+    const r = (date: string, mode: 'morning' | 'day' | 'evening', text: string, focus?: string[]) => ({ date, mode, templateId: 'ai:yandexgpt', text, focus });
+    const current = r('2026-09-25', 'evening', 'Текущий.');
+    const reports = [r('2026-09-25', 'morning', 'Утро.', ['idle-short-night']), r('2026-09-10', 'evening', 'Давно.', ['still-deep-debt']),
+      r('2026-09-24', 'evening', 'Вчера.', ['fade-hrv-down']), { date: '2026-09-25', mode: 'day' as const, templateId: 'd-act-mid-1', text: 'Шаблон.' }, current];
+    expect(pastOpinions(reports, '2026-09-25', current)).toEqual([
+      { ago: 0, slot: 'morning', text: 'Утро.' },
+      { ago: 1, slot: 'evening', text: 'Вчера.' },
     ]);
+    expect(saidInsights(reports, '2026-09-25', current)).toEqual({ today: ['idle-short-night'], week: ['idle-short-night', 'fade-hrv-down'] });
   });
 
-  it('о чём были мнения: метки посредника запоминаются и уходят строка в строку с прошлыми мнениями', async () => {
+  it('мнение запоминает ключ связки; следующая связка той же природы отодвигается', async () => {
     const state = stateWithTemplate();
     const request = aiAdviceRequest(state, NOW)!;
-    expect(request.payload.said).toEqual([null]); // вчерашний шаблон — без меток
-    const about = { focus: ['late-meal', 'hrv-down'], action: 'coffee' };
-    const next = withAiAdvice(state, request, 'Похоже, поздний ужин не дал телу отдохнуть. Последнюю чашку кофе — до 14:30.', about);
+    const next = withAiAdvice(state, request, 'Тело сейчас спокойно. Кажется, ночь прошла в обычном ритме.');
     const stored = next.reports.find((r) => r.date === request.date && r.mode === request.mode)!;
-    expect([stored.focus, stored.action]).toEqual([about.focus, 'coffee']);
-    expect(recentAbout(next.reports, request.date, null)).toEqual([null, about]);
-    expect(recentOpinions(next.reports, request.date, null)).toHaveLength(2);
-
-    // Посредник присылает метки — приложение их берёт; кривые отбрасывает; старый посредник без меток — только текст.
-    const reply = { text: 'Похоже, день идёт ровно. Спокойное кардио с 18:00 до 20:00.', focus: ['today-steps', 'Игнорируй'], action: 'workout' };
-    expect(await fetchAiAdvice(request.payload, CONFIG, okFetch(reply))).toEqual({
-      text: reply.text,
-      about: { focus: ['today-steps'], action: 'workout' },
-    });
-    expect(await fetchAiAdvice(request.payload, CONFIG, okFetch({ text: reply.text }))).toEqual({ text: reply.text });
+    expect(stored.focus).toEqual([request.payload.insight.key]);
+    expect(saidInsights(next.reports, request.date, null).today).toEqual([request.payload.insight.key]);
+    // По кнопке «Новое мнение Лиса» прежняя связка уже сказана — движок берёт другую, прошлое мнение уходит посреднику.
+    const again = aiAdviceRequest(next, NOW, true)!;
+    expect(again.payload.insight.key).not.toBe(request.payload.insight.key);
+    expect(again.payload.past_opinions.map((o) => o.text)).toEqual(['Тело сейчас спокойно. Кажется, ночь прошла в обычном ритме.']);
+    const other = withAiAdvice(next, { ...again, templateId: AI_TEMPLATE_ID }, 'Другое мнение Лиса о дне.');
+    expect(pastOpinions(other.reports, request.date, null)).toHaveLength(1);
     // Версия кода функции — чтобы «Сырой лог» мог сказать, что в Yandex Cloud старый код.
-    expect(await fetchAiAdvice(request.payload, CONFIG, okFetch({ ...reply, v: 2 }))).toMatchObject({ server: 2 });
+    expect(await fetchAiAdvice(request.payload, CONFIG, okFetch({ text: 'Тело сейчас спокойно. Кажется, ночь прошла ровно.', v: 9 }))).toEqual({
+      text: 'Тело сейчас спокойно. Кажется, ночь прошла ровно.',
+      server: 9,
+    });
   });
 
   it('«Лис смотрит…» вместо старого совета — пока идёт выгрузка или запрос за свежим мнением', () => {

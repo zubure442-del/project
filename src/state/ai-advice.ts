@@ -1,20 +1,17 @@
 import {
   AI_TEMPLATE_ID,
-  EFFORT_TEXT,
-  adviceAbout,
   cleanAdvice,
   coffeeClock,
   isAiTemplate,
   isSafeAdvice,
-  type AdviceAbout,
   type AdvicePayload,
   type ReportMode,
 } from '../domain';
 import { nowRingTs } from '../codec';
-import { addReport, profileAge, type StoredReport, type VueloState } from '../storage';
-import { adviceDaysFor } from './advice-days';
+import { addReport, type StoredReport, type VueloState } from '../storage';
+import { insightFor } from './advice-days';
 import { currentCycle } from './cycle';
-import { DAY_START_HOUR, adviceModeNow, recommendationsFor, todayKey } from './day';
+import { DAY_START_HOUR, adviceModeNow } from './day';
 
 /**
  * Адрес посредника и ключ приложения — из файла `.env` в корне проекта (в git не попадает):
@@ -32,8 +29,6 @@ export function aiAdviceConfig(): { url: string; key: string } | null {
 
 /** Сколько ждём ответа посредника: дольше человек уже смотрит на шаблонный совет. */
 export const AI_ADVICE_TIMEOUT_MS = 15000;
-/** Сколько последних советов отдаём модели, чтобы она не повторялась. */
-export const AI_ADVICE_RECENT = 3;
 /** Запрос на тот же цикл и отрезок не удался — снова не раньше чем через столько (не тратим деньги впустую). */
 export const AI_ADVICE_RETRY_MS = 30 * 60 * 1000;
 
@@ -77,62 +72,33 @@ export function aiAdviceTarget(
 }
 
 const SLOT_ORDER: Record<ReportMode, number> = { morning: 0, day: 1, evening: 2 };
-const SLOT_WHEN: Record<ReportMode, string> = { morning: 'утром', day: 'днём', evening: 'вечером' };
-const shiftDate = (date: string, days: number) =>
-  new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+const daysAgo = (date: string, d: string) => Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86400000);
 
-/** Недавние советы по порядку — последние AI_ADVICE_RECENT до текущего. */
-function recentReports(reports: readonly StoredReport[], date: string, except: StoredReport | null): StoredReport[] {
-  return [...reports]
-    .filter((r) => r !== except && r.date <= date)
-    .sort((a, b) => a.date.localeCompare(b.date) || SLOT_ORDER[a.mode] - SLOT_ORDER[b.mode])
-    .slice(-AI_ADVICE_RECENT);
-}
-
-/**
- * Недавние мнения для модели — с тем, когда они были сказаны («сегодня утром — …»), по порядку:
- * Лис продолжает историю дня (утром советовал лечь пораньше — вечером видит, что вышло), а не
- * начинает каждый раз с нуля (владелец 26.09: «как будто не следит за тобой»).
- */
-export function recentOpinions(reports: readonly StoredReport[], date: string, except: StoredReport | null): string[] {
-  const day = (d: string) => (d === date ? 'сегодня' : d === shiftDate(date, -1) ? 'вчера' : 'раньше');
-  return recentReports(reports, date, except).map((r) => `${day(r.date)} ${SLOT_WHEN[r.mode]} — ${r.text}`);
-}
-
-/**
- * Мнения от модели за последние 7 дней, свежие первыми (текущий отрезок не входит): из них посредник
- * собирает уже предложенные микро-действия, чтобы модель их не повторяла (владелец 26.09).
- */
-export function pastOpinions(reports: readonly StoredReport[], date: string, except: StoredReport | null): { ago: number; slot: ReportMode; text: string }[] {
-  const ago = (d: string) => Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86400000);
-  return [...reports]
-    .filter((r) => r !== except && isAiTemplate(r.templateId) && ago(r.date) >= 0 && ago(r.date) < AI_ADVICE_HISTORY_DAYS)
-    .sort((a, b) => b.date.localeCompare(a.date) || SLOT_ORDER[b.mode] - SLOT_ORDER[a.mode])
-    .slice(0, AI_ADVICE_HISTORY_DAYS * 3)
-    .map((r) => ({ ago: ago(r.date), slot: r.mode, text: r.text.slice(0, 400) }));
-}
-
-/** Сколько дней истории тем уходит посреднику. */
+/** Сколько дней истории мнений учитываем: и для проверки повторов, и для выбора связки. */
 export const AI_ADVICE_HISTORY_DAYS = 7;
 
-/** О чём Лис говорил за последние дни: метки главного, свежие первыми (текущий отрезок не входит). */
-export function focusHistory(reports: readonly StoredReport[], date: string, except: StoredReport | null): { ago: number; focus: string[] }[] {
-  const ago = (d: string) => Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86400000);
+/** Мнения от модели за последние 7 дней, свежие первыми (текущий отрезок не входит). */
+function aiReports(reports: readonly StoredReport[], date: string, except: StoredReport | null): StoredReport[] {
   return [...reports]
-    .filter((r) => r !== except && r.focus?.length && ago(r.date) >= 0 && ago(r.date) < AI_ADVICE_HISTORY_DAYS)
-    .sort((a, b) => b.date.localeCompare(a.date) || SLOT_ORDER[b.mode] - SLOT_ORDER[a.mode])
+    .filter((r) => r !== except && isAiTemplate(r.templateId) && daysAgo(date, r.date) >= 0 && daysAgo(date, r.date) < AI_ADVICE_HISTORY_DAYS)
+    .sort((a, b) => b.date.localeCompare(a.date) || SLOT_ORDER[b.mode] - SLOT_ORDER[a.mode]);
+}
+
+/** Тексты прошлых мнений для посредника: ответ, слишком похожий на них, он отклонит. */
+export function pastOpinions(reports: readonly StoredReport[], date: string, except: StoredReport | null): { ago: number; slot: ReportMode; text: string }[] {
+  return aiReports(reports, date, except)
     .slice(0, AI_ADVICE_HISTORY_DAYS * 3)
-    .map((r) => ({ ago: ago(r.date), focus: (r.focus ?? []).slice(0, 4) }));
+    .map((r) => ({ ago: daysAgo(date, r.date), slot: r.mode, text: r.text.slice(0, 400) }));
 }
 
 /**
- * О чём были те же мнения — строка в строку с `recentOpinions` (владелец 26.09: «выдаёт одно и то же
- * три раза подряд»): по меткам посредник не даёт Лису говорить об одном и том же и повторять совет.
+ * О каких связках движка Лис уже говорил (ключ хранится в `StoredReport.focus`): в этом цикле и за неделю.
+ * Движок физиологии выберет другую связку, если есть из чего (владелец 26.09: «циклится на одних фразах»).
  */
-export function recentAbout(reports: readonly StoredReport[], date: string, except: StoredReport | null): (AdviceAbout | null)[] {
-  return recentReports(reports, date, except).map((r) =>
-    r.focus || r.action ? { focus: r.focus ?? [], action: r.action ?? null } : null,
-  );
+export function saidInsights(reports: readonly StoredReport[], date: string, except: StoredReport | null): { today: string[]; week: string[] } {
+  const list = aiReports(reports, date, except);
+  const keys = (rs: StoredReport[]) => rs.flatMap((r) => r.focus ?? []);
+  return { today: keys(list.filter((r) => r.date === date)), week: keys(list) };
 }
 
 /** Цикл в кэше, скорее всего, уже закончился: с подъёма прошло столько часов, а новая ночь ещё на кольце. */
@@ -184,26 +150,18 @@ export function foxThinking(input: {
  * к синхронизации, и лишние запросы стоят денег. Так за цикл выходит не больше трёх запросов.
  * В демо-режиме к модели не ходим.
  *
- * Модели отдаём всё, кроме имени (решение владельца 26.09): профиль, оценки, таблицу чисел
- * за последнюю неделю и сегодня (`adviceDaysFor`), шаги сегодня по часам и план Vuelo на сегодня
- * (тренировка, кофе, еда, время отхода ко сну). Готовых выводов приложение не шлёт: посредник
- * (`server/advice`) сравнивает числа с личной нормой, что главное и почему — решает модель.
- * Значений глюкозы и давления не отдаём — только время подъёмов глюкозы (обычно это еда).
+ * Физиологию считает приложение (`insightFor` → движок `physiology.ts`), модели уходят только две
+ * фразы: что с телом сейчас и первопричина. Движку не из чего сделать вывод — не просим, остаётся шаблон.
  */
 export function aiAdviceRequest(state: VueloState, now = new Date(), force = false): AiAdviceRequest | null {
   const target = aiAdviceTarget(state, now, force);
   const cycle = currentCycle(state);
   if (!target || !cycle) return null;
   const { mode, stored } = target;
-
-  const today = todayKey(now);
-  const rec = recommendationsFor(state, today, now);
-  const coffee = rec?.coffee ?? null;
-  const endurance = rec?.endurance ?? null;
-  const sleepMode = rec?.sleepMode ?? null;
-  const { profile } = state;
-  const { days, hours } = adviceDaysFor(state, now);
-
+  // По кнопке «Новое мнение Лиса» текущее мнение тоже «уже сказано»: движок выберет другую связку.
+  const except = force ? null : stored;
+  const insight = insightFor(state, mode, saidInsights(state.reports, cycle.date, except), now);
+  if (!insight) return null;
   return {
     date: cycle.date,
     mode,
@@ -211,46 +169,8 @@ export function aiAdviceRequest(state: VueloState, now = new Date(), force = fal
     payload: {
       mode,
       time: coffeeClock(now.getHours() * 60 + now.getMinutes()),
-      profile: {
-        sex: profile.sex,
-        age: profileAge(profile, now) ?? state.age,
-        heightCm: profile.heightCm,
-        weightKg: profile.weightKg,
-        goal: profile.goal ?? null,
-      },
-      scores: { total: cycle.total, sleep: cycle.scores.sleep, activity: cycle.scores.activity, organism: cycle.scores.state },
-      days,
-      hours,
-      plan: {
-        workout: endurance
-          ? {
-              title: endurance.plan.title,
-              effort: EFFORT_TEXT[endurance.plan.effort],
-              minutes: endurance.plan.minutes,
-              from: coffeeClock(endurance.from),
-              to: coffeeClock(endurance.to),
-            }
-          : null,
-        coffee:
-          coffee && coffee.kind === 'window'
-            ? { from: coffeeClock(coffee.start), until: coffeeClock(coffee.cutoff), cups: coffee.cups?.n ?? null }
-            : null,
-        noCoffee: coffee?.kind === 'no-window',
-        meals: (rec?.food?.meals ?? []).map((m) => ({ title: m.title, time: coffeeClock(m.minute) })),
-        bedtime: sleepMode
-          ? {
-              from: coffeeClock(sleepMode.from),
-              to: coffeeClock(sleepMode.to),
-              wake: coffeeClock(sleepMode.wake),
-              needMinutes: sleepMode.needMin,
-              debtMinutes: sleepMode.debtMin,
-            }
-          : null,
-      },
-      recent: recentOpinions(state.reports, cycle.date, stored),
-      said: recentAbout(state.reports, cycle.date, stored),
-      history: focusHistory(state.reports, cycle.date, stored),
-      past_opinions: pastOpinions(state.reports, cycle.date, stored),
+      insight: { key: insight.key, consequence: insight.consequence, root_cause: insight.rootCause },
+      past_opinions: pastOpinions(state.reports, cycle.date, except),
     },
   };
 }
@@ -258,20 +178,20 @@ export function aiAdviceRequest(state: VueloState, now = new Date(), force = fal
 /**
  * Совет от модели вместо шаблонного — только если шаблонный за время запроса не сменился
  * (шаблона не было, а выгрузка успела его записать, — не смена: мнение модели его и заменяет).
- * `about` — о чём мнение (метки посредника): запоминаем, чтобы Лис не ходил по кругу.
+ * Ключ связки движка запоминаем (`focus`): в следующий раз Лис выберет другую.
  */
-export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: string, about: AdviceAbout | null = null): VueloState {
+export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: string): VueloState {
   const stored = state.reports.find((r) => r.date === request.date && r.mode === request.mode);
   const same = stored === undefined || stored.templateId === request.templateId || (request.templateId === null && !isAiTemplate(stored.templateId));
   if (!same) return state;
-  const report: StoredReport = { date: request.date, mode: request.mode, templateId: AI_TEMPLATE_ID, text, ...(about ?? {}) };
+  const report: StoredReport = { date: request.date, mode: request.mode, templateId: AI_TEMPLATE_ID, text, focus: [request.payload.insight.key] };
   return { ...state, reports: addReport(state.reports, report) };
 }
 
-export type AiAdviceResult = { text: string; about?: AdviceAbout; server?: number } | { error: string };
+export type AiAdviceResult = { text: string; server?: number } | { error: string };
 
-/** Версия кода облачной функции, с которой приложение работает полностью (разговор за день, метки). */
-export const AI_ADVICE_SERVER_VERSION = 8;
+/** Версия кода облачной функции, с которой приложение работает (запрос — вывод движка физиологии). */
+export const AI_ADVICE_SERVER_VERSION = 9;
 
 /** Запрос к посреднику. Любая неудача — `error` с причиной для отладочного лога, без исключений. */
 export async function fetchAiAdvice(
@@ -290,13 +210,11 @@ export async function fetchAiAdvice(
       signal: controller.signal,
     });
     if (!response.ok) return { error: `посредник ответил ${response.status}` };
-    const data = (await response.json()) as { text?: unknown; focus?: unknown; action?: unknown; v?: unknown };
+    const data = (await response.json()) as { text?: unknown; v?: unknown };
     if (typeof data.text !== 'string') return { error: 'в ответе нет текста' };
     const text = cleanAdvice(data.text);
     if (!isSafeAdvice(text)) return { error: 'текст не прошёл проверку' };
-    const about = adviceAbout(data);
-    const server = typeof data.v === 'number' ? { server: data.v } : {};
-    return about ? { text, about, ...server } : { text, ...server };
+    return typeof data.v === 'number' ? { text, server: data.v } : { text };
   } catch (e) {
     return { error: controller.signal.aborted ? 'нет ответа за 15 с' : `нет связи (${String(e)})` };
   } finally {

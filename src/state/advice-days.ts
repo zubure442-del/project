@@ -1,33 +1,20 @@
-import { adviceDay, glucoseLevel, type AdviceDay } from '../domain';
-import { profileAge, type VueloState } from '../storage';
+import { adviceDay, findInsight, glucoseLevel, type AdviceDay, type Insight, type MinutePoint, type ReportMode } from '../domain';
+import { profileAge, type DaySnapshot, type VueloState } from '../storage';
 import { findDay, todayKey } from './day';
 import { notMealOf } from './food';
 
 const shiftDate = (date: string, days: number) =>
   new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
 
-/** Сколько прошлых дней кладём в таблицу: неделя — видно и «обычно», и то, что копится. */
+/** Сколько прошлых дней берём для личных норм движка физиологии: неделя. */
 export const ADVICE_DAYS_BACK = 7;
 
 /**
- * Сегодня по часам: с часа подъёма (не раньше 7:00) до часа данных. Шаги и средний стресс часа
- * (null — замеров в этот час не было): по ним посредник ищет связи внутри дня («с 12:00 стресс
- * вырос, а шагов почти не было»).
+ * Строки по дням для движка физиологии: каждый из семи прошлых дней, где есть данные, и сегодняшний
+ * день до времени последней выгрузки. `upTo` — минута последней выгрузки сегодня; выгрузки сегодня
+ * не было — null (о «сейчас» судить не по чему).
  */
-export interface AdviceHours {
-  from: number;
-  steps: number[];
-  stress: (number | null)[];
-  /** Средний пульс часа; null — замеров не было. Датчик кольца, по которому Лис видит «здесь и сейчас». */
-  pulse: (number | null)[];
-}
-
-/**
- * Таблица чисел для «Мнения Лиса»: строка на каждый из семи прошлых дней, где есть данные,
- * и сегодняшний день до времени последней выгрузки, плюс шаги сегодня по часам. Без выводов:
- * что за числами стоит, решает модель.
- */
-export function adviceDaysFor(state: VueloState, now = new Date()): { days: AdviceDay[]; hours: AdviceHours | null } {
+export function adviceDaysFor(state: VueloState, now = new Date()): { days: AdviceDay[]; upTo: number | null } {
   const today = todayKey(now);
   const synced = state.lastSyncAt === null ? null : new Date(state.lastSyncAt);
   const upTo = synced && todayKey(synced) === today ? synced.getHours() * 60 + synced.getMinutes() : null;
@@ -36,28 +23,46 @@ export function adviceDaysFor(state: VueloState, now = new Date()): { days: Advi
     return { ago, day: findDay(state.days, shiftDate(today, -ago)) };
   }).filter((d): d is { ago: number; day: NonNullable<typeof d.day> } => d.day !== null);
 
-  // Обычный уровень глюкозы — по всем замерам таблицы: от него считаются подъёмы после еды.
+  // Обычный уровень глюкозы — по всем замерам недели: от него считаются подъёмы после еды.
   const level = glucoseLevel(
     dated.flatMap(({ day }) => day.summaryPoints.map((p) => p.glucose).filter((v): v is number => v !== null)),
   );
-  // Подъёмы во сне и на интенсивной нагрузке — не еда: Лис не примет рассветный подъём за ночной перекус.
+  // Подъёмы во сне и на интенсивной нагрузке — не еда: рассветный подъём не примем за ночной перекус.
   const age = profileAge(state.profile, now) ?? state.age;
   const days = dated.map(({ ago, day }) => adviceDay(ago, day, level, ago === 0 ? upTo : null, notMealOf(day, age)));
+  return { days, upTo };
+}
 
-  const todayDay = dated.find((d) => d.ago === 0)?.day ?? null;
-  let hours: AdviceHours | null = null;
-  if (todayDay && upTo !== null) {
-    const wake = todayDay.sleepSegments.length ? Math.max(...todayDay.sleepSegments.map((s) => s.to)) : 7 * 60;
-    const from = Math.floor(Math.max(wake, 7 * 60) / 60);
-    const to = Math.floor(upTo / 60);
-    if (to >= from) {
-      const byHour = (points: readonly { m: number; v: number }[]) =>
-        Array.from({ length: to - from + 1 }, (_, i) => {
-          const inHour = points.filter((p) => Math.floor(p.m / 60) === from + i).map((p) => p.v);
-          return inHour.length ? Math.round(inHour.reduce((a, b) => a + b, 0) / inHour.length) : null;
-        });
-      hours = { from, steps: todayDay.stepsByHour.slice(from, to + 1), stress: byHour(todayDay.stress), pulse: byHour(todayDay.heart) };
-    }
-  }
-  return { days, hours };
+/** Ряды вчера и сегодня на одной оси: минуты от полуночи сегодня, вчерашние — отрицательные. */
+function joined(yesterday: DaySnapshot | null, today: DaySnapshot | null, pick: (d: DaySnapshot) => readonly MinutePoint[], upTo: number) {
+  return [
+    ...(yesterday ? pick(yesterday).map((p) => ({ m: p.m - 1440, v: p.v })) : []),
+    ...(today ? pick(today).filter((p) => p.m <= upTo) : []),
+  ];
+}
+
+/**
+ * Вывод движка физиологии для «Мнения Лиса» (`findInsight`): что с телом сейчас и почему. `said` —
+ * о каких связках Лис уже говорил (за цикл и за неделю): движок выберет другую. null — сказать
+ * нечего (не было выгрузки сегодня или нет замеров за последний час).
+ */
+export function insightFor(
+  state: VueloState,
+  mode: ReportMode,
+  said: { today: readonly string[]; week: readonly string[] },
+  now = new Date(),
+): Insight | null {
+  const { days, upTo } = adviceDaysFor(state, now);
+  if (upTo === null) return null;
+  const today = findDay(state.days, todayKey(now));
+  const yesterday = findDay(state.days, shiftDate(todayKey(now), -1));
+  return findInsight({
+    mode,
+    now: upTo,
+    days,
+    heart: joined(yesterday, today, (d) => d.heart, upTo),
+    steps: joined(yesterday, today, (d) => d.stepsByMinute, upTo),
+    stress: joined(yesterday, today, (d) => d.stress, upTo),
+    said,
+  });
 }

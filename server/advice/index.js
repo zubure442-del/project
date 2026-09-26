@@ -3,16 +3,17 @@
 /**
  * Облачная функция Yandex Cloud — посредник между приложением Vuelo и YandexGPT («Мнение Лиса»).
  *
- * Владелец 26.09, концепция v7–v8: Лис не командует и не советует — он ищет физиологическую первопричину.
- * - модель получает сырой JSON — ряды чисел по дням за неделю и по часам за сегодня, профиль и
- *   что Лис уже говорил (`previous_opinions`);
- * - системный запрос (`SYSTEM_PROMPT`) просит собрать картину целиком (движение и неподвижность,
- *   пульс, фон напряжения, время суток, вчерашний день) и ответить двумя предложениями: картина
- *   состояния живыми словами и дружеское предположение о её причине. Готовых фраз в нём нет;
- * - функция лишь проверяет ответ (`answerProblem`): до 130 символов, ровно два предложения, без цифр,
- *   без команд («сделайте», «встаньте»…), выдуманных дел и работы, тавтологий, днём — без призывов поспать,
- *   без ярлыков настроения, запретных слов и повтора прежних мнений.
- *   Не прошёл — один повтор с причиной; и он мимо — 502, в приложении шаблонный совет.
+ * Владелец 26.09, новая архитектура: модель не умеет считать ряды данных — из сырого JSON выходили
+ * тавтологии, выдуманные «дела» и одни и те же фразы. Теперь физиологию считает приложение (движок
+ * `src/domain/physiology.ts`: личные нормы, четыре временных слоя, одна доминантная связка), а сюда
+ * приходит готовый вывод — две фразы без цифр:
+ * - `insight.consequence` — что с телом сейчас;
+ * - `insight.root_cause` — первопричина из истории кольца.
+ * Модель получает ТОЛЬКО эти две фразы и пересказывает их голосом Лиса: два коротких предложения
+ * до 130 символов, первое — следствие, второе — причина. Функция проверяет ответ (`answerProblem`):
+ * без цифр, команд, выдуманных обстоятельств, шаблонных «Возможно/Вероятно», зауми и повтора прежних
+ * мнений (`past_opinions` — только для этой проверки, модели не уходят). Не прошёл — один повтор
+ * с причиной; и он мимо — 502, в приложении шаблонный совет.
  *
  * Ключей API здесь нет: функция ходит в YandexGPT от имени своего сервисного аккаунта
  * (роль ai.languageModels.user), токен выдаёт платформа (context.token). Яндексу передаётся
@@ -27,64 +28,41 @@ const { Buffer } = require('node:buffer');
 
 const API_URL = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion';
 /** Версия кода — в каждом ответе (`v`): по ней приложение видит, что в Yandex Cloud свежий код. */
-const VERSION = 8;
+const VERSION = 9;
 const MAX_BODY_CHARS = 16000;
+/** Длина фразы движка: короткие предложения без цифр. */
+const INSIGHT_MAX_CHARS = 200;
 const LLM_TIMEOUT_MS = 12000;
 /** Сколько функция готова ждать модель в сумме: приложение ждёт ответ 15 с. */
 const DEADLINE_MS = 13000;
 /** Меньше этого на повтор не остаётся — не пробуем. */
 const RETRY_MIN_MS = 4000;
-const TEMPERATURE = 0.8;
+/** Пересказ, а не сочинение: чуть живости, но без фантазий. */
+const TEMPERATURE = 0.5;
 
 const MODE_TEXT = { morning: 'утро, после пробуждения', day: 'день', evening: 'вечер, перед сном' };
-const SLOT_WHEN = { morning: 'утром', day: 'днём', evening: 'вечером' };
-const GOAL_TEXT = { lose: 'снизить вес', keep: 'поддерживать форму', gain: 'набрать мышечную массу' };
-const SEX_TEXT = { male: 'мужчина', female: 'женщина' };
-const WORKOUT_TEXT = { cardio: 'кардио', strength: 'силовая' };
 
 /**
- * Системный запрос (владелец 26.09, пятая версия). Лис не командует и не советует, а по физиологии
- * догадывается о причине текущего тонуса. v7 давал тавтологии («мало активны из-за недостатка
- * движения») и выдумывал обстоятельства («загруженность делами») — у кольца нет календаря. Главная
- * причина — днём был запрещён разговор о ночи, и модели не из чего было строить взаимосвязь: теперь
- * ночь и вчерашний день — законная первопричина в любое время, днём запрещены только призывы поспать.
+ * Системный запрос (владелец 26.09, шестая версия): модель ничего не анализирует — факт и причину
+ * уже нашёл движок приложения. Её дело — сказать это живо и тепло, ничего не добавив от себя.
  */
-const SYSTEM_PROMPT = `Ты — Лис, тёплый и внимательный компаньон в приложении Vuelo к умному кольцу. Ты видишь только то, что измеряет кольцо, и по этим данным догадываешься, как связаны процессы в теле. Ты не врач и не тренер: не советуешь, не командуешь и не поучаешь. Обращайся на «вы».
+const SYSTEM_PROMPT = `Ты — Лис, тёплый и внимательный компаньон в приложении Vuelo к умному кольцу. Приложение уже разобрало данные кольца и нашло главное. Твоя задача — сказать это человеку живым, дружелюбным языком, обращаясь на «вы».
 
 На входе JSON:
-- current_time — текущее местное время;
-- person — пол, возраст, цель;
-- days — ряды по дням (ago: 0 — сегодня): сон, глубокий сон, пульс во сне, пульс покоя, вариабельность, стресс днём, шаги и личная норма, время приёмов пищи; null — данных нет;
-- today_by_hour — сегодня по часам, начиная с from_hour: steps — шаги, stress — фон напряжения от 0 до 100, pulse — средний пульс; null — замера не было;
-- previous_opinions — что ты уже говорил этому человеку раньше.
-
-Больше ты о человеке ничего не знаешь. Календаря, переписки и планов ты не видишь — не придумывай обстоятельства жизни.
-
-Как думать (про себя, в ответ не пиши):
-1. Посмотри, что сейчас с телом: движение по часам, пульс против обычного покоя этого человека, фон напряжения, время суток.
-2. Найди физиологическую взаимосвязь, которая объясняет текущий тонус:
-- пульс или напряжение растут, а шагов почти нет — холостой ход: внутреннее возбуждение или стимуляторы без мышечной разрядки;
-- шагов мало, но пульс низкий и напряжение около нуля — режим сбережения энергии: тело спокойно отдыхает в покое;
-- силы к вечеру падают или тонус ниже обычного — смотри на ночную базу: длительность и глубина сна накануне, вариабельность, пульс во сне против своей нормы;
-- ночь и вчерашний день — законная первопричина того, что происходит сегодня, в любое время суток.
-3. Причина должна быть другой природы, чем наблюдение: активность нельзя объяснять самой активностью, напряжение — самим напряжением.
-4. Не повторяй мысли и слова из previous_opinions — смотри под новым углом.
+- consequence — что сейчас происходит с телом;
+- root_cause — первопричина из истории кольца.
 
 Ответ — ровно два коротких предложения, вместе не длиннее 130 символов:
-1. Наблюдение за телом сейчас — живыми словами, без цифр.
-2. Твоя дружеская догадка о физиологической взаимосвязи — почему тело так себя ведёт.
+1. Первое — consequence своими словами: наблюдение за телом.
+2. Второе — root_cause своими словами: твоя дружеская догадка, как это связано.
 
-Нельзя:
-- выдумывать обстоятельства жизни: дела, работа, задачи, график, режим дня, загруженность, встречи;
-- объяснять наблюдение им самим, как в «мало двигались из-за нехватки движения»;
-- советы, команды и нравоучения: никаких «сделайте», «попробуйте», «встаньте», «отдохните», «разомните»; днём — никаких призывов лечь или поспать;
-- ярлыки вроде «вы устали» или «вы напряжены» вместо наблюдения и причины;
-- сухие конструкции вида «одно выросло, а другое упало» и перечисление показателей;
-- дыхательные упражнения, диагнозы, болезни, врачи, заумные и медицинские термины, обещания результата; слова «глюкоза», «сахар», «давление»; другие приложения и бренды;
-- цифры, приветствия, вопросы, списки, эмодзи, кавычки.
+Правила:
+- передай смысл точно: ничего не добавляй и не убирай, не придумывай новых причин и обстоятельств жизни — дел, работы, задач, графика, режима дня, загруженности;
+- не начинай предложения с шаблонных вводных «Возможно», «Вероятно», «Скорее всего», «Наверное»;
+- никаких советов, команд и призывов: «сделайте», «попробуйте», «встаньте», «отдохните», «разомните» и любых других;
+- говори просто: без цифр, заумных и медицинских терминов, диагнозов, обещаний и ярлыков вроде «вы устали»;
+- без приветствий, вопросов, списков, эмодзи и кавычек.
 Больше ничего не пиши.`;
-
-// ── Вход модели: сырой JSON ─────────────────────────────────────────────────────────────────────
 
 /** Предложения текста: по точке, восклицательному или вопросительному знаку и многоточию. */
 const sentences = (text) =>
@@ -95,64 +73,12 @@ const sentences = (text) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
-/** «сегодня утром», «вчера вечером», «3 дня назад днём». */
-function whenText(ago, slot) {
-  const day = ago === 0 ? 'сегодня' : ago === 1 ? 'вчера' : `${ago} дн. назад`;
-  return `${day} ${SLOT_WHEN[slot]}`;
-}
+/** Тексты прошлых мнений Лиса — только для проверки повторов, модели не уходят. */
+const pastOf = (p) => (Array.isArray(p.past_opinions) ? p.past_opinions.map((o) => o.text) : []);
 
-/**
- * Что Лис уже говорил: `past_opinions` приложения (неделя) или, у старых сборок, три строки `recent`
- * («сегодня утром — …»). Действие — последнее предложение мнения.
- */
-function pastOf(p) {
-  const list = Array.isArray(p.past_opinions) && p.past_opinions.length
-    ? p.past_opinions.map((o) => ({ when: whenText(o.ago, o.slot), text: o.text }))
-    : p.recent.map((line) => {
-        const lead = /^(.+?) — /.exec(line);
-        return { when: lead ? lead[1] : '', text: lead ? line.slice(lead[0].length) : line };
-      });
-  return list.map((o) => {
-    const parts = sentences(o.text);
-    return { ...o, action: parts.length > 1 ? parts[parts.length - 1] : null };
-  });
-}
-
-/** JSON для модели: текущее время, ряды как есть и уже данные советы. */
+/** JSON для модели: только вывод движка — следствие и первопричина. */
 function modelInput(p) {
-  const pr = p.profile;
-  const days = [...p.days]
-    .sort((a, b) => b.ago - a.ago)
-    .map((d) => ({
-      ago: d.ago,
-      asleep: d.asleep,
-      awake: d.awake,
-      sleep_min: d.sleepMin,
-      deep_min: d.deepMin,
-      night_pulse: d.nightPulse,
-      resting_pulse: d.restingPulse,
-      hrv_ms: d.hrv,
-      day_stress: d.stress,
-      steps: d.steps,
-      step_norm: d.stepNorm,
-      workout: d.workout ? WORKOUT_TEXT[d.workout] : null,
-      meal_times: d.meals,
-    }));
-  const h = p.hours;
-  return {
-    current_time: p.time,
-    person: { sex: pr.sex ? SEX_TEXT[pr.sex] : null, age: pr.age, goal: pr.goal ? GOAL_TEXT[pr.goal] : null },
-    days,
-    today_by_hour: h
-      ? {
-          from_hour: h.from,
-          steps: h.steps,
-          stress: Array.isArray(h.stress) ? h.stress : null,
-          pulse: Array.isArray(h.pulse) ? h.pulse : null,
-        }
-      : null,
-    previous_opinions: pastOf(p).map((o) => o.text),
-  };
+  return { consequence: p.insight.consequence, root_cause: p.insight.root_cause };
 }
 
 // ── Проверка ответа ─────────────────────────────────────────────────────────────────────────────
@@ -203,6 +129,8 @@ const FORBIDDEN = [
   /таблетк/, /врач/, /доктор/, /глюкоз/, /сахар/, /давлени/, /гарантир/, /ожирен/,
   /whoop/, /oura/, /garmin/, /apple/, /yandex/, /яндекс/, /алиса/, /gpt/,
 ];
+/** Шаблонные вводные в начале предложения (владелец 26.09): догадка звучит живее без них. */
+const HEDGE = /^(возможно|вероятно|скорее всего|наверное|может быть|должно быть)([^а-яё]|$)/;
 /** Общие слова, по которым действия похожими не считаются. */
 const COMMON = new Set(['прямо', 'сейча', 'секун', 'минут', 'затем', 'потом', 'несколько', 'сдела']);
 const stems = (text) =>
@@ -257,6 +185,7 @@ function answerProblem(text, previous = [], time = '15:00') {
   if (now >= DAY_FROM && now < EVENING_FROM && DAY_SLEEP_ADVICE.test(lower)) return 'day_sleep';
   if (COMMANDS.test(lower)) return 'command';
   const [first, second] = parts.map((x) => x.toLowerCase());
+  if (HEDGE.test(first) || HEDGE.test(second)) return 'hedge';
   if (ACTIVITY.test(first) && ACTIVITY.test(second) && !OTHER_CAUSE.test(second)) return 'tautology';
   if (previous.some((a) => similar(text, a))) return 'repeat';
   return null;
@@ -266,115 +195,40 @@ function answerProblem(text, previous = [], time = '15:00') {
 const PROBLEM_TEXT = {
   short: 'слишком коротко',
   long: 'длиннее 130 символов — сократи',
-  horoscope: 'не ярлык настроения, а картина состояния и её причина',
+  horoscope: 'не ярлык настроения, а наблюдение за телом и его причина',
   touchy: 'без прикосновений к себе и советов',
   command: 'никаких советов и команд — только наблюдение за телом и дружеская догадка о причине',
+  hedge: 'без шаблонных вводных «Возможно», «Вероятно», «Скорее всего» в начале предложения',
   format: 'есть разметка или переводы строк',
   sentences: 'нужно ровно два коротких предложения',
   numbers: 'в ответе есть цифры',
   forbidden: 'есть запрещённые слова (медицина, глюкоза, сахар, давление или бренды)',
   breathing: 'без дыхательных упражнений и советов',
-  esoteric: 'без эзотерики и практик — только картина и причина',
+  esoteric: 'без эзотерики и практик — только наблюдение и причина',
   jargon: 'заумные слова — скажи проще, по-человечески',
-  day_sleep: 'сейчас день — не зови лечь или поспать; ночь можно называть только как причину',
-  invented: 'ты не знаешь о делах, работе, задачах и графике человека — суди только по данным кольца',
-  tautology: 'причина повторяет наблюдение — найди взаимосвязь другой природы: пульс, напряжение, ночь, вчерашний день',
-  repeat: 'слишком похоже на одно из previous_opinions — посмотри под новым углом',
+  day_sleep: 'сейчас день — не зови лечь или поспать',
+  invented: 'не придумывай дела, работу, задачи и график человека — только consequence и root_cause',
+  tautology: 'второе предложение повторяет первое — перескажи root_cause',
+  repeat: 'слишком похоже на то, что Лис уже говорил, — скажи другими словами',
 };
 
 // ── Запрос ──────────────────────────────────────────────────────────────────────────────────────
 
 const has = (obj, key) => typeof key === 'string' && Object.prototype.hasOwnProperty.call(obj, key);
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const isScore = (v) => v === null || (typeof v === 'number' && v >= 0 && v <= 100);
-const isNum = (v, min, max) => v === null || (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max);
 const isInt = (v, min, max) => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
 const isClock = (v) => typeof v === 'string' && /^\d\d:\d\d$/.test(v);
-const isClockOrNull = (v) => v === null || isClock(v);
-/** Короткая подпись из приложения («Спокойное кардио», «Обед»): без переводов строк и разметки. */
-const isLabel = (v, max = 40) => typeof v === 'string' && v.length > 0 && v.length <= max && !/[\n\r<>{}]/.test(v);
-
-function validateProfile(p) {
-  return (
-    isObject(p) &&
-    (p.sex === null || has(SEX_TEXT, p.sex)) &&
-    isNum(p.age, 5, 120) &&
-    isNum(p.heightCm, 50, 260) &&
-    isNum(p.weightKg, 20, 350) &&
-    (p.goal === null || has(GOAL_TEXT, p.goal))
-  );
-}
-
-function validateDay(d) {
-  return (
-    isObject(d) &&
-    isInt(d.ago, 0, 14) &&
-    isClockOrNull(d.asleep) &&
-    isClockOrNull(d.awake) &&
-    isNum(d.sleepMin, 0, 1440) &&
-    isNum(d.deepMin, 0, 1440) &&
-    isNum(d.nightPulse, 20, 220) &&
-    isNum(d.hrv, 0, 400) &&
-    isNum(d.restingPulse, 20, 220) &&
-    isNum(d.spo2, 50, 100) &&
-    isNum(d.stress, 0, 100) &&
-    isNum(d.steps, 0, 200000) &&
-    isNum(d.stepNorm, 0, 50000) &&
-    isNum(d.calories, 0, 20000) &&
-    isNum(d.load, 0, 5000) &&
-    (d.workout === null || has(WORKOUT_TEXT, d.workout)) &&
-    Array.isArray(d.meals) &&
-    d.meals.length <= 12 &&
-    d.meals.every(isClock)
-  );
-}
-
-function validatePlan(plan) {
-  if (!isObject(plan) || typeof plan.noCoffee !== 'boolean') return false;
-  const w = plan.workout;
-  const workoutOk =
-    w === null ||
-    (isObject(w) && isLabel(w.title) && isLabel(w.effort) && typeof w.minutes === 'number' && isNum(w.minutes, 0, 300) &&
-      isClock(w.from) && isClock(w.to));
-  const c = plan.coffee;
-  const coffeeOk = c === null || (isObject(c) && isClock(c.from) && isClock(c.until) && isNum(c.cups, 0, 10));
-  const mealsOk =
-    Array.isArray(plan.meals) && plan.meals.length <= 6 && plan.meals.every((m) => isObject(m) && isLabel(m.title, 20) && isClock(m.time));
-  const b = plan.bedtime;
-  const bedtimeOk =
-    b === null ||
-    (isObject(b) && isClock(b.from) && isClock(b.to) && isClock(b.wake) &&
-      typeof b.needMinutes === 'number' && isNum(b.needMinutes, 0, 1440) &&
-      typeof b.debtMinutes === 'number' && isNum(b.debtMinutes, 0, 3000));
-  return workoutOk && coffeeOk && mealsOk && bedtimeOk;
-}
+const isTag = (v) => typeof v === 'string' && /^[a-z]+(?:-[a-z]+)*$/.test(v) && v.length <= 40;
+/** Фраза движка: одна строка, без цифр и разметки. */
+const isPhrase = (v) => typeof v === 'string' && v.length >= 10 && v.length <= INSIGHT_MAX_CHARS && !/[\n\r<>{}\d]/.test(v);
 
 /** Проверка тела запроса: только ожидаемые поля и разумные значения. Возвращает причину отказа или null. */
 function validate(p) {
   if (!isObject(p)) return 'body';
   if (!has(MODE_TEXT, p.mode)) return 'mode';
   if (!isClock(p.time)) return 'time';
-  if (!validateProfile(p.profile)) return 'profile';
-  const sc = p.scores;
-  if (!isObject(sc) || !isScore(sc.total) || !isScore(sc.sleep) || !isScore(sc.activity) || !isScore(sc.organism)) return 'scores';
-  if (!Array.isArray(p.days) || p.days.length > 15 || !p.days.every(validateDay)) return 'days';
-  const h = p.hours;
-  if (h !== null && (!isObject(h) || !isInt(h.from, 0, 23) || !Array.isArray(h.steps) || h.steps.length > 24 || !h.steps.every((v) => isNum(v, 0, 50000) && v !== null))) {
-    return 'hours';
-  }
-  if (h && h.stress !== undefined && (!Array.isArray(h.stress) || h.stress.length !== h.steps.length || !h.stress.every((v) => isNum(v, 0, 100)))) {
-    return 'hours';
-  }
-  if (h && h.pulse !== undefined && (!Array.isArray(h.pulse) || h.pulse.length !== h.steps.length || !h.pulse.every((v) => isNum(v, 20, 220)))) {
-    return 'hours';
-  }
-  if (!validatePlan(p.plan)) return 'plan';
-  if (!Array.isArray(p.recent) || p.recent.length > 5 || p.recent.some((t) => typeof t !== 'string' || t.length > 400)) {
-    return 'recent';
-  }
-  // Необязательно (старые сборки не шлют): метки прошлых мнений, по одной на строку `recent`.
-  if (p.said !== undefined && !validateSaid(p.said, p.recent.length)) return 'said';
-  if (p.history !== undefined && !validateHistory(p.history)) return 'history';
+  const i = p.insight;
+  if (!isObject(i) || !isTag(i.key) || !isPhrase(i.consequence) || !isPhrase(i.root_cause)) return 'insight';
   if (p.past_opinions !== undefined && !validatePast(p.past_opinions)) return 'past_opinions';
   return null;
 }
@@ -384,21 +238,6 @@ function validatePast(past) {
     Array.isArray(past) &&
     past.length <= 30 &&
     past.every((o) => isObject(o) && isInt(o.ago, 0, 14) && has(MODE_TEXT, o.slot) && typeof o.text === 'string' && o.text.length <= 400)
-  );
-}
-function validateHistory(history) {
-  return (
-    Array.isArray(history) &&
-    history.length <= 30 &&
-    history.every((h) => isObject(h) && isInt(h.ago, 0, 14) && Array.isArray(h.focus) && h.focus.length <= 4 && h.focus.every(isTag))
-  );
-}
-const isTag = (v) => typeof v === 'string' && /^[a-z]+(?:-[a-z]+)*$/.test(v) && v.length <= 30;
-function validateSaid(said, length) {
-  return (
-    Array.isArray(said) &&
-    said.length === length &&
-    said.every((x) => x === null || (isObject(x) && Array.isArray(x.focus) && x.focus.length <= 4 && x.focus.every(isTag) && (x.action === null || isTag(x.action))))
   );
 }
 
@@ -450,11 +289,11 @@ async function handler(event, context) {
     const result = await askModel({ token, folder, model, messages, temperature: TEMPERATURE, timeoutMs: timeLeft() });
     if (result.status) return reply(result.status, { error: result.error });
     const text = cleanAnswer(result.text);
-    problem = answerProblem(text, input.previous_opinions, payload.time);
+    problem = answerProblem(text, pastOf(payload), payload.time);
     if (!problem) return reply(200, { text, mode: 'free', v: VERSION });
     // Причина — в лог функции, без текста ответа. Повтор — с объяснением, что не так.
     console.warn('answer rejected', problem);
-    messages.push({ role: 'assistant', text: result.text }, { role: 'user', text: `Ответ не подходит: ${PROBLEM_TEXT[problem]}. Напиши заново по правилам — ровно два коротких предложения, до 130 символов: наблюдение за телом и догадка о физиологической причине.` });
+    messages.push({ role: 'assistant', text: result.text }, { role: 'user', text: `Ответ не подходит: ${PROBLEM_TEXT[problem]}. Напиши заново по правилам — ровно два коротких предложения, до 130 символов: первое — consequence, второе — root_cause.` });
   }
   return reply(502, { error: `answer ${problem || 'timeout'}` });
 }

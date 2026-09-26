@@ -225,7 +225,10 @@ export function VueloProvider({ children }: { children: ReactNode }) {
         ? '\nВнимание: в Yandex Cloud старый код функции — вставьте server/advice/index.js заново.'
         : '';
       const engineLine = result.engine ? `\n(модель не прошла проверку «${result.engine}» — показана фраза движка)` : '';
-      return `Новое мнение (${slot}) — на главном экране:\n${result.text}${engineLine}${old}`;
+      const links = request.options === 1
+        ? '\nСвязка сейчас одна — по данным больше не о чем сказать, смысл будет повторяться.'
+        : `\nСвязка ${request.payload.insight.key}, всего сейчас ${request.options}.`;
+      return `Новое мнение (${slot}) — на главном экране:\n${result.text}${engineLine}${links}${old}`;
     } finally {
       adviceBusy.current = false;
       setAdviceRequesting(null);

@@ -58,14 +58,14 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     const prompt = fn.SYSTEM_PROMPT;
     expect(prompt).toContain('consequence — что сейчас происходит с телом');
     expect(prompt).toContain('root_cause — первопричина из истории кольца');
-    expect(prompt).toContain('Ответ — ровно два коротких предложения, вместе не длиннее 125 символов');
+    expect(prompt).toContain('Ответ — ровно два предложения, вместе примерно 90–125 символов, не короче 80');
     expect(prompt).toContain('давление, сахар, кислород, пульс и стресс называй прямо, но без цифр и без диагнозов');
     expect(prompt).toContain('никаких «в покое», «в спокойствии», «наблюдается», «отмечается», «Причина —»');
     expect(prompt).toContain('никаких «мотор», «шпарит»');
     expect(prompt).toContain('ничего добавлять и убирать');
     expect(prompt).toContain('«Возможно», «Вероятно», «Скорее всего»');
     expect(prompt).toContain('«сделайте», «иди», «попробуйте», «встаньте», «отдохните», «разомните»');
-    expect(prompt).not.toMatch(/например|Пример/i);
+    expect(prompt).not.toMatch(/например|Пример:/i);
   });
 
   it('прежние мнения — только для проверки повторов, модели не уходят', async () => {
@@ -172,8 +172,14 @@ describe('СИНТЕТИЧЕСКИЕ: облачная функция «Мнен
     expect(JSON.parse(res.body).text).toBe(GOOD);
     expect(bodies[1].messages.slice(-2)).toEqual([
       { role: 'assistant', text: bad },
-      { role: 'user', text: 'Ответ не подходит: без шаблонных вводных «Возможно», «Вероятно», «Скорее всего» в начале предложения. Напиши заново по правилам — ровно два коротких предложения, до 130 символов: первое — consequence, второе — root_cause.' },
+      { role: 'user', text: 'Ответ не подходит: без шаблонных вводных «Возможно», «Вероятно», «Скорее всего» в начале предложения. Напиши заново по правилам — ровно два предложения, примерно 90–125 символов: первое — consequence, второе — root_cause.' },
     ]);
+
+    // Вторая попытка лишь коротковата — берём живой пересказ, а не заготовленную фразу.
+    const brief = 'Пульс выше обычного. Мало глубокого сна две ночи.';
+    answers = ['Отдохните.', brief];
+    const soft = await fn.handler(event(await readSample()), context);
+    expect(JSON.parse(soft.body)).toEqual({ text: brief, mode: 'free', soft: 'short', v: fn.VERSION });
 
     answers = ['Отдохните.', 'Подышите.'];
     const sample = await readSample();

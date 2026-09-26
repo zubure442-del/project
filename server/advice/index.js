@@ -28,7 +28,7 @@ const { Buffer } = require('node:buffer');
 
 const API_URL = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completion';
 /** Версия кода — в каждом ответе (`v`): по ней приложение видит, что в Yandex Cloud свежий код. */
-const VERSION = 12;
+const VERSION = 13;
 const MAX_BODY_CHARS = 16000;
 /** Длина фразы движка: короткие предложения без цифр. */
 const INSIGHT_MAX_CHARS = 200;
@@ -53,7 +53,7 @@ const SYSTEM_PROMPT = `Ты — Лис, тёплый и внимательный
 - consequence — что сейчас происходит с телом;
 - root_cause — первопричина из истории кольца.
 
-Ответ — ровно два коротких предложения, вместе не длиннее 125 символов:
+Ответ — ровно два предложения, вместе примерно 90–125 символов, не короче 80:
 1. Первое — consequence своими словами.
 2. Второе — root_cause своими словами, как дружеская догадка, как это связано («похоже, это после…», «кажется, сказывается…»).
 
@@ -91,8 +91,14 @@ function modelInput(p) {
 
 // ── Проверка ответа ─────────────────────────────────────────────────────────────────────────────
 
-/** Короче — это уже не пересказ связки («Пульс скачет. Вы поздно легли спать.», владелец 26.09). */
-const ANSWER_MIN_CHARS = 70;
+/**
+ * Короче — это уже не пересказ связки («Пульс скачет. Вы поздно легли спать.», владелец 26.09).
+ * 70 оказалось строго: модель писала 55–65 символов, и почти каждый ответ уходил в запасную фразу.
+ */
+const ANSWER_MIN_CHARS = 50;
+/** На последней попытке «коротко» и «похоже на прежнее» — не повод отдавать шаблонную фразу движка. */
+const SOFT_MIN_CHARS = 40;
+const SOFT_PROBLEMS = new Set(['short', 'repeat']);
 /** Плашка на главном экране маленькая: длиннее текст обрезается на полуслове (владелец 26.09). */
 const ANSWER_MAX_CHARS = 130;
 /** Связка движка как запасной ответ — до предела карточки в приложении (`AI_ADVICE_MAX_CHARS`). */
@@ -203,17 +209,18 @@ function meaningProblem(text, insight) {
   const lower = text.toLowerCase();
   const source = `${insight.consequence} ${insight.root_cause}`.toLowerCase();
   if (DRAMA.test(lower) && !DRAMA.test(source)) return 'distorted';
-  // Наблюдение — короткое: всё, что в нём названо, остаётся. У причины — самое конкретное (кислород,
-  // еда, нагрузка важнее общего «ночью»): список SUBJECTS — от конкретного к общему.
-  const observed = SUBJECTS.filter((re) => re.test(insight.consequence.toLowerCase()));
-  if (observed.some((re) => !re.test(lower))) return 'lost';
-  const cause = SUBJECTS.find((re) => re.test(insight.root_cause.toLowerCase()));
-  if (cause && !cause.test(lower)) return 'lost';
+  // И в наблюдении, и в причине остаётся самое конкретное (пульс важнее «не двигаетесь», кислород —
+  // важнее «ночью»): список SUBJECTS — от конкретного к общему. Требовать всё названное было строго:
+  // «хотя вы сидите» вместо «хотя вы не двигаетесь» — тот же смысл.
+  for (const phrase of [insight.consequence, insight.root_cause]) {
+    const main = SUBJECTS.find((re) => re.test(phrase.toLowerCase()));
+    if (main && !main.test(lower)) return 'lost';
+  }
   return null;
 }
 
-function answerProblem(text, previous = [], time = '15:00', insight = null) {
-  if (text.length < ANSWER_MIN_CHARS) return 'short';
+function answerProblem(text, previous = [], time = '15:00', insight = null, soft = false) {
+  if (text.length < (soft ? SOFT_MIN_CHARS : ANSWER_MIN_CHARS)) return 'short';
   if (text.length > ANSWER_MAX_CHARS) return 'long';
   if (/[*#_`<>[\]{}|]/.test(text) || /\n/.test(text)) return 'format';
   const parts = sentences(text);
@@ -239,7 +246,7 @@ function answerProblem(text, previous = [], time = '15:00', insight = null) {
     const meaning = meaningProblem(text, insight);
     if (meaning) return meaning;
   }
-  if (previous.some((a) => similar(text, a))) return 'repeat';
+  if (!soft && previous.some((a) => similar(text, a))) return 'repeat';
   return null;
 }
 
@@ -340,19 +347,26 @@ async function handler(event, context) {
   const timeLeft = () => Math.min(LLM_TIMEOUT_MS, DEADLINE_MS - (Date.now() - started));
 
   let problem = null;
+  let last = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0 && DEADLINE_MS - (Date.now() - started) < RETRY_MIN_MS) break;
     const result = await askModel({ token, folder, model, messages, temperature: TEMPERATURE, timeoutMs: timeLeft() });
     if (result.status) return reply(result.status, { error: result.error });
     const text = cleanAnswer(result.text);
+    last = text;
     problem = answerProblem(text, pastOf(payload), payload.time, payload.insight);
     if (!problem) return reply(200, { text, mode: 'free', v: VERSION });
     // Причина — в лог функции, без текста ответа. Повтор — с объяснением, что не так.
     console.warn('answer rejected', problem);
-    messages.push({ role: 'assistant', text: result.text }, { role: 'user', text: `Ответ не подходит: ${PROBLEM_TEXT[problem]}. Напиши заново по правилам — ровно два коротких предложения, до 130 символов: первое — consequence, второе — root_cause.` });
+    messages.push({ role: 'assistant', text: result.text }, { role: 'user', text: `Ответ не подходит: ${PROBLEM_TEXT[problem]}. Напиши заново по правилам — ровно два предложения, примерно 90–125 символов: первое — consequence, второе — root_cause.` });
   }
   // Модель дважды не справилась — отдаём саму связку движка: она уже без цифр и простыми словами,
   // и карточка не остаётся без инсайта (владелец 26.09: «посредник ответил 502»). Причина — в `rejected`.
+  // Вторая попытка только коротковата или похожа на прежнее мнение (при одной связке за день это
+  // неизбежно) — живой пересказ модели всё равно лучше заготовленной фразы движка.
+  if (problem && last && SOFT_PROBLEMS.has(problem) && !answerProblem(last, [], payload.time, payload.insight, true)) {
+    return reply(200, { text: last, mode: 'free', soft: problem, v: VERSION });
+  }
   if (problem) {
     const own = engineAnswer(payload.insight);
     if (own) return reply(200, { text: own, mode: 'engine', rejected: problem, v: VERSION });

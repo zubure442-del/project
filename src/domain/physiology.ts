@@ -73,6 +73,8 @@ export interface Insight {
   consequence: string;
   /** Первопричина из истории кольца — без цифр. */
   rootCause: string;
+  /** Сколько допустимых связок движок нашёл сейчас: одна — ротации не из чего выбирать. */
+  options: number;
 }
 
 // ── Пороги ──────────────────────────────────────────────────────────────────────────────────────
@@ -516,5 +518,6 @@ export function findInsight(input: PhysioInput): Insight | null {
     cause: cause.key,
     consequence: `${STATE_TEXT[state.key][input.mode][strong(state.strength)]}.`,
     rootCause: `${cause.text ?? CAUSE_TEXT[cause.key][strong(cause.strength)]}.`,
+    options: ranked.length,
   };
 }

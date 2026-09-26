@@ -51,6 +51,8 @@ export interface AiAdviceRequest {
    */
   templateId: string | null;
   payload: AdvicePayload;
+  /** Сколько связок нашёл движок (для «Сырого лога»; посреднику не уходит). */
+  options: number;
 }
 
 /**
@@ -169,6 +171,7 @@ export function aiAdviceRequest(state: VueloState, now = new Date(), force = fal
     date: cycle.date,
     mode,
     templateId: stored?.templateId ?? null,
+    options: insight.options,
     payload: {
       mode,
       time: coffeeClock(now.getHours() * 60 + now.getMinutes()),
@@ -209,7 +212,7 @@ export function withAiAdvice(state: VueloState, request: AiAdviceRequest, text: 
 export type AiAdviceResult = { text: string; server?: number; engine?: string } | { error: string };
 
 /** Версия кода облачной функции, с которой приложение работает (запрос — вывод движка физиологии). */
-export const AI_ADVICE_SERVER_VERSION = 12;
+export const AI_ADVICE_SERVER_VERSION = 13;
 
 /** Запрос к посреднику. Любая неудача — `error` с причиной для отладочного лога, без исключений. */
 export async function fetchAiAdvice(
